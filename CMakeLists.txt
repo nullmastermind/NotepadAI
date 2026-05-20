@@ -28,7 +28,7 @@ if(UNIX AND NOT APPLE)
     add_link_options(-Wl,-z,relro -Wl,-z,now)
 endif()
 
-find_package(Qt6
+find_package(Qt6 6.5
     REQUIRED
         COMPONENTS
             Core
@@ -39,6 +39,12 @@ find_package(Qt6
             Core5Compat
 )
 
+option(NOTEPADNEXT_BUILD_TESTS "Build unit tests" OFF)
+if(NOTEPADNEXT_BUILD_TESTS)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
+    enable_testing()
+endif()
+
 set(CMAKE_AUTORCC ON)
 qt_standard_project_setup()
 
@@ -46,5 +52,9 @@ set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cpm-cache" CACHE PATH "CPM source cac
 
 add_subdirectory(thirdparty)
 add_subdirectory(src)
+
+if(NOTEPADNEXT_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
 
 include(${CMAKE_SOURCE_DIR}/cmake/Packaging.cmake)

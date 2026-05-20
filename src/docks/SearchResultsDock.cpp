@@ -97,8 +97,13 @@ void SearchResultsDock::newSearch(const QString searchTerm)
     currentSearch = new QTreeWidgetItem();
     ui->treeWidget->insertTopLevelItem(0, currentSearch);
 
-    currentSearch->setBackground(0, QColor(232, 232, 255));
-    currentSearch->setForeground(0, QColor(0, 0, 170));
+    {
+        const QPalette &pal = ui->treeWidget->palette();
+        QColor bg = pal.color(QPalette::Highlight);
+        bg.setAlpha(60);
+        currentSearch->setBackground(0, bg);
+        currentSearch->setForeground(0, pal.color(QPalette::Text));
+    }
     currentSearch->setExpanded(true);
     currentSearch->setFirstColumnSpanned(true);
 
@@ -116,8 +121,11 @@ void SearchResultsDock::newFileEntry(ScintillaNext *editor)
     currentFile = new QTreeWidgetItem(currentSearch);
     currentFile->setData(0, Qt::UserRole, QVariant::fromValue(editor_pointer));
 
-    currentFile->setBackground(0, QColor(213, 255, 213));
-    currentFile->setForeground(0, QColor(0, 128, 0));
+    {
+        const QPalette &pal = ui->treeWidget->palette();
+        currentFile->setBackground(0, pal.color(QPalette::AlternateBase));
+        currentFile->setForeground(0, pal.color(QPalette::Text));
+    }
     currentFile->setExpanded(true);
     currentFile->setFirstColumnSpanned(true);
 
@@ -131,7 +139,7 @@ void SearchResultsDock::newResultsEntry(const QString line, int lineNumber, int 
 
     // Scintilla internally references line numbers starting at 0, however it needs displayed starting at 1
     item->setText(0, QString::number(lineNumber + 1));
-    item->setBackground(0, QBrush(QColor(220, 220, 220)));
+    item->setBackground(0, QBrush(ui->treeWidget->palette().color(QPalette::AlternateBase)));
     item->setTextAlignment(0, Qt::AlignRight);
 
     item->setData(1, SearchResultData::LineNumber, lineNumber);

@@ -27,6 +27,7 @@
 #include "SessionManager.h"
 #include "TranslationManager.h"
 #include "ApplicationSettings.h"
+#include "ThemeResolver.h"
 
 #include "LuaState.h"
 #include "lua.hpp"
@@ -38,6 +39,11 @@
 #include <QCommandLineParser>
 
 #include <QDirIterator>
+#include <QGuiApplication>
+#include <QPalette>
+#include <QStyle>
+#include <QStyleFactory>
+#include <QStyleHints>
 
 #ifdef Q_OS_WIN
 #include <Windows.h>
@@ -141,6 +147,16 @@ bool NotepadNextApplication::init()
     });
 
     loadSettings();
+
+    applyTheme();
+    connect(settings, &ApplicationSettings::themeChanged, this, [this](ApplicationSettings::ThemeEnum) {
+        applyTheme();
+    });
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this](Qt::ColorScheme) {
+        if (settings->theme() == ApplicationSettings::System) {
+            applyTheme();
+        }
+    });
 
     connect(this, &NotepadNextApplication::aboutToQuit, this, &NotepadNextApplication::saveSettings);
 
@@ -490,6 +506,50 @@ MainWindow *NotepadNextApplication::createNewWindow()
     autoSaveTimer.start(60 * 1000);
 
     return window;
+}
+
+bool NotepadNextApplication::isEffectiveThemeDark() const
+{
+    return resolveThemeIsDark(settings->theme(), QGuiApplication::styleHints()->colorScheme());
+}
+
+void NotepadNextApplication::applyTheme()
+{
+    qInfo(Q_FUNC_INFO);
+
+    const bool dark = isEffectiveThemeDark();
+
+    // Fusion is the most consistent style across platforms for palette-driven theming
+    setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+
+    QPalette palette;
+    if (dark) {
+        palette.setColor(QPalette::Window,          QColor(45, 45, 45));
+        palette.setColor(QPalette::WindowText,      QColor(220, 220, 220));
+        palette.setColor(QPalette::Base,            QColor(30, 30, 30));
+        palette.setColor(QPalette::AlternateBase,   QColor(45, 45, 45));
+        palette.setColor(QPalette::ToolTipBase,     QColor(60, 60, 60));
+        palette.setColor(QPalette::ToolTipText,     QColor(220, 220, 220));
+        palette.setColor(QPalette::Text,            QColor(220, 220, 220));
+        palette.setColor(QPalette::PlaceholderText, QColor(140, 140, 140));
+        palette.setColor(QPalette::Button,          QColor(53, 53, 53));
+        palette.setColor(QPalette::ButtonText,      QColor(220, 220, 220));
+        palette.setColor(QPalette::BrightText,      Qt::red);
+        palette.setColor(QPalette::Link,            QColor(80, 160, 220));
+        palette.setColor(QPalette::Highlight,       QColor(38, 110, 180));
+        palette.setColor(QPalette::HighlightedText, Qt::white);
+        palette.setColor(QPalette::Disabled, QPalette::Text,            QColor(120, 120, 120));
+        palette.setColor(QPalette::Disabled, QPalette::ButtonText,      QColor(120, 120, 120));
+        palette.setColor(QPalette::Disabled, QPalette::WindowText,      QColor(120, 120, 120));
+        palette.setColor(QPalette::Disabled, QPalette::HighlightedText, QColor(180, 180, 180));
+    }
+    else {
+        palette = style()->standardPalette();
+    }
+
+    setPalette(palette);
+
+    emit effectiveThemeChanged();
 }
 
 QStringList NotepadNextApplication::debugInfo() const

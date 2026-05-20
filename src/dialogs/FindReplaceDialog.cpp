@@ -629,6 +629,13 @@ int FindReplaceDialog::computeSearchFlags()
 
 void FindReplaceDialog::showMessage(const QString &message, const QString &color)
 {
-    statusBar->setStyleSheet(QStringLiteral("color: %1").arg(color));
+    const bool darkBase = statusBar->palette().color(QPalette::Window).lightness() < 128;
+    QString effective = color;
+    if (darkBase) {
+        if (color == QLatin1String("red"))   effective = QStringLiteral("#ff7070");
+        else if (color == QLatin1String("green")) effective = QStringLiteral("#8ee07a");
+        else if (color == QLatin1String("blue"))  effective = QStringLiteral("#6aa9ff");
+    }
+    statusBar->setStyleSheet(QStringLiteral("color: %1").arg(effective));
     statusBar->showMessage(message);
 }

@@ -50,6 +50,8 @@ qt_add_executable(NotepadNext
 	TranslationManager.h
 	UndoAction.h
 	ZoomEventWatcher.h
+	ThemeResolver.h
+	StylesheetResource.h
 	resources.qrc
 	scripts.qrc
 	ApplicationSettings.cpp

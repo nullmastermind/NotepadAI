@@ -70,6 +70,11 @@ public:
 
     QStringList debugInfo() const;
 
+    bool isEffectiveThemeDark() const;
+
+signals:
+    void effectiveThemeChanged();
+
 protected:
     bool event(QEvent *event) override;
 
@@ -82,6 +87,8 @@ private:
     void openFiles(const QStringList &files);
 
     void loadSettings();
+
+    void applyTheme();
 
     EditorManager *editorManager;
     RecentFilesListManager *recentFilesListManager;

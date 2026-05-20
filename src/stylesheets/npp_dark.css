@@ -1,0 +1,77 @@
+QStatusBar {
+    border-top: 1px solid #3a3a3a;
+}
+
+ads--CDockWidgetTab ads--CElidingLabel {
+    color: #d0d0d0;
+}
+
+ads--CDockWidgetTab {
+    background: rgb(45, 45, 45);
+    margin-top: 2px;
+    border-left: 1px solid #2a2a2a;
+    border-top: 2px solid #2a2a2a;
+    border-right: 2px solid #1a1a1a;
+    padding: 2px 2px 0px 2px;
+    border-top-left-radius: 2px;
+    border-top-right-radius: 2px;
+}
+
+ads--CDockWidgetTab[activeTab="true"]
+{
+    background: rgb(60, 60, 60);
+    border-top: 4px solid rgb(255, 140, 60);
+    padding-bottom: 2px;
+    margin-top: 1px;
+}
+
+ads--CDockWidgetTab[focused="true"]
+{
+    background: rgb(60, 60, 60);
+    border-top: 4px solid orange;
+    padding-bottom: 2px;
+    margin-top: 1px;
+}
+
+ads--CDockWidgetTab:hover[activeTab="false"] {
+    background: rgb(70, 70, 70);
+}
+
+ads--CDockAreaTitleBar
+{
+    background: transparent;
+    border-bottom: 1px solid #3a3a3a;
+    padding-bottom: 0px;
+}
+
+ads--CDockWidgetTab[activeTab="false"] QLabel {
+    color: #888888;
+}
+
+#tabCloseButton
+{
+    background: rgba(255, 255, 255, 16);
+    margin-bottom: 1px;
+    margin-left: 4px;
+    border: none;
+    padding: 0px -2px;
+}
+
+#tabCloseButton:hover
+{
+    border: 1px solid rgba(255, 255, 255, 32);
+    background-color: rgb(180, 60, 60);
+    color: white;
+}
+
+#tabCloseButton:pressed
+{
+    background: rgb(220, 80, 80);
+}
+
+#QuickFindWidget {
+    border-left: 1px solid #3a3a3a;
+    border-right: 1px solid #3a3a3a;
+    border-bottom: 3px solid rgb(80, 140, 220);
+    background: palette(window);
+}

@@ -101,14 +101,23 @@ bool QuickFindWidget::eventFilter(QObject *obj, QEvent *event)
     return QObject::eventFilter(obj, event);
 }
 
+static bool isDarkPaletteBase(const QPalette &pal)
+{
+    return pal.color(QPalette::Base).lightness() < 128;
+}
+
 void QuickFindWidget::setSearchContextColorBad()
 {
-    setSearchContextColor(QStringLiteral("red"));
+    setSearchContextColor(isDarkPaletteBase(palette())
+        ? QStringLiteral("#ff7070")
+        : QStringLiteral("red"));
 }
 
 void QuickFindWidget::setSearchContextColorGood()
 {
-    setSearchContextColor(QStringLiteral("blue"));
+    setSearchContextColor(isDarkPaletteBase(palette())
+        ? QStringLiteral("#6aa9ff")
+        : QStringLiteral("blue"));
 }
 
 void QuickFindWidget::performNewSearch()

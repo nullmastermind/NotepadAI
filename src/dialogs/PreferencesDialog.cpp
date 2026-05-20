@@ -68,6 +68,22 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
         showApplicationRestartRequired();
     });
 
+    ui->comboBoxTheme->addItem(tr("Follow System"), static_cast<int>(ApplicationSettings::System));
+    ui->comboBoxTheme->addItem(tr("Light"),         static_cast<int>(ApplicationSettings::Light));
+    ui->comboBoxTheme->addItem(tr("Dark"),          static_cast<int>(ApplicationSettings::Dark));
+    {
+        int themeIndex = ui->comboBoxTheme->findData(static_cast<int>(settings->theme()));
+        ui->comboBoxTheme->setCurrentIndex(themeIndex == -1 ? 0 : themeIndex);
+    }
+    connect(ui->comboBoxTheme, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int index) {
+        settings->setTheme(static_cast<ApplicationSettings::ThemeEnum>(
+            ui->comboBoxTheme->itemData(index).toInt()));
+    });
+    connect(settings, &ApplicationSettings::themeChanged, this, [=](ApplicationSettings::ThemeEnum t) {
+        int idx = ui->comboBoxTheme->findData(static_cast<int>(t));
+        if (idx != -1) ui->comboBoxTheme->setCurrentIndex(idx);
+    });
+
     MapSettingToCheckBox(ui->checkBoxExitOnLastTabClosed, &ApplicationSettings::exitOnLastTabClosed, &ApplicationSettings::setExitOnLastTabClosed, &ApplicationSettings::exitOnLastTabClosedChanged);
 
     ui->fcbDefaultFont->setCurrentFont(QFont(settings->fontName()));
@@ -183,6 +199,9 @@ void PreferencesDialog::populateTranslationComboBox()
 
     // Add the system default at the top
     ui->comboBoxTranslation->addItem(tr("<System Default>"), QStringLiteral(""));
+
+    // Under test harnesses qApp is a plain QApplication; skip enumerating translations.
+    if (!app) return;
 
     // TODO: sort this list and keep the system default at the top
     for (const auto &localeName : app->getTranslationManager()->availableTranslations())
