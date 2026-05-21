@@ -48,6 +48,7 @@ class QLabel;
 class QPlainTextEdit;
 class QPushButton;
 class QScrollArea;
+class QTimer;
 class QToolButton;
 class QVBoxLayout;
 
@@ -114,10 +115,22 @@ private:
     void wireSignals();
     void hydrateFromModel();
     void appendMessageWidget(int idx);
+    // Insert a widget into the transcript timeline at the tail, just above
+    // the inline heartbeat indicator (if present) and the trailing stretch.
+    // All bubbles, tool-call cards, plan widgets, and permission prompts go
+    // through here so the heartbeat always trails the freshest content.
+    void insertTimelineWidget(QWidget *w);
     void scrollToBottomDeferred();
     void updateJumpButtonVisibility();
     void positionJumpButton();
     bool inputKeyEventIsSubmit(QKeyEvent *ke) const;
+    // Heartbeat indicator at the tail of the transcript: shows time since the
+    // last structural event (new message / thought / tool call / plan /
+    // permission). Text/thought chunk streaming intentionally does NOT
+    // reset — during steady streaming the counter grows so the user
+    // sees "still working, last new event was X.Xs ago".
+    void resetElapsed();
+    void onElapsedTick();
 
     AcpSessionModel *m_model = nullptr;       // non-owning
     AcpConnection *m_connection = nullptr;    // non-owning
@@ -159,6 +172,11 @@ private:
 
     // Usage
     AcpUsageIndicator *m_usageIndicator = nullptr;
+
+    // Heartbeat indicator shown only while the agent is processing.
+    QLabel *m_elapsedLabel = nullptr;
+    QTimer *m_elapsedTimer = nullptr;
+    int m_elapsedMs = 0;
 
     // Tracking
     QHash<int, AcpMessageWidget *> m_messageWidgets;

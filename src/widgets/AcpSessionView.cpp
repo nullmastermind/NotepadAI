@@ -173,6 +173,17 @@ void AcpSessionView::buildUi()
     m_transcriptLayout = new QVBoxLayout(m_transcriptHost);
     m_transcriptLayout->setContentsMargins(4, 4, 4, 4);
     m_transcriptLayout->setSpacing(6);
+
+    // Inline heartbeat indicator. Lives at the tail of the transcript so it
+    // visually trails the freshest bubble/card. Hidden outside processing;
+    // shown while the agent is busy. Italic + muted = "status whisper".
+    m_elapsedLabel = new QLabel(m_transcriptHost);
+    m_elapsedLabel->setStyleSheet(QStringLiteral(
+        "QLabel { color: palette(placeholder-text); font-style: italic; }"));
+    m_elapsedLabel->setToolTip(tr("Time since the last new event from the agent"));
+    m_elapsedLabel->hide();
+    m_transcriptLayout->addWidget(m_elapsedLabel);
+
     m_transcriptLayout->addStretch();
 
     m_scroll->setWidget(m_transcriptHost);
@@ -262,6 +273,11 @@ void AcpSessionView::buildUi()
     btnRow->addStretch();
     m_usageIndicator = new AcpUsageIndicator(this);
     btnRow->addWidget(m_usageIndicator);
+
+    m_elapsedTimer = new QTimer(this);
+    m_elapsedTimer->setInterval(100); // 0.1 s precision
+    connect(m_elapsedTimer, &QTimer::timeout, this, &AcpSessionView::onElapsedTick);
+
     btnRow->addWidget(m_cancelBtn);
     btnRow->addWidget(m_sendBtn);
     outer->addLayout(btnRow);
@@ -334,10 +350,10 @@ void AcpSessionView::wireSignals()
                 this, &AcpSessionView::onErrorOccurred);
         connect(m_connection, &AcpConnection::planReceived,
                 this, [this](const QList<AcpProtocol::AcpPlanEntry> &entries) {
+            resetElapsed();
             if (!m_planWidget) {
                 m_planWidget = new AcpPlanWidget(m_transcriptHost);
-                const int insertAt = m_transcriptLayout->count() - 1;
-                m_transcriptLayout->insertWidget(insertAt, m_planWidget);
+                insertTimelineWidget(m_planWidget);
             }
             m_planWidget->setEntries(entries);
             scrollToBottomDeferred();
@@ -365,15 +381,13 @@ void AcpSessionView::hydrateFromModel()
             const AcpMessage &msg = messages.at(entry.messageIndex);
             auto *w = new AcpMessageWidget(msg.role, m_transcriptHost);
             w->setContent(msg.content);
-            const int insertAt = m_transcriptLayout->count() - 1; // before the stretch
-            m_transcriptLayout->insertWidget(insertAt, w);
+            insertTimelineWidget(w);
             m_messageWidgets.insert(entry.messageIndex, w);
         } else if (entry.kind == AcpTimelineEntry::Kind::ToolCall) {
             auto it = toolCalls.find(entry.toolCallId);
             if (it != toolCalls.end()) {
                 auto *card = new AcpToolCallCard(it.value(), m_transcriptHost);
-                const int insertAt = m_transcriptLayout->count() - 1;
-                m_transcriptLayout->insertWidget(insertAt, card);
+                insertTimelineWidget(card);
                 m_toolCallCards.insert(entry.toolCallId, card);
             }
         }
@@ -433,13 +447,20 @@ void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)
     m_model = model;
     m_connection = connection;
 
-    // Clear the transcript: drop everything except the trailing stretch.
+    // Clear the transcript: drop bubbles, cards, plan, permission prompts.
+    // Leave the trailing stretch in place, and skip the inline heartbeat
+    // (it's owned by the view, reused across session swaps).
     while (m_transcriptLayout->count() > 1) {
-        QLayoutItem *item = m_transcriptLayout->takeAt(0);
+        QLayoutItem *item = m_transcriptLayout->itemAt(0);
         if (!item) break;
-        if (QWidget *w = item->widget()) {
-            w->deleteLater();
+        QWidget *w = item->widget();
+        if (w == m_elapsedLabel) {
+            // The heartbeat is always the last widget before the stretch,
+            // so reaching it means we're done.
+            break;
         }
+        m_transcriptLayout->takeAt(0);
+        if (w) w->deleteLater();
         delete item;
     }
     m_messageWidgets.clear();
@@ -460,6 +481,12 @@ void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)
     // Fresh session → reset the auto-scroll flag to its default.
     m_stickToBottom = true;
 
+    // Stop and hide the heartbeat indicator; onIsProcessingChanged will
+    // restart it if the new session is already mid-turn.
+    if (m_elapsedTimer) m_elapsedTimer->stop();
+    if (m_elapsedLabel) m_elapsedLabel->hide();
+    resetElapsed();
+
     // If the debug-log popup is open, repoint its content at the new
     // connection's log so the user sees the freshly-restarted session.
     if (m_debugDialog && m_debugDialogText) {
@@ -479,6 +506,23 @@ void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)
     hydrateFromModel();
 }
 
+void AcpSessionView::insertTimelineWidget(QWidget *w)
+{
+    if (!w || !m_transcriptLayout) return;
+    // Default: just before the trailing stretch.
+    int idx = m_transcriptLayout->count() - 1;
+    // If the heartbeat indicator is in the layout, land above it so the
+    // heartbeat keeps trailing the freshest content. Hidden labels still
+    // occupy a layout slot, so this works during off-turn idle too.
+    if (m_elapsedLabel) {
+        const int hbIdx = m_transcriptLayout->indexOf(m_elapsedLabel);
+        if (hbIdx >= 0) {
+            idx = hbIdx;
+        }
+    }
+    m_transcriptLayout->insertWidget(idx, w);
+}
+
 void AcpSessionView::appendMessageWidget(int idx)
 {
     if (!m_model) return;
@@ -487,8 +531,7 @@ void AcpSessionView::appendMessageWidget(int idx)
 
     auto *w = new AcpMessageWidget(msg.role, m_transcriptHost);
     w->setContent(msg.content);
-    const int insertAt = m_transcriptLayout->count() - 1;
-    m_transcriptLayout->insertWidget(insertAt, w);
+    insertTimelineWidget(w);
     m_messageWidgets.insert(idx, w);
 
     // If a thought was streaming and an assistant message starts, collapse it.
@@ -502,6 +545,7 @@ void AcpSessionView::appendMessageWidget(int idx)
 
 void AcpSessionView::onMessageAppended(int idx)
 {
+    resetElapsed();
     appendMessageWidget(idx);
 }
 
@@ -524,6 +568,7 @@ void AcpSessionView::onMessageChunkAppended(int idx, const QString &chunk)
 
 void AcpSessionView::onThoughtAppended(int idx)
 {
+    resetElapsed();
     appendMessageWidget(idx);
     auto *w = m_messageWidgets.value(idx, nullptr);
     if (w && w->role() == QLatin1String("thought")) {
@@ -550,6 +595,7 @@ void AcpSessionView::onThoughtChunkAppended(int idx, const QString &chunk)
 void AcpSessionView::onToolCallAddedOrUpdated(const QString &toolCallId)
 {
     if (!m_model) return;
+    resetElapsed();
     auto it = m_model->toolCalls().find(toolCallId);
     if (it == m_model->toolCalls().end()) return;
     const AcpProtocol::AcpToolCall &tc = it.value();
@@ -557,8 +603,7 @@ void AcpSessionView::onToolCallAddedOrUpdated(const QString &toolCallId)
     auto *card = m_toolCallCards.value(toolCallId, nullptr);
     if (!card) {
         card = new AcpToolCallCard(tc, m_transcriptHost);
-        const int insertAt = m_transcriptLayout->count() - 1;
-        m_transcriptLayout->insertWidget(insertAt, card);
+        insertTimelineWidget(card);
         m_toolCallCards.insert(toolCallId, card);
         m_currentGroupCards.append(card);
         scrollToBottomDeferred();
@@ -663,6 +708,15 @@ void AcpSessionView::onIsProcessingChanged(bool processing)
         m_cancelBtn->setEnabled(processing);
         m_cancelBtn->setVisible(processing);
     }
+    // Heartbeat indicator: visible only while the agent is processing.
+    if (processing) {
+        resetElapsed();
+        if (m_elapsedLabel) m_elapsedLabel->show();
+        if (m_elapsedTimer) m_elapsedTimer->start();
+    } else {
+        if (m_elapsedTimer) m_elapsedTimer->stop();
+        if (m_elapsedLabel) m_elapsedLabel->hide();
+    }
 }
 
 void AcpSessionView::onTurnEnded(int groupId)
@@ -678,13 +732,13 @@ void AcpSessionView::onTurnEnded(int groupId)
 
 void AcpSessionView::onPermissionRequested(const AcpProtocol::AcpPermissionRequest &req)
 {
+    resetElapsed();
     if (m_registry && m_registry->autoApprovePolicy() == QLatin1String("allowAll")) {
         // Connection already auto-approved before emitting (defense in depth).
         return;
     }
     auto *prompt = new AcpPermissionPrompt(req, m_transcriptHost);
-    const int insertAt = m_transcriptLayout->count() - 1;
-    m_transcriptLayout->insertWidget(insertAt, prompt);
+    insertTimelineWidget(prompt);
     m_activePermissionPrompt = prompt;
     connect(prompt, &AcpPermissionPrompt::choiceMade,
             this, [this, prompt](const QString &reqId, const QString &outcome, const QString &optionId) {
@@ -802,6 +856,24 @@ void AcpSessionView::onJumpToBottomClicked()
         m_programmaticScroll = false;
     }
     updateJumpButtonVisibility();
+}
+
+void AcpSessionView::resetElapsed()
+{
+    m_elapsedMs = 0;
+    if (m_elapsedLabel) {
+        m_elapsedLabel->setText(QStringLiteral("0.0s"));
+    }
+}
+
+void AcpSessionView::onElapsedTick()
+{
+    m_elapsedMs += 100;
+    if (m_elapsedLabel) {
+        const int whole = m_elapsedMs / 1000;
+        const int tenths = (m_elapsedMs % 1000) / 100;
+        m_elapsedLabel->setText(QStringLiteral("%1.%2s").arg(whole).arg(tenths));
+    }
 }
 
 void AcpSessionView::onShowDebugLogClicked()
