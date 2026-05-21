@@ -137,11 +137,12 @@ void AcpSessionView::buildUi()
     m_banner = new QFrame(this);
     m_banner->setObjectName(QStringLiteral("AcpStatusBanner"));
     m_banner->setStyleSheet(QStringLiteral(
-        "QFrame#AcpStatusBanner { background: palette(window); border: 1px solid palette(mid); border-radius: 4px; padding: 4px; }"
-        "QFrame#AcpStatusBanner[bannerKind=\"warning\"] { background: #fff3cd; border-color: #ffeeba; }"
-        "QFrame#AcpStatusBanner[bannerKind=\"error\"] { background: #f8d7da; border-color: #f5c6cb; }"));
+        "QFrame#AcpStatusBanner { background: transparent; border: none; border-radius: 4px; padding: 0px; }"
+        "QFrame#AcpStatusBanner[bannerKind=\"warning\"] { background: #fff3cd; border: 1px solid #ffeeba; padding: 4px; }"
+        "QFrame#AcpStatusBanner[bannerKind=\"error\"] { background: #f8d7da; border: 1px solid #f5c6cb; padding: 4px; }"));
     auto *banL = new QHBoxLayout(m_banner);
-    banL->setContentsMargins(8, 4, 8, 4);
+    banL->setContentsMargins(0, 0, 0, 0);
+    banL->setSpacing(4);
     m_bannerLabel = new QLabel(m_banner);
     m_bannerLabel->setWordWrap(true);
     m_bannerRetry = new QPushButton(tr("Retry"), m_banner);
@@ -150,15 +151,24 @@ void AcpSessionView::buildUi()
         clearBanner();
         emit retryRequested();
     });
-    m_bannerDebug = new QPushButton(tr("Debug"), m_banner);
+    m_bannerDebug = new QToolButton(m_banner);
+    m_bannerDebug->setText(tr("Debug"));
+    m_bannerDebug->setAutoRaise(true);
+    m_bannerDebug->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_bannerDebug->setToolTip(tr("Show ACP protocol log for this session"));
-    connect(m_bannerDebug, &QPushButton::clicked, this, &AcpSessionView::onShowDebugLogClicked);
+    m_bannerDebug->setStyleSheet(QStringLiteral(
+        "QToolButton { color: palette(placeholder-text); padding: 1px 6px; border: 1px solid transparent; border-radius: 3px; }"
+        "QToolButton:hover { color: palette(text); border: 1px solid palette(mid); }"));
+    connect(m_bannerDebug, &QToolButton::clicked, this, &AcpSessionView::onShowDebugLogClicked);
     banL->addWidget(m_bannerLabel, 1);
+    banL->addStretch();
     banL->addWidget(m_bannerRetry);
     banL->addWidget(m_bannerDebug);
     // The banner stays visible at all times so the Debug button is always
     // reachable — even when there's no error to surface. clearBanner() hides
-    // the label + Retry so the row looks neutral.
+    // the label + Retry so the row looks neutral. In neutral state the banner
+    // has no chrome (transparent background, no border, no padding) so the
+    // small Debug toolbutton floats top-right without dominating the panel.
     m_bannerLabel->hide();
     m_banner->setProperty("bannerKind", QStringLiteral("info"));
     outer->addWidget(m_banner);
