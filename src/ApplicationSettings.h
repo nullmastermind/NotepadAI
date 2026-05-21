@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
 
 #include <QObject>
@@ -76,7 +77,7 @@ public:
     };
     Q_ENUM(DefaultDirectoryBehaviorEnum)
 
-    enum ThemeEnum {
+    enum ThemeEnum : std::uint8_t {
         System,
         Light,
         Dark
@@ -128,4 +129,7 @@ public:
     DEFINE_SETTING(DefaultEOLMode, defaultEOLMode, QString)
     DEFINE_SETTING(URLHighlighting, urlHighlighting, bool)
     DEFINE_SETTING(ShowLineNumbers, showLineNumbers, bool)
+
+    DEFINE_SETTING(ShellCommand, shellCommand, QString)
+    DEFINE_SETTING(TerminalFont, terminalFont, QString)
 };

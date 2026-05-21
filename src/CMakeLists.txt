@@ -185,6 +185,21 @@ qt_add_executable(NotepadNext
 	ScintillaSorter.h ScintillaSorter.cpp
 	widgets/TabsQuickActionsBar.cpp
 	widgets/TabsQuickActionsBar.h
+
+	TerminalCwdResolver.h
+	TerminalCwdResolver.cpp
+	TerminalManager.h
+	TerminalManager.cpp
+	widgets/TerminalColorScheme.h
+	widgets/TerminalColorScheme.cpp
+	widgets/ScrollbackBuffer.h
+	widgets/ScrollbackBuffer.cpp
+	widgets/TerminalCellSource.h
+	widgets/TerminalCellSource.cpp
+	widgets/TerminalWidget.h
+	widgets/TerminalWidget.cpp
+	docks/TerminalDock.h
+	docks/TerminalDock.cpp
 )
 
 set_target_properties(NotepadNext PROPERTIES
@@ -240,6 +255,8 @@ target_link_libraries(NotepadNext
         lexilla
         scintilla
         uchardet
+        libvterm
+        libptyqt
 )
 
 target_compile_definitions(NotepadNext

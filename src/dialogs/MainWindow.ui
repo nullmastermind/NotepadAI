@@ -332,6 +332,13 @@
     <addaction name="actionEditMacros"/>
     <addaction name="separator"/>
    </widget>
+   <widget class="QMenu" name="menuTerminal">
+    <property name="title">
+     <string>Terminal</string>
+    </property>
+    <addaction name="actionOpenTerminalInWorkspace"/>
+    <addaction name="actionOpenTerminalInFolder"/>
+   </widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title">
      <string>Help</string>
@@ -356,6 +363,7 @@
    <addaction name="menuEncodings"/>
    <addaction name="menuLanguage"/>
    <addaction name="menuSettings"/>
+   <addaction name="menuTerminal"/>
    <addaction name="menuMacro"/>
    <addaction name="menuHelp"/>
   </widget>
@@ -1000,6 +1008,16 @@
    </property>
    <property name="menuRole">
     <enum>QAction::PreferencesRole</enum>
+   </property>
+  </action>
+  <action name="actionOpenTerminalInWorkspace">
+   <property name="text">
+    <string>Open Terminal in Workspace</string>
+   </property>
+  </action>
+  <action name="actionOpenTerminalInFolder">
+   <property name="text">
+    <string>Open Terminal in Folder</string>
    </property>
   </action>
   <action name="actionQuickFind">

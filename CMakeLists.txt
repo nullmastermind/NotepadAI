@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 project(NotepadNext
     VERSION 0.14
     DESCRIPTION "Cross-platform text editor"
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 set(APP_DISTRIBUTION "" CACHE STRING "Distribution type")

@@ -67,6 +67,10 @@
 #include "SearchResultsDock.h"
 #include "DebugLogDock.h"
 #include "FileListDock.h"
+#include "TerminalDock.h"
+
+#include "TerminalManager.h"
+#include "TerminalCwdResolver.h"
 
 #include "FindReplaceDialog.h"
 #include "MacroRunDialog.h"
@@ -950,6 +954,57 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
 
     applyStyleSheet();
     connect(app, &NotepadNextApplication::effectiveThemeChanged, this, &MainWindow::applyStyleSheet);
+
+    terminalManager = new TerminalManager(app, this);
+    connect(app, &NotepadNextApplication::effectiveThemeChanged, terminalManager, &TerminalManager::applyTheme);
+    connect(app->getSettings(), &ApplicationSettings::terminalFontChanged, terminalManager, &TerminalManager::applyFont);
+
+    connect(ui->menuTerminal, &QMenu::aboutToShow, this, [this]() {
+        QString workspaceRoot;
+        if (FolderAsWorkspaceDock *fawDock = findChild<FolderAsWorkspaceDock *>()) {
+            workspaceRoot = fawDock->rootPath();
+        }
+        QString activeFilePath;
+        bool activeIsFile = false;
+        if (ScintillaNext *editor = currentEditor()) {
+            if (editor->isFile()) {
+                activeFilePath = editor->getFilePath();
+                activeIsFile = true;
+            }
+        }
+        ui->actionOpenTerminalInWorkspace->setEnabled(TerminalCwdResolver::canOpenInWorkspace(workspaceRoot));
+        ui->actionOpenTerminalInFolder->setEnabled(TerminalCwdResolver::canOpenInFolder(activeFilePath, activeIsFile, workspaceRoot));
+    });
+
+    connect(ui->actionOpenTerminalInWorkspace, &QAction::triggered, this, [this]() {
+        QString workspaceRoot;
+        if (FolderAsWorkspaceDock *fawDock = findChild<FolderAsWorkspaceDock *>()) {
+            workspaceRoot = fawDock->rootPath();
+        }
+        const QString cwd = TerminalCwdResolver::resolveWorkspace(workspaceRoot);
+        if (!cwd.isEmpty()) {
+            terminalManager->openTerminal(cwd);
+        }
+    });
+
+    connect(ui->actionOpenTerminalInFolder, &QAction::triggered, this, [this]() {
+        QString workspaceRoot;
+        if (FolderAsWorkspaceDock *fawDock = findChild<FolderAsWorkspaceDock *>()) {
+            workspaceRoot = fawDock->rootPath();
+        }
+        QString activeFilePath;
+        bool activeIsFile = false;
+        if (ScintillaNext *editor = currentEditor()) {
+            if (editor->isFile()) {
+                activeFilePath = editor->getFilePath();
+                activeIsFile = true;
+            }
+        }
+        const QString cwd = TerminalCwdResolver::resolveFolder(activeFilePath, activeIsFile, workspaceRoot);
+        if (!cwd.isEmpty()) {
+            terminalManager->openTerminal(cwd);
+        }
+    });
 
     restoreSettings();
 
@@ -2197,6 +2252,10 @@ void MainWindow::closeEvent(QCloseEvent *event)
     if (!checkEditorsBeforeClose(e)) {
         event->ignore();
         return;
+    }
+
+    if (terminalManager) {
+        terminalManager->shutdown();
     }
 
     emit aboutToClose();

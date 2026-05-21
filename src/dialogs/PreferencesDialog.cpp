@@ -25,6 +25,9 @@
 
 #include <QButtonGroup>
 #include <QFileDialog>
+#include <QFont>
+#include <QFontDatabase>
+#include <QFontDialog>
 #include <QMessageBox>
 
 
@@ -158,6 +161,43 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
     else {
         ui->txtHardCodedPath->setText(QString());
     }
+
+    ui->lineEditShellCommand->setText(settings->shellCommand());
+    connect(ui->lineEditShellCommand, &QLineEdit::editingFinished, this, [=]() {
+        settings->setShellCommand(ui->lineEditShellCommand->text());
+    });
+    connect(settings, &ApplicationSettings::shellCommandChanged, this, [=](const QString &s) {
+        if (ui->lineEditShellCommand->text() != s) {
+            ui->lineEditShellCommand->setText(s);
+        }
+    });
+
+    connect(ui->btnBrowseShell, &QToolButton::clicked, this, [=]() {
+#ifdef Q_OS_WIN
+        const QString filter = tr("Executables (*.exe);;All files (*)");
+#else
+        const QString filter = tr("All files (*)");
+#endif
+        const QString path = QFileDialog::getOpenFileName(this, tr("Choose Shell"), ui->lineEditShellCommand->text(), filter);
+        if (!path.isEmpty()) {
+            const QString native = QDir::toNativeSeparators(path);
+            ui->lineEditShellCommand->setText(native);
+            settings->setShellCommand(native);
+        }
+    });
+
+    connect(ui->btnChooseTerminalFont, &QPushButton::clicked, this, [=]() {
+        QFont current;
+        const QString stored = settings->terminalFont();
+        if (stored.isEmpty() || !current.fromString(stored)) {
+            current = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        }
+        bool ok = false;
+        const QFont chosen = QFontDialog::getFont(&ok, current, this, tr("Terminal Font"));
+        if (ok) {
+            settings->setTerminalFont(chosen.toString());
+        }
+    });
 }
 
 PreferencesDialog::~PreferencesDialog()

@@ -43,6 +43,7 @@ class ZoomEventWatcher;
 class Converter;
 class DefaultDirectoryManager;
 class TabsQuickActionsBar;
+class TerminalManager;
 
 class MainWindow : public QMainWindow
 {
@@ -183,6 +184,8 @@ private:
     int zoomLevel = 0;
     int contextMenuPos = 0;
     QMenu *buildMenu(QStringList actionNames);
+
+    TerminalManager *terminalManager = Q_NULLPTR;
 };
 
 #endif // MAINWINDOW_H

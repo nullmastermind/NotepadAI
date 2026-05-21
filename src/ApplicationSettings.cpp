@@ -20,6 +20,7 @@
 
 #include <QApplication>
 #include <QFont>
+#include <QFontDatabase>
 
 #define CREATE_SETTING(group, name, lname, type, default) \
 ApplicationSetting<type> name{#group "/" #name, default};\
@@ -73,3 +74,17 @@ CREATE_SETTING(Editor, AdditionalWordChars, additionalWordChars, QString, QStrin
 CREATE_SETTING(Editor, DefaultEOLMode, defaultEOLMode, QString, QStringLiteral(""))
 CREATE_SETTING(Editor, URLHighlighting, urlHighlighting, bool, true)
 CREATE_SETTING(Editor, ShowLineNumbers, showLineNumbers, bool, true)
+
+static QString defaultShellCommand()
+{
+#ifdef Q_OS_WIN
+    return qEnvironmentVariable("COMSPEC", QStringLiteral("cmd.exe"));
+#else
+    return qEnvironmentVariable("SHELL", QStringLiteral("/bin/sh"));
+#endif
+}
+
+CREATE_SETTING(Terminal, ShellCommand, shellCommand, QString, []() { return defaultShellCommand(); })
+CREATE_SETTING(Terminal, TerminalFont, terminalFont, QString, []() {
+    return QFontDatabase::systemFont(QFontDatabase::FixedFont).toString();
+})
