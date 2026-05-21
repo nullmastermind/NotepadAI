@@ -77,6 +77,10 @@
 #include "MacroRunDialog.h"
 #include "MacroSaveDialog.h"
 #include "PreferencesDialog.h"
+#include "AcpAgentSettingsDialog.h"
+#include "AcpAgentRegistry.h"
+#include "AcpAgentManager.h"
+#include "AiAgentDock.h"
 #include "ColumnEditorDialog.h"
 
 #include "TabsQuickActionsBar.h"
@@ -737,6 +741,22 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         pd->activateWindow();
     });
 
+    connect(ui->actionAiAgents, &QAction::triggered, this, [=] {
+        AcpAgentSettingsDialog *dlg = findChild<AcpAgentSettingsDialog *>(QString(), Qt::FindDirectChildrenOnly);
+
+        if (dlg == Q_NULLPTR) {
+            AcpAgentRegistry *registry = app->getAiAgentManager()
+                ? app->getAiAgentManager()->registry()
+                : new AcpAgentRegistry(app->getSettings(), this);
+            dlg = new AcpAgentSettingsDialog(registry, this);
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+        }
+
+        dlg->show();
+        dlg->raise();
+        dlg->activateWindow();
+    });
+
     // The macro manager has already loaded any saved macros, so it might have some already
     ui->actionRunMacroMultipleTimes->setEnabled(macroManager.availableMacros().size() > 0);
     ui->actionEditMacros->setEnabled(macroManager.availableMacros().size() > 0);
@@ -1011,6 +1031,67 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         const QString cwd = TerminalCwdResolver::resolveFolder(activeFilePath, activeIsFile, workspaceRoot);
         if (!cwd.isEmpty()) {
             terminalManager->openTerminal(cwd);
+        }
+    });
+
+    connect(ui->menuAi, &QMenu::aboutToShow, this, [this]() {
+        QString workspaceRoot;
+        if (FolderAsWorkspaceDock *fawDock = findChild<FolderAsWorkspaceDock *>()) {
+            workspaceRoot = fawDock->rootPath();
+        }
+        QString activeFilePath;
+        bool activeIsFile = false;
+        if (ScintillaNext *editor = currentEditor()) {
+            if (editor->isFile()) {
+                activeFilePath = editor->getFilePath();
+                activeIsFile = true;
+            }
+        }
+        ui->actionOpenAiAgentInWorkspace->setEnabled(TerminalCwdResolver::canOpenInWorkspace(workspaceRoot));
+        ui->actionOpenAiAgentInFolder->setEnabled(TerminalCwdResolver::canOpenInFolder(activeFilePath, activeIsFile, workspaceRoot));
+    });
+
+    connect(ui->actionOpenAiAgentInWorkspace, &QAction::triggered, this, [this]() {
+        QString workspaceRoot;
+        if (FolderAsWorkspaceDock *fawDock = findChild<FolderAsWorkspaceDock *>()) {
+            workspaceRoot = fawDock->rootPath();
+        }
+        const QString cwd = TerminalCwdResolver::resolveWorkspace(workspaceRoot);
+        if (cwd.isEmpty()) return;
+
+        AcpAgentManager *manager = this->app->getAiAgentManager();
+        if (!manager) return;
+        AiAgentDock *dock = manager->openAgent(manager->registry()->defaultAgentId(), cwd);
+        if (dock) {
+            addDockWidget(AiAgentDock::defaultArea(), dock);
+            dock->show();
+            dock->raise();
+        }
+    });
+
+    connect(ui->actionOpenAiAgentInFolder, &QAction::triggered, this, [this]() {
+        QString workspaceRoot;
+        if (FolderAsWorkspaceDock *fawDock = findChild<FolderAsWorkspaceDock *>()) {
+            workspaceRoot = fawDock->rootPath();
+        }
+        QString activeFilePath;
+        bool activeIsFile = false;
+        if (ScintillaNext *editor = currentEditor()) {
+            if (editor->isFile()) {
+                activeFilePath = editor->getFilePath();
+                activeIsFile = true;
+            }
+        }
+        const QString cwd = TerminalCwdResolver::resolveFolder(activeFilePath, activeIsFile, workspaceRoot);
+        if (cwd.isEmpty()) return;
+
+        AcpAgentManager *manager = this->app->getAiAgentManager();
+        if (!manager) return;
+        AiAgentDock *dock = manager->openAgent(manager->registry()->defaultAgentId(), cwd);
+        if (dock) {
+            addDockWidget(AiAgentDock::defaultArea(), dock);
+            dock->show();
+            dock->raise();
         }
     });
 

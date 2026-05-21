@@ -132,4 +132,21 @@ public:
 
     DEFINE_SETTING(ShellCommand, shellCommand, QString)
     DEFINE_SETTING(TerminalFont, terminalFont, QString)
+
+    // AI / ACP agent settings. Stored under the "Ai/" group.
+public:
+    QString defaultAiAgentId() const;
+    QString aiAutoApprovePolicy() const;
+    QString aiAgentsJson() const;
+
+public slots:
+    void setDefaultAiAgentId(const QString &id);
+    void setAiAutoApprovePolicy(const QString &policy);
+    void setAiAgentsJson(const QString &json);
+
+signals:
+    void defaultAiAgentIdChanged(const QString &id);
+    void aiAutoApprovePolicyChanged(const QString &policy);
+    void autoApprovePolicyChanged(const QString &policy);
+    void aiAgentsJsonChanged(const QString &json);
 };

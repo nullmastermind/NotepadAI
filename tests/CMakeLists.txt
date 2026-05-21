@@ -124,3 +124,292 @@ target_sources(test_terminal_key_routing PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets/ScrollbackBuffer.h
 )
 add_test(NAME TerminalKeyRouting COMMAND test_terminal_key_routing)
+
+# --- AcpAgentRegistry: builtin seed, user CRUD, default + auto-approve policy ---
+qt_add_executable(test_acp_agent_registry test_acp_agent_registry.cpp)
+target_include_directories(test_acp_agent_registry PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_acp_agent_registry PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_acp_agent_registry PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentDefinition.h
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.h
+)
+add_test(NAME AcpAgentRegistry COMMAND test_acp_agent_registry)
+
+# --- AcpProtocol::acpExtractFrames: stdio newline-delimited JSON framing ---
+qt_add_executable(test_acp_jsonrpc_framing test_acp_jsonrpc_framing.cpp)
+target_include_directories(test_acp_jsonrpc_framing PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_acp_jsonrpc_framing PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_acp_jsonrpc_framing PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+)
+add_test(NAME AcpJsonRpcFraming COMMAND test_acp_jsonrpc_framing)
+
+# --- AcpProtocol::pickAutoApproveOptionId: pure auto-approve policy picker ---
+qt_add_executable(test_acp_permission_policy test_acp_permission_policy.cpp)
+target_include_directories(test_acp_permission_policy PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_acp_permission_policy PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_acp_permission_policy PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+)
+add_test(NAME AcpPermissionPolicy COMMAND test_acp_permission_policy)
+
+# --- AcpErrorClassifier: classify / loginHint / friendlyMessage ---
+qt_add_executable(test_acp_error_classifier test_acp_error_classifier.cpp)
+target_include_directories(test_acp_error_classifier PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_acp_error_classifier PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_acp_error_classifier PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.h
+)
+add_test(NAME AcpErrorClassifier COMMAND test_acp_error_classifier)
+
+# --- AcpProtocol::pathIsInsideWorkingDir: hermetic boundary check ---
+qt_add_executable(test_acp_path_sandbox test_acp_path_sandbox.cpp)
+target_include_directories(test_acp_path_sandbox PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_acp_path_sandbox PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_acp_path_sandbox PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+)
+add_test(NAME AcpPathSandbox COMMAND test_acp_path_sandbox)
+
+# --- AcpProtocol::buildSpawnArgv: POSIX/Windows program+args selection ---
+qt_add_executable(test_acp_spawn_argv test_acp_spawn_argv.cpp)
+target_include_directories(test_acp_spawn_argv PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_acp_spawn_argv PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_acp_spawn_argv PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+)
+add_test(NAME AcpSpawnArgv COMMAND test_acp_spawn_argv)
+
+# --- AcpProtocol JSON (de)serialization: content blocks + permission types ---
+qt_add_executable(test_acp_protocol_serialization test_acp_protocol_serialization.cpp)
+target_include_directories(test_acp_protocol_serialization PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_acp_protocol_serialization PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_acp_protocol_serialization PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+)
+add_test(NAME AcpProtocolSerialization COMMAND test_acp_protocol_serialization)
+
+# --- AcpHistoryStore: debounced atomic per-session JSON writes ---
+qt_add_executable(test_acp_history_store test_acp_history_store.cpp)
+target_include_directories(test_acp_history_store PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_acp_history_store PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_acp_history_store PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.h
+)
+add_test(NAME AcpHistoryStore COMMAND test_acp_history_store)
+
+# --- AcpSessionModel: in-memory transcript + persistence wiring ---
+qt_add_executable(test_acp_session_model test_acp_session_model.cpp)
+target_include_directories(test_acp_session_model PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_acp_session_model PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_acp_session_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.h
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+)
+add_test(NAME AcpSessionModel COMMAND test_acp_session_model)
+
+# --- AcpSessionModel persistence integration: full restart round-trip
+#     via the default QStandardPaths::AppDataLocation history directory. ---
+qt_add_executable(test_acp_session_model_persistence_integration
+    test_acp_session_model_persistence_integration.cpp)
+target_include_directories(test_acp_session_model_persistence_integration PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_acp_session_model_persistence_integration PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_acp_session_model_persistence_integration PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.h
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+)
+add_test(NAME AcpSessionModelPersistenceIntegration COMMAND test_acp_session_model_persistence_integration)
+
+# --- AcpAgentManager: lifecycle, history worker-thread placement, shutdown ---
+qt_add_executable(test_acp_agent_manager test_acp_agent_manager.cpp)
+target_include_directories(test_acp_agent_manager PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/docks
+    ${CMAKE_SOURCE_DIR}/src/widgets
+)
+target_link_libraries(test_acp_agent_manager PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_acp_agent_manager PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentDefinition.h
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.h
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentManager.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentManager.h
+    ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpConnection.h
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.h
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.h
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+    ${CMAKE_SOURCE_DIR}/src/docks/AiAgentDock.cpp
+    ${CMAKE_SOURCE_DIR}/src/docks/AiAgentDock.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpImageAttachmentList.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpImageAttachmentList.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpMessageWidget.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpMessageWidget.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPermissionPrompt.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPermissionPrompt.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpSessionView.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpSessionView.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpToolCallCard.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpToolCallCard.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.h
+)
+add_test(NAME AcpAgentManager COMMAND test_acp_agent_manager)
+
+# --- AcpAgentManager exit + restart: W4 session state machine ---
+qt_add_executable(test_acp_agent_exit_restart test_acp_agent_exit_restart.cpp)
+target_include_directories(test_acp_agent_exit_restart PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/docks
+    ${CMAKE_SOURCE_DIR}/src/widgets
+)
+target_link_libraries(test_acp_agent_exit_restart PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_acp_agent_exit_restart PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentDefinition.h
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.h
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentManager.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentManager.h
+    ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpConnection.h
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.h
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.h
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+    ${CMAKE_SOURCE_DIR}/src/docks/AiAgentDock.cpp
+    ${CMAKE_SOURCE_DIR}/src/docks/AiAgentDock.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpImageAttachmentList.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpImageAttachmentList.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpMessageWidget.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpMessageWidget.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPermissionPrompt.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPermissionPrompt.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpSessionView.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpSessionView.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpToolCallCard.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpToolCallCard.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.h
+)
+add_test(NAME AcpAgentExitRestart COMMAND test_acp_agent_exit_restart)
+
+# --- AiAgentDock: closeEvent prompt-while-running confirmation gate ---
+qt_add_executable(test_acp_dock_close_event test_acp_dock_close_event.cpp)
+target_include_directories(test_acp_dock_close_event PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/docks
+    ${CMAKE_SOURCE_DIR}/src/widgets
+)
+target_link_libraries(test_acp_dock_close_event PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_acp_dock_close_event PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentDefinition.h
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.h
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
+    ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpConnection.h
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.h
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.h
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+    ${CMAKE_SOURCE_DIR}/src/docks/AiAgentDock.cpp
+    ${CMAKE_SOURCE_DIR}/src/docks/AiAgentDock.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpImageAttachmentList.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpImageAttachmentList.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpMessageWidget.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpMessageWidget.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPermissionPrompt.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPermissionPrompt.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpSessionView.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpSessionView.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpToolCallCard.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpToolCallCard.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.h
+)
+add_test(NAME AcpDockCloseEvent COMMAND test_acp_dock_close_event)
+
+# --- AcpImageAttachmentList: validation, queue, drag/drop ---
+qt_add_executable(test_acp_image_attachment_limits test_acp_image_attachment_limits.cpp)
+target_include_directories(test_acp_image_attachment_limits PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/widgets
+)
+target_link_libraries(test_acp_image_attachment_limits PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_acp_image_attachment_limits PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpImageAttachmentList.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpImageAttachmentList.h
+)
+add_test(NAME AcpImageAttachmentLimits COMMAND test_acp_image_attachment_limits)
+
+# --- AcpUsageIndicator: label/bar visibility + warning/error levels ---
+qt_add_executable(test_acp_usage_indicator test_acp_usage_indicator.cpp)
+target_include_directories(test_acp_usage_indicator PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/widgets
+)
+target_link_libraries(test_acp_usage_indicator PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_acp_usage_indicator PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.h
+)
+add_test(NAME AcpUsageIndicator COMMAND test_acp_usage_indicator)
+
+# --- AcpMessageWidget: streaming markdown + thought collapse ---
+qt_add_executable(test_acp_message_widget_streaming test_acp_message_widget_streaming.cpp)
+target_include_directories(test_acp_message_widget_streaming PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/widgets
+)
+target_link_libraries(test_acp_message_widget_streaming PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_acp_message_widget_streaming PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpMessageWidget.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AcpMessageWidget.h
+)
+add_test(NAME AcpMessageWidgetStreaming COMMAND test_acp_message_widget_streaming)

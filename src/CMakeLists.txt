@@ -1,6 +1,14 @@
 qt_add_executable(NotepadNext
 	WIN32
 	MACOSX_BUNDLE
+	AcpAgentDefinition.h
+	AcpAgentManager.h
+	AcpAgentRegistry.h
+	AcpConnection.h
+	AcpErrorClassifier.h
+	AcpHistoryStore.h
+	AcpProtocol.h
+	AcpSessionModel.h
 	ActionUtils.h
 	ApplicationSettings.h
 	ByteArrayUtils.h
@@ -56,6 +64,13 @@ qt_add_executable(NotepadNext
 	resources.qrc
 	scripts.qrc
 	ApplicationSettings.cpp
+	AcpAgentManager.cpp
+	AcpAgentRegistry.cpp
+	AcpConnection.cpp
+	AcpErrorClassifier.cpp
+	AcpHistoryStore.cpp
+	AcpProtocol.cpp
+	AcpSessionModel.cpp
 	ColorPickerDelegate.cpp
 	ComboBoxDelegate.cpp
 	Converter.cpp
@@ -128,6 +143,9 @@ qt_add_executable(NotepadNext
 	decorators/SurroundSelection.h
 	decorators/URLFinder.cpp
 	decorators/URLFinder.h
+	dialogs/AcpAgentSettingsDialog.cpp
+	dialogs/AcpAgentSettingsDialog.h
+	dialogs/AcpAgentSettingsDialog.ui
 	dialogs/ColumnEditorDialog.cpp
 	dialogs/ColumnEditorDialog.h
 	dialogs/ColumnEditorDialog.ui
@@ -149,6 +167,8 @@ qt_add_executable(NotepadNext
 	dialogs/PreferencesDialog.cpp
 	dialogs/PreferencesDialog.h
 	dialogs/PreferencesDialog.ui
+	docks/AiAgentDock.cpp
+	docks/AiAgentDock.h
 	docks/DebugLogDock.cpp
 	docks/DebugLogDock.h
 	docks/DebugLogDock.ui
@@ -173,6 +193,20 @@ qt_add_executable(NotepadNext
 	docks/SearchResultsDock.cpp
 	docks/SearchResultsDock.h
 	docks/SearchResultsDock.ui
+    widgets/AcpImageAttachmentList.cpp
+	widgets/AcpImageAttachmentList.h
+	widgets/AcpMessageWidget.cpp
+	widgets/AcpMessageWidget.h
+	widgets/AcpPermissionPrompt.cpp
+	widgets/AcpPermissionPrompt.h
+	widgets/AcpPlanWidget.cpp
+	widgets/AcpPlanWidget.h
+	widgets/AcpSessionView.cpp
+	widgets/AcpSessionView.h
+	widgets/AcpToolCallCard.cpp
+	widgets/AcpToolCallCard.h
+	widgets/AcpUsageIndicator.cpp
+	widgets/AcpUsageIndicator.h
     widgets/DockMiddleClickCloser.cpp
 	widgets/DockMiddleClickCloser.h
     widgets/EditorInfoStatusBar.cpp

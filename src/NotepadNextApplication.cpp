@@ -27,6 +27,7 @@
 #include "SessionManager.h"
 #include "TranslationManager.h"
 #include "ApplicationSettings.h"
+#include "AcpAgentManager.h"
 #include "ThemeResolver.h"
 
 #include "LuaState.h"
@@ -132,6 +133,7 @@ bool NotepadNextApplication::init()
 
     recentFilesListManager = new RecentFilesListManager(this);
     editorManager = new EditorManager(settings, this);
+    aiAgentManager_ = new AcpAgentManager(settings, this);
     sessionManager = new SessionManager(this);
 
     connect(editorManager, &EditorManager::editorCreated, recentFilesListManager, [=](ScintillaNext *editor) {
@@ -159,6 +161,11 @@ bool NotepadNextApplication::init()
     });
 
     connect(this, &NotepadNextApplication::aboutToQuit, this, &NotepadNextApplication::saveSettings);
+    connect(this, &NotepadNextApplication::aboutToQuit, this, [this]() {
+        if (aiAgentManager_) {
+            aiAgentManager_->shutdown();
+        }
+    });
 
     EditorConfigAppDecorator *ecad = new EditorConfigAppDecorator(this);
     ecad->setEnabled(true);

@@ -320,6 +320,7 @@
      <string>Settings</string>
     </property>
     <addaction name="actionPreferences"/>
+    <addaction name="actionAiAgents"/>
    </widget>
    <widget class="QMenu" name="menuMacro">
     <property name="title">
@@ -338,6 +339,13 @@
     </property>
     <addaction name="actionOpenTerminalInWorkspace"/>
     <addaction name="actionOpenTerminalInFolder"/>
+   </widget>
+   <widget class="QMenu" name="menuAi">
+    <property name="title">
+     <string>AI</string>
+    </property>
+    <addaction name="actionOpenAiAgentInWorkspace"/>
+    <addaction name="actionOpenAiAgentInFolder"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title">
@@ -364,6 +372,7 @@
    <addaction name="menuLanguage"/>
    <addaction name="menuSettings"/>
    <addaction name="menuTerminal"/>
+   <addaction name="menuAi"/>
    <addaction name="menuMacro"/>
    <addaction name="menuHelp"/>
   </widget>
@@ -1010,6 +1019,11 @@
     <enum>QAction::PreferencesRole</enum>
    </property>
   </action>
+  <action name="actionAiAgents">
+   <property name="text">
+    <string>AI Agents…</string>
+   </property>
+  </action>
   <action name="actionOpenTerminalInWorkspace">
    <property name="text">
     <string>Open Terminal in Workspace</string>
@@ -1018,6 +1032,16 @@
   <action name="actionOpenTerminalInFolder">
    <property name="text">
     <string>Open Terminal in Folder</string>
+   </property>
+  </action>
+  <action name="actionOpenAiAgentInWorkspace">
+   <property name="text">
+    <string>Open AI Agent in Workspace</string>
+   </property>
+  </action>
+  <action name="actionOpenAiAgentInFolder">
+   <property name="text">
+    <string>Open AI Agent in Folder</string>
    </property>
   </action>
   <action name="actionQuickFind">

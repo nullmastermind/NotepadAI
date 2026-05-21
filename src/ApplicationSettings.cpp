@@ -88,3 +88,47 @@ CREATE_SETTING(Terminal, ShellCommand, shellCommand, QString, []() { return defa
 CREATE_SETTING(Terminal, TerminalFont, terminalFont, QString, []() {
     return QFontDatabase::systemFont(QFontDatabase::FixedFont).toString();
 })
+
+// --- AI / ACP agent settings ---------------------------------------------------
+//
+// Declared by hand (not via CREATE_SETTING) because the auto-approve setter
+// emits an extra `autoApprovePolicyChanged` signal expected by AcpAgentRegistry
+// and other consumers in addition to the standard `<name>Changed` form.
+
+static const char kAiDefaultAgentIdKey[]      = "Ai/DefaultAgentId";
+static const char kAiAutoApprovePolicyKey[]   = "Ai/AutoApprovePermissions";
+static const char kAiAgentsJsonKey[]          = "Ai/Agents";
+
+QString ApplicationSettings::defaultAiAgentId() const
+{
+    return value(QLatin1String(kAiDefaultAgentIdKey), QString()).toString();
+}
+
+void ApplicationSettings::setDefaultAiAgentId(const QString &id)
+{
+    setValue(QLatin1String(kAiDefaultAgentIdKey), id);
+    emit defaultAiAgentIdChanged(id);
+}
+
+QString ApplicationSettings::aiAutoApprovePolicy() const
+{
+    return value(QLatin1String(kAiAutoApprovePolicyKey), QString()).toString();
+}
+
+void ApplicationSettings::setAiAutoApprovePolicy(const QString &policy)
+{
+    setValue(QLatin1String(kAiAutoApprovePolicyKey), policy);
+    emit aiAutoApprovePolicyChanged(policy);
+    emit autoApprovePolicyChanged(policy);
+}
+
+QString ApplicationSettings::aiAgentsJson() const
+{
+    return value(QLatin1String(kAiAgentsJsonKey), QString()).toString();
+}
+
+void ApplicationSettings::setAiAgentsJson(const QString &json)
+{
+    setValue(QLatin1String(kAiAgentsJsonKey), json);
+    emit aiAgentsJsonChanged(json);
+}
