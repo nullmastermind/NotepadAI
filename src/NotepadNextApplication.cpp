@@ -546,7 +546,28 @@ void NotepadNextApplication::applyTheme()
         palette.setColor(QPalette::Disabled, QPalette::HighlightedText, QColor(180, 180, 180));
     }
     else {
-        palette = style()->standardPalette();
+        // Fusion's standardPalette() consults QGuiApplication::styleHints()
+        // ->colorScheme() since Qt 6.5, so on a system in dark mode it hands
+        // back a dark palette even when the user explicitly chose Light here.
+        // Build the light palette by hand so Light means light, period.
+        palette.setColor(QPalette::Window,          QColor(240, 240, 240));
+        palette.setColor(QPalette::WindowText,      Qt::black);
+        palette.setColor(QPalette::Base,            Qt::white);
+        palette.setColor(QPalette::AlternateBase,   QColor(247, 247, 247));
+        palette.setColor(QPalette::ToolTipBase,     QColor(255, 255, 220));
+        palette.setColor(QPalette::ToolTipText,     Qt::black);
+        palette.setColor(QPalette::Text,            Qt::black);
+        palette.setColor(QPalette::PlaceholderText, QColor(120, 120, 120));
+        palette.setColor(QPalette::Button,          QColor(240, 240, 240));
+        palette.setColor(QPalette::ButtonText,      Qt::black);
+        palette.setColor(QPalette::BrightText,      Qt::red);
+        palette.setColor(QPalette::Link,            QColor(0, 102, 204));
+        palette.setColor(QPalette::Highlight,       QColor(48, 140, 198));
+        palette.setColor(QPalette::HighlightedText, Qt::white);
+        palette.setColor(QPalette::Disabled, QPalette::Text,            QColor(160, 160, 160));
+        palette.setColor(QPalette::Disabled, QPalette::ButtonText,      QColor(160, 160, 160));
+        palette.setColor(QPalette::Disabled, QPalette::WindowText,      QColor(160, 160, 160));
+        palette.setColor(QPalette::Disabled, QPalette::HighlightedText, QColor(220, 220, 220));
     }
 
     setPalette(palette);
