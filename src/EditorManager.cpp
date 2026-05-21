@@ -37,6 +37,7 @@
 #include "URLFinder.h"
 #include "BookMarkDecorator.h"
 #include "HTMLAutoCompleteDecorator.h"
+#include "JustfileRecipeHighlighter.h"
 
 
 const int MARK_HIDELINESBEGIN = 23;
@@ -291,6 +292,9 @@ void EditorManager::setupEditor(ScintillaNext *editor)
 
     URLFinder *uf = new URLFinder(editor);
     uf->setEnabled(settings->urlHighlighting());
+
+    JustfileRecipeHighlighter *jrh = new JustfileRecipeHighlighter(editor);
+    jrh->setEnabled(true);
 
     BookMarkDecorator *bm = new BookMarkDecorator(editor);
     bm->setEnabled(true);

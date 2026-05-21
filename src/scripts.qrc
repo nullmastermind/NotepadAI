@@ -42,6 +42,7 @@
         <file>languages/java.lua</file>
         <file>languages/javascript.lua</file>
         <file>languages/json.lua</file>
+        <file>languages/justfile.lua</file>
         <file>languages/kix.lua</file>
         <file>languages/latex.lua</file>
         <file>languages/lisp.lua</file>

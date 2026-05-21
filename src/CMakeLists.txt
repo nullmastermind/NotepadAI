@@ -131,6 +131,8 @@ qt_add_executable(NotepadNext
 	decorators/EditorDecorator.h
 	decorators/HighlightedScrollBar.cpp
 	decorators/HighlightedScrollBar.h
+	decorators/JustfileRecipeHighlighter.cpp
+	decorators/JustfileRecipeHighlighter.h
 	decorators/HTMLAutoCompleteDecorator.cpp
 	decorators/HTMLAutoCompleteDecorator.h
 	decorators/LineNumbers.cpp

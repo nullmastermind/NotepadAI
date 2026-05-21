@@ -329,7 +329,8 @@ QString NotepadNextApplication::detectLanguage(ScintillaNext *editor) const
     QString language_name = QStringLiteral("Text");
 
     if (editor->isFile()) {
-        language_name = detectLanguageFromExtension(editor->getFileInfo().suffix());
+        const QFileInfo fileInfo = editor->getFileInfo();
+        language_name = detectLanguageFromExtension(fileInfo.suffix(), fileInfo.fileName());
     }
 
     if (language_name == QStringLiteral("Text")) {
@@ -339,13 +340,28 @@ QString NotepadNextApplication::detectLanguage(ScintillaNext *editor) const
     return language_name;
 }
 
-QString NotepadNextApplication::detectLanguageFromExtension(const QString &extension) const
+QString NotepadNextApplication::detectLanguageFromExtension(const QString &extension, const QString &fileName) const
 {
     qInfo(Q_FUNC_INFO);
 
     getLuaState()->setVariable("ext", extension);
+    getLuaState()->setVariable("fileName", fileName);
 
     return getLuaState()->executeAndReturn<QString>(R"(
+    -- Filename match is checked first so it always beats fallback
+    -- extensions (e.g. text.lua claims the empty extension "" which
+    -- would otherwise win for bare files like 'justfile' / 'Makefile').
+    if fileName ~= "" then
+        for name, L in pairs(languages) do
+            if L.filenames then
+                for _, v in ipairs(L.filenames) do
+                    if v == fileName then
+                        return name
+                    end
+                end
+            end
+        end
+    end
     for name, L in pairs(languages) do
         if L.extensions then
             for _, v in ipairs(L.extensions) do

@@ -63,7 +63,7 @@ public:
     void setEditorLanguage(ScintillaNext *editor, const QString &languageName) const;
 
     QString detectLanguage(ScintillaNext *editor) const;
-    QString detectLanguageFromExtension(const QString &extension) const;
+    QString detectLanguageFromExtension(const QString &extension, const QString &fileName = QString()) const;
     QString detectLanguageFromContents(ScintillaNext *editor) const;
 
     void sendInfoToPrimaryInstance();
