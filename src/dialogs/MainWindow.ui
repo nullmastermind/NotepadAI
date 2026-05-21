@@ -71,9 +71,17 @@
      <addaction name="actionExportHtml"/>
      <addaction name="actionExportRtf"/>
     </widget>
+    <widget class="QMenu" name="menuOpenFolderAsWorkspace">
+     <property name="title">
+      <string>Open Folder as Workspace...</string>
+     </property>
+     <addaction name="actionOpenFolderAsWorkspaceNew"/>
+     <addaction name="separator"/>
+    </widget>
     <addaction name="actionNew"/>
     <addaction name="actionOpen"/>
     <addaction name="actionOpenFolderasWorkspace"/>
+    <addaction name="menuOpenFolderAsWorkspace"/>
     <addaction name="actionReload"/>
     <addaction name="actionSave"/>
     <addaction name="actionSaveAs"/>
@@ -1101,6 +1109,11 @@
   <action name="actionOpenFolderasWorkspace">
    <property name="text">
     <string>Open Folder as Workspace...</string>
+   </property>
+  </action>
+  <action name="actionOpenFolderAsWorkspaceNew">
+   <property name="text">
+    <string>Open New Folder...</string>
    </property>
   </action>
   <action name="actionToggleSingleLineComment">

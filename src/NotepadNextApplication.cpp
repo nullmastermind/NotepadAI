@@ -147,6 +147,7 @@ bool NotepadNextApplication::init()
     luaState = new LuaState();
 
     recentFilesListManager = new RecentFilesListManager(this);
+    recentWorkspacesListManager = new RecentFilesListManager(this);
     editorManager = new EditorManager(settings, this);
     aiAgentManager_ = new AcpAgentManager(settings, this);
     sessionManager = new SessionManager(this);
@@ -507,11 +508,13 @@ void NotepadNextApplication::openFiles(const QStringList &files)
 void NotepadNextApplication::loadSettings()
 {
     recentFilesListManager->setFileList(getSettings()->value("App/RecentFilesList").toStringList());
+    recentWorkspacesListManager->setFileList(getSettings()->value("App/RecentWorkspacesList").toStringList());
 }
 
 void NotepadNextApplication::saveSettings()
 {
     getSettings()->setValue("App/RecentFilesList", recentFilesListManager->fileList());
+    getSettings()->setValue("App/RecentWorkspacesList", recentWorkspacesListManager->fileList());
 }
 
 void NotepadNextApplication::saveSession()

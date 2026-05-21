@@ -142,6 +142,37 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
 #endif
 
     connect(ui->actionOpenFolderasWorkspace, &QAction::triggered, this, &MainWindow::openFolderAsWorkspaceDialog);
+    connect(ui->actionOpenFolderAsWorkspaceNew, &QAction::triggered, this, &MainWindow::openFolderAsWorkspaceDialog);
+
+    connect(ui->menuFile, &QMenu::aboutToShow, this, [=]() {
+        RecentFilesListManager *recents = app->getRecentWorkspacesListManager();
+        const bool hasRecents = recents->count() > 0;
+
+        ui->actionOpenFolderasWorkspace->setVisible(!hasRecents);
+        ui->menuOpenFolderAsWorkspace->menuAction()->setVisible(hasRecents);
+
+        if (!hasRecents) return;
+
+        // Static head of the submenu = "Open New Folder..." + separator (2 actions).
+        // Strip any previously-built recent entries before rebuilding.
+        while (ui->menuOpenFolderAsWorkspace->actions().size() > 2) {
+            delete ui->menuOpenFolderAsWorkspace->actions().takeLast();
+        }
+
+        int i = 0;
+        for (const QString &path : recents->fileList()) {
+            ++i;
+            const QString native = QDir::toNativeSeparators(path);
+            QAction *action = new QAction(
+                QString("%1%2: %3").arg(i < 10 ? "&" : "").arg(i).arg(native),
+                ui->menuOpenFolderAsWorkspace);
+            action->setData(path);
+            connect(action, &QAction::triggered, this, [this, path]() {
+                openFolderAsWorkspacePath(path);
+            });
+            ui->menuOpenFolderAsWorkspace->addAction(action);
+        }
+    });
 
     connect(ui->actionCloseAllExceptActive, &QAction::triggered, this, &MainWindow::closeAllExceptActive);
     connect(ui->actionCloseAllToLeft, &QAction::triggered, this, &MainWindow::closeAllToLeft);
@@ -1332,15 +1363,37 @@ void MainWindow::openFile(const QString &filePath)
 void MainWindow::openFolderAsWorkspaceDialog()
 {
     const QString dir = QFileDialog::getExistingDirectory(this, tr("Open Folder as Workspace"), defaultDirectoryManager->getDefaultDirectory(), QFileDialog::ShowDirsOnly);
+    openFolderAsWorkspacePath(dir);
+}
 
-    if (dir.isEmpty())
-        return;
+void MainWindow::setFolderAsWorkspacePath(const QString &dir)
+{
+    openFolderAsWorkspacePath(dir);
+}
+
+void MainWindow::openFolderAsWorkspacePath(const QString &dir)
+{
+    if (dir.isEmpty()) return;
+
+    app->getRecentWorkspacesListManager()->addFile(dir);
+
+    // If this workspace is already open in some dock, just focus it rather
+    // than spawning a duplicate tab.
+    const QString cleaned = QDir::cleanPath(dir);
+    const auto existing = findChildren<FolderAsWorkspaceDock *>();
+    for (FolderAsWorkspaceDock *d : existing) {
+        if (QDir::cleanPath(d->rootPath()) == cleaned) {
+            d->setVisible(true);
+            d->raise();
+            m_activeWorkspace = d;
+            return;
+        }
+    }
 
     // Reuse the initial (always-present) workspace dock when it has no path yet
-    // so the first "Open Folder as Workspace" doesn't sit alongside an empty
-    // ghost tab. Any subsequent open creates a new tabified dock so the user
-    // can keep multiple workspaces in one window.
-    const auto existing = findChildren<FolderAsWorkspaceDock *>();
+    // so the first open doesn't sit alongside an empty ghost tab. Any subsequent
+    // open creates a new tabified dock so the user can keep multiple workspaces
+    // in one window.
     FolderAsWorkspaceDock *vacant = nullptr;
     FolderAsWorkspaceDock *anchor = nullptr;
     for (FolderAsWorkspaceDock *d : existing) {
@@ -1371,40 +1424,6 @@ void MainWindow::openFolderAsWorkspaceDialog()
         tabifyDockWidget(anchor, dock);
     }
 
-    dock->setVisible(true);
-    dock->raise();
-    m_activeWorkspace = dock;
-}
-
-void MainWindow::setFolderAsWorkspacePath(const QString &dir)
-{
-    if (dir.isEmpty()) return;
-
-    // CLI --workspace targets the initial workspace slot. If the user already
-    // has multiple workspaces open in this restored window, the new one is
-    // tabified alongside them so existing tabs aren't clobbered.
-    const auto docks = findChildren<FolderAsWorkspaceDock *>();
-    FolderAsWorkspaceDock *primary = docks.isEmpty() ? nullptr : docks.first();
-    if (primary && primary->rootPath().isEmpty()) {
-        primary->setRootPath(dir);
-        primary->setVisible(true);
-        primary->raise();
-        m_activeWorkspace = primary;
-        return;
-    }
-
-    auto *dock = new FolderAsWorkspaceDock(dir, this);
-    static int cliIdx = 0;
-    dock->setObjectName(QStringLiteral("FolderAsWorkspaceDock_cli_%1").arg(++cliIdx));
-    dock->setAttribute(Qt::WA_DeleteOnClose, true);
-
-    addDockWidget(Qt::LeftDockWidgetArea, dock);
-    DockMiddleClickCloser::install(dock);
-    ui->menuView->addAction(dock->toggleViewAction());
-    connect(dock, &FolderAsWorkspaceDock::fileDoubleClicked, this, &MainWindow::openFile);
-    registerWorkspaceDock(dock);
-
-    if (primary) tabifyDockWidget(primary, dock);
     dock->setVisible(true);
     dock->raise();
     m_activeWorkspace = dock;

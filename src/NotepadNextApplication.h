@@ -49,6 +49,7 @@ public:
     bool init();
 
     RecentFilesListManager *getRecentFilesListManager() const { return recentFilesListManager; }
+    RecentFilesListManager *getRecentWorkspacesListManager() const { return recentWorkspacesListManager; }
     EditorManager *getEditorManager() const { return editorManager; }
     SessionManager *getSessionManager() const;
     TranslationManager *getTranslationManager() const { return translationManager; };
@@ -94,6 +95,7 @@ private:
 
     EditorManager *editorManager;
     RecentFilesListManager *recentFilesListManager;
+    RecentFilesListManager *recentWorkspacesListManager;
     ApplicationSettings *settings;
     SessionManager *sessionManager;
     TranslationManager *translationManager;
