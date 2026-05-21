@@ -29,6 +29,7 @@
 #include <QTextBrowser>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -132,17 +133,47 @@ AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
         configureBubbleBrowser(m_browser);
         m_layout->addWidget(m_browser);
     }
+
+    // Debounce assistant/thought re-renders so streamed chunks don't drown the
+    // UI thread in markdown parsing — especially severe for table-heavy
+    // replies where every chunk re-parses the whole payload.
+    m_rerenderTimer = new QTimer(this);
+    m_rerenderTimer->setSingleShot(true);
+    m_rerenderTimer->setInterval(80);
+    connect(m_rerenderTimer, &QTimer::timeout, this, &AcpMessageWidget::rerender);
+}
+
+void AcpMessageWidget::scheduleRerender()
+{
+    if (m_rerenderTimer) {
+        if (!m_rerenderTimer->isActive()) {
+            m_rerenderTimer->start();
+        }
+    } else {
+        rerender();
+    }
+}
+
+void AcpMessageWidget::flushRerender()
+{
+    if (m_rerenderTimer && m_rerenderTimer->isActive()) {
+        m_rerenderTimer->stop();
+    }
 }
 
 void AcpMessageWidget::appendChunk(const QString &chunk)
 {
     m_text += chunk;
-    rerender();
+    scheduleRerender();
 }
 
 void AcpMessageWidget::setText(const QString &fullText)
 {
     m_text = fullText;
+    // Wholesale replacements are usually terminal states (compaction done,
+    // model rewrote in place) — render immediately so the user sees the
+    // settled state rather than waiting for the debounce.
+    flushRerender();
     rerender();
 }
 

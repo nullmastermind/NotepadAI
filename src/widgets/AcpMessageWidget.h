@@ -27,6 +27,7 @@
 #include "AcpProtocol.h"
 
 class QTextBrowser;
+class QTimer;
 class QToolButton;
 class QLabel;
 class QVBoxLayout;
@@ -74,6 +75,8 @@ private:
     void rerender();
     void refitBrowserHeight();
     void applyCollapsed(bool collapsed);
+    void scheduleRerender();
+    void flushRerender();
 
     QString m_role;
     QString m_text;
@@ -82,6 +85,10 @@ private:
     QTextBrowser *m_browser = nullptr;     // assistant + non-thought rendered widgets
     QToolButton *m_thoughtHeader = nullptr; // thought role
     QVBoxLayout *m_layout = nullptr;
+    // Debounce timer for assistant markdown re-renders. setMarkdown on a long
+    // table-bearing payload is O(N) per call; without debouncing, every
+    // streamed chunk re-parses the whole document and the UI thread stalls.
+    QTimer *m_rerenderTimer = nullptr;
 
     // User role: image thumbnails kept alongside their original pixmap so we
     // can rescale to bubble width on resize without quality loss.
