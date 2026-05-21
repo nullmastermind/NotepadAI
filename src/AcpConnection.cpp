@@ -240,6 +240,20 @@ void AcpConnection::sendNewSession()
                     const QJsonObject r = result.toObject();
                     m_sessionId = r.value(QStringLiteral("sessionId")).toString();
 
+                    // Flush any prompts the user queued while session/new was
+                    // still in flight. Move the queue aside first so a
+                    // re-entrant sendPrompt (shouldn't happen, but be safe)
+                    // doesn't infinite-loop.
+                    if (!m_pendingPrompts.isEmpty()) {
+                        const auto pending = std::move(m_pendingPrompts);
+                        m_pendingPrompts.clear();
+                        appendDebugLog(QStringLiteral("session/new: flushing %1 deferred prompt(s)")
+                                           .arg(pending.size()));
+                        for (const auto &p : pending) {
+                            sendPrompt(p.text, p.images);
+                        }
+                    }
+
                     m_availableCommands.clear();
                     for (const auto &v : r.value(QStringLiteral("availableCommands")).toArray()) {
                         m_availableCommands.append(v.toString());
@@ -359,6 +373,16 @@ void AcpConnection::sendErrorResponse(const QJsonValue &id, int code, const QStr
 
 void AcpConnection::sendPrompt(const QString &text, const QList<QPair<QByteArray, QString>> &images)
 {
+    // The user may submit before `session/new` has returned; in that case
+    // m_sessionId is still empty and sending now would produce a "Session not
+    // found" error. Queue and flush from the session/new callback instead.
+    if (m_sessionId.isEmpty()) {
+        m_pendingPrompts.append({text, images});
+        appendDebugLog(QStringLiteral("sendPrompt: deferred — session not yet established (queue=%1)")
+                           .arg(m_pendingPrompts.size()));
+        return;
+    }
+
     QJsonArray content;
     {
         AcpProtocol::AcpContentBlock t;

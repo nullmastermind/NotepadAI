@@ -206,6 +206,16 @@ private:
     QHash<QString, TerminalState> m_terminals;
     int m_nextTerminalSeq = 1;
 
+    // Prompts submitted by the user before `session/new` returned. We enqueue
+    // here when m_sessionId is still empty and flush the queue in the
+    // session/new success callback — otherwise the prompt goes out with an
+    // empty sessionId and the agent rejects it with "Session not found".
+    struct PendingPrompt {
+        QString text;
+        QList<QPair<QByteArray, QString>> images;
+    };
+    QList<PendingPrompt> m_pendingPrompts;
+
     static constexpr int kDebugLogMaxLines = 2000;
     static constexpr int kDebugLogLineMaxChars = 4096;
     QStringList m_debugLog;
