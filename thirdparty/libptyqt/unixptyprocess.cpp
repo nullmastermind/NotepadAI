@@ -91,9 +91,9 @@ bool UnixPtyProcess::startProcess(const QString &shellPath, const QString &worki
             base == QLatin1String("fish") ||
             base == QLatin1String("ksh");
         if (wantsInteractive) {
-            execl(shellPath.constData(), shellPath.constData(), "-i", reinterpret_cast<char *>(nullptr));
+            execl(shellPath.constData(), shellPath.constData(), "-i", (char *)nullptr);
         } else {
-            execl(shellPath.constData(), shellPath.constData(), reinterpret_cast<char *>(nullptr));
+            execl(shellPath.constData(), shellPath.constData(), (char *)nullptr);
         }
         _exit(127);
     }
