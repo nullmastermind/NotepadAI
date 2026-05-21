@@ -68,6 +68,7 @@
 #include "DebugLogDock.h"
 #include "FileListDock.h"
 #include "TerminalDock.h"
+#include "DockMiddleClickCloser.h"
 
 #include "TerminalManager.h"
 #include "TerminalCwdResolver.h"
@@ -357,6 +358,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
 
     SearchResultsDock *srDock = new SearchResultsDock(this);
     addDockWidget(Qt::BottomDockWidgetArea, srDock);
+    DockMiddleClickCloser::install(srDock);
     srDock->toggleViewAction()->setShortcut(Qt::Key_F7);
     ui->menuView->addAction(srDock->toggleViewAction());
 
@@ -906,18 +908,22 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
     EditorInspectorDock *editorInspectorDock = new EditorInspectorDock(this);
     editorInspectorDock->hide();
     addDockWidget(Qt::RightDockWidgetArea, editorInspectorDock);
+    DockMiddleClickCloser::install(editorInspectorDock);
 
     LanguageInspectorDock *languageInspectorDock = new LanguageInspectorDock(this);
     languageInspectorDock->hide();
     addDockWidget(Qt::RightDockWidgetArea, languageInspectorDock);
+    DockMiddleClickCloser::install(languageInspectorDock);
 
     LuaConsoleDock *luaConsoleDock = new LuaConsoleDock(app->getLuaState(), this);
     luaConsoleDock->hide();
     addDockWidget(Qt::BottomDockWidgetArea, luaConsoleDock);
+    DockMiddleClickCloser::install(luaConsoleDock);
 
     DebugLogDock *debugLogDock = new DebugLogDock(this);
     debugLogDock->hide();
     addDockWidget(Qt::RightDockWidgetArea, debugLogDock);
+    DockMiddleClickCloser::install(debugLogDock);
 
     ui->menuHelp->insertActions(ui->menuHelp->actions().at(0), {
                                     luaConsoleDock->toggleViewAction(),
@@ -929,12 +935,14 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
     FolderAsWorkspaceDock *fawDock = new FolderAsWorkspaceDock(this);
     fawDock->hide();
     addDockWidget(Qt::LeftDockWidgetArea, fawDock);
+    DockMiddleClickCloser::install(fawDock);
     ui->menuView->addAction(fawDock->toggleViewAction());
     connect(fawDock, &FolderAsWorkspaceDock::fileDoubleClicked, this, &MainWindow::openFile);
 
     FileListDock *fileListDock = new FileListDock(this);
     fileListDock->hide();
     addDockWidget(Qt::LeftDockWidgetArea, fileListDock);
+    DockMiddleClickCloser::install(fileListDock);
     ui->menuView->addAction(fileListDock->toggleViewAction());
 
     connect(app->getSettings(), &ApplicationSettings::showMenuBarChanged, this, [=](bool showMenuBar) {

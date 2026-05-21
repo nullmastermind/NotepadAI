@@ -173,6 +173,8 @@ qt_add_executable(NotepadNext
 	docks/SearchResultsDock.cpp
 	docks/SearchResultsDock.h
 	docks/SearchResultsDock.ui
+    widgets/DockMiddleClickCloser.cpp
+	widgets/DockMiddleClickCloser.h
     widgets/EditorInfoStatusBar.cpp
 	widgets/EditorInfoStatusBar.h
 	widgets/FadingIndicator.cpp

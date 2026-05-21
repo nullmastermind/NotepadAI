@@ -24,6 +24,7 @@
 #include "TerminalDock.h"
 #include "TerminalWidget.h"
 #include "TerminalColorScheme.h"
+#include "DockMiddleClickCloser.h"
 
 #include "iptyprocess.h"
 #include "ptyqt.h"
@@ -109,6 +110,7 @@ void TerminalManager::openTerminal(const QString &cwd)
     }
 
     auto *dock = new TerminalDock(shell, cwd, m_mainWindow);
+    DockMiddleClickCloser::install(dock);
 
     QPointer<TerminalDock> p(dock);
     m_docks.append(p);
