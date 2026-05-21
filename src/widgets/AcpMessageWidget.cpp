@@ -105,6 +105,12 @@ void AcpMessageWidget::appendChunk(const QString &chunk)
     rerender();
 }
 
+void AcpMessageWidget::setText(const QString &fullText)
+{
+    m_text = fullText;
+    rerender();
+}
+
 void AcpMessageWidget::setContent(const QVector<AcpProtocol::AcpContentBlock> &content)
 {
     if (m_role == QLatin1String("user")) {

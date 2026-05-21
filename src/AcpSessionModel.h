@@ -153,6 +153,9 @@ signals:
     void metadataChanged();
     void messageAppended(int idx);
     void messageChunkAppended(int idx, const QString &chunk);
+    // Emitted when the model rewrites a streaming message body in place (e.g.
+    // compaction status replacement). View should set the bubble text wholesale.
+    void messageReplaced(int idx, const QString &fullText);
     void thoughtAppended(int idx);
     void thoughtChunkAppended(int idx, const QString &chunk);
     void toolCallAddedOrUpdated(const QString &toolCallId);

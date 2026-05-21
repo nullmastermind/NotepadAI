@@ -411,6 +411,8 @@ void AcpSessionView::wireSignals()
                 this, &AcpSessionView::onMessageAppended);
         connect(m_model, &AcpSessionModel::messageChunkAppended,
                 this, &AcpSessionView::onMessageChunkAppended);
+        connect(m_model, &AcpSessionModel::messageReplaced,
+                this, &AcpSessionView::onMessageReplaced);
         connect(m_model, &AcpSessionModel::thoughtAppended,
                 this, &AcpSessionView::onThoughtAppended);
         connect(m_model, &AcpSessionModel::thoughtChunkAppended,
@@ -647,6 +649,23 @@ void AcpSessionView::onMessageChunkAppended(int idx, const QString &chunk)
     }
     if (w) {
         w->appendChunk(chunk);
+        if (w->role() == QLatin1String("assistant") && !m_activeThought.isNull()) {
+            m_activeThought->markStreamingDone();
+            m_activeThought.clear();
+        }
+        scrollToBottomDeferred();
+    }
+}
+
+void AcpSessionView::onMessageReplaced(int idx, const QString &fullText)
+{
+    auto *w = m_messageWidgets.value(idx, nullptr);
+    if (!w) {
+        appendMessageWidget(idx);
+        w = m_messageWidgets.value(idx, nullptr);
+    }
+    if (w) {
+        w->setText(fullText);
         if (w->role() == QLatin1String("assistant") && !m_activeThought.isNull()) {
             m_activeThought->markStreamingDone();
             m_activeThought.clear();

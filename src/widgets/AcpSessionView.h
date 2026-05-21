@@ -93,6 +93,7 @@ protected:
 private slots:
     void onMessageAppended(int idx);
     void onMessageChunkAppended(int idx, const QString &chunk);
+    void onMessageReplaced(int idx, const QString &fullText);
     void onThoughtAppended(int idx);
     void onThoughtChunkAppended(int idx, const QString &chunk);
     void onToolCallAddedOrUpdated(const QString &toolCallId);

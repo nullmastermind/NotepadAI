@@ -388,10 +388,25 @@ void AcpSessionModel::onMessageChunk(const QString &text)
             block.kind = AcpContentBlock::Kind::Text;
             block.text = text;
             msg.content.prepend(block);
+            emit messageChunkAppended(idx, text);
         } else {
-            msg.content.first().text.append(text);
+            // Compaction transition: the agent emits "Compacting..." as a
+            // placeholder bubble, performs context compaction, then sends a
+            // follow-up chunk starting with "\n\nCompacting completed." into
+            // the same assistant message. Treat that as an in-place rewrite
+            // so the bubble shows only the completion text instead of both
+            // lines stacked.
+            const QString &existing = msg.content.first().text;
+            const QLatin1String kPlaceholder("Compacting...");
+            const QLatin1String kCompletionPrefix("\n\nCompacting completed.");
+            if (existing == kPlaceholder && text.startsWith(kCompletionPrefix)) {
+                msg.content.first().text = text.mid(2); // strip leading "\n\n"
+                emit messageReplaced(idx, msg.content.first().text);
+            } else {
+                msg.content.first().text.append(text);
+                emit messageChunkAppended(idx, text);
+            }
         }
-        emit messageChunkAppended(idx, text);
     }
     schedulePersistIfNeeded();
 }

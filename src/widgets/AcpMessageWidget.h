@@ -45,6 +45,11 @@ public:
     // Append a streamed chunk to the message body and re-render.
     void appendChunk(const QString &chunk);
 
+    // Replace the body text wholesale and re-render. Used when the model
+    // rewrites a streaming message in-place (e.g. compaction transition where
+    // "Compacting..." becomes "Compacting completed." rather than appending).
+    void setText(const QString &fullText);
+
     // Replace the body with the joined text of `content` blocks. Used when
     // hydrating from history. Images are inserted as `[image]` placeholders.
     void setContent(const QVector<AcpProtocol::AcpContentBlock> &content);
