@@ -67,7 +67,15 @@ constexpr std::size_t kPathMax        = 4096;
 constexpr std::size_t kSectionBufSize = 4096;       // ≤ PIPE_BUF for atomic O_APPEND
 constexpr int         kMaxStackFrames = 128;
 constexpr std::size_t kRotateBytes    = 10 * 1024 * 1024;
-constexpr int         kFramesPerSection = 40;       // ~80B/frame × 40 ≈ 3.2KB
+// Reserve enough headroom for the worst-case frame line (path + symbol + line
+// number can easily reach ~700B). Flush *before* writing a frame if remaining
+// space is below this — otherwise appendStr silently truncates and frames are
+// dropped.
+constexpr std::size_t kFrameReserve   = 1024;
+// If SymFromAddr's reported offset from the matched symbol exceeds this, the
+// "symbol" is almost certainly the nearest export of a PDB-less module, not
+// the real function. Suppress the misleading name in that case.
+constexpr DWORD64     kSymDispMax     = 256 * 1024;
 
 #ifndef _WIN32
 constexpr std::size_t kAltStackSize = 1 << 16;      // 64KB
@@ -500,7 +508,6 @@ void writeStackTraceWindows(CrashFile *cf, CONTEXT *ctx)
 
     DWORD64 lastPc = 0;
     int dupCount = 0;
-    int writtenInSection = 0;
     std::size_t p = 0;
 
     auto flushCycle = [&]() {
@@ -529,12 +536,23 @@ void writeStackTraceWindows(CrashFile *cf, CONTEXT *ctx)
         }
         lastPc = frame.AddrPC.Offset;
 
+        // Flush *before* the next frame if there isn't enough room for its
+        // worst-case formatting. Counting frames written (the previous design)
+        // silently truncated when paths + symbol names overflowed the buffer.
+        if (kSectionBufSize - p < kFrameReserve) {
+            writeSection(cf, g_section_buf, &p);
+        }
+
         alignas(SYMBOL_INFO) char symBuf[sizeof(SYMBOL_INFO) + 256];
         SYMBOL_INFO *sym = reinterpret_cast<SYMBOL_INFO *>(symBuf);
         sym->SizeOfStruct = sizeof(SYMBOL_INFO);
         sym->MaxNameLen   = 255;
         DWORD64 symDisp = 0;
-        const bool haveSym = SymFromAddr(process, frame.AddrPC.Offset, &symDisp, sym) != 0;
+        const bool symLookupOk = SymFromAddr(process, frame.AddrPC.Offset, &symDisp, sym) != 0;
+        // Reject implausibly-distant matches: SymFromAddr on a PDB-less module
+        // (e.g. shipped Qt) returns the nearest exported symbol, which can be
+        // hundreds of KB away and is more misleading than helpful.
+        const bool haveSym = symLookupOk && symDisp <= kSymDispMax;
 
         IMAGEHLP_LINE64 line{};
         line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
@@ -554,11 +572,20 @@ void writeStackTraceWindows(CrashFile *cf, CONTEXT *ctx)
         appendHex64(g_section_buf, kSectionBufSize, &p, frame.AddrPC.Offset, 16);
         appendChar(g_section_buf, kSectionBufSize, &p, ' ');
         appendStr(g_section_buf, kSectionBufSize, &p, haveMod ? mod.ModuleName : "?");
-        appendChar(g_section_buf, kSectionBufSize, &p, '!');
-        appendStr(g_section_buf, kSectionBufSize, &p, haveSym ? sym->Name : "(no symbol)");
         if (haveSym) {
+            appendChar(g_section_buf, kSectionBufSize, &p, '!');
+            appendStr(g_section_buf, kSectionBufSize, &p, sym->Name);
             appendStr(g_section_buf, kSectionBufSize, &p, "+0x");
             appendHex64(g_section_buf, kSectionBufSize, &p, symDisp, 0);
+        } else if (haveMod && mod.BaseOfImage != 0
+                   && frame.AddrPC.Offset >= mod.BaseOfImage) {
+            // No usable symbol — print module-relative offset so the address
+            // can still be resolved post-mortem with a matching PDB.
+            appendStr(g_section_buf, kSectionBufSize, &p, "+0x");
+            appendHex64(g_section_buf, kSectionBufSize, &p,
+                        frame.AddrPC.Offset - mod.BaseOfImage, 0);
+        } else {
+            appendStr(g_section_buf, kSectionBufSize, &p, "!(no symbol)");
         }
         if (haveLine) {
             appendStr(g_section_buf, kSectionBufSize, &p, "  [");
@@ -568,11 +595,6 @@ void writeStackTraceWindows(CrashFile *cf, CONTEXT *ctx)
             appendChar(g_section_buf, kSectionBufSize, &p, ']');
         }
         appendChar(g_section_buf, kSectionBufSize, &p, '\n');
-
-        if (++writtenInSection >= kFramesPerSection) {
-            writeSection(cf, g_section_buf, &p);
-            writtenInSection = 0;
-        }
     }
     flushCycle();
     writeSection(cf, g_section_buf, &p);
