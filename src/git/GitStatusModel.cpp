@@ -199,6 +199,9 @@ QVariant GitStatusModel::data(const QModelIndex &index, int role) const
         case HasUnstableEncodingRole:    return e.hasUnstableEncoding;
         case OursShaRole:                return e.oursSha;
         case TheirsShaRole:              return e.theirsSha;
+        case IsSubmoduleRole:            return e.isSubmodule;
+        case SubAddedLinesRole:          return e.subAddedLines;
+        case SubDeletedLinesRole:        return e.subDeletedLines;
         default: return {};
     }
 }
@@ -231,6 +234,45 @@ void GitStatusModel::mergeNumstat(const QHash<QString, GitNumstatParser::Stat> &
             emit dataChanged(idx, idx, { Qt::DisplayRole, AddedLinesRole, DeletedLinesRole, IsBinaryRole });
         }
     }
+}
+
+void GitStatusModel::mergeSubmoduleStats(const QString &relPath, qint32 added, qint32 deleted)
+{
+    if (relPath.isEmpty()) return;
+    // Apply to every section: a submodule with both pointer + content change
+    // can appear in both Staged and Tracked, and we want both rows to show the
+    // same inner stats.
+    for (int s = 0; s < GitStatusEntry::SectionCount; ++s) {
+        auto &bucket = m_buckets[s];
+        for (int r = 0; r < bucket.size(); ++r) {
+            if (bucket.at(r).relPath != relPath) continue;
+            GitStatusEntry &e = bucket[r];
+            if (e.subAddedLines == added && e.subDeletedLines == deleted) continue;
+            e.subAddedLines = added;
+            e.subDeletedLines = deleted;
+
+            int visParent = -1;
+            for (int v = 0; v < m_visibleSections.size(); ++v) {
+                if (m_visibleSections.at(v) == s) { visParent = v; break; }
+            }
+            if (visParent < 0) continue;
+            const QModelIndex parentIdx = createIndex(visParent, 0, quintptr(-1));
+            const QModelIndex idx = index(r, 0, parentIdx);
+            emit dataChanged(idx, idx, { Qt::DisplayRole, SubAddedLinesRole, SubDeletedLinesRole });
+        }
+    }
+}
+
+QStringList GitStatusModel::modifiedSubmodulePaths() const
+{
+    QStringList out;
+    for (int s = 0; s < GitStatusEntry::SectionCount; ++s) {
+        for (const GitStatusEntry &e : m_buckets[s]) {
+            if (!e.isSubmodule || !e.subHasModifiedContent) continue;
+            if (!out.contains(e.relPath)) out.append(e.relPath);
+        }
+    }
+    return out;
 }
 
 void GitStatusModel::setDarkPalette(bool isDark)

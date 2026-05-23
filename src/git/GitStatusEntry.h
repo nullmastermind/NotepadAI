@@ -44,6 +44,15 @@ struct GitStatusEntry
     bool isModeOnly = false;            // mode-only change (no content delta)
     bool hasUnstableEncoding = false;   // raw path bytes aren't valid UTF-8
 
+    // Submodule status — derived from porcelain v2 `sub` field (e.g. "S.M.").
+    // isSubmodule=true when sub[0]=='S'. subHasModifiedContent=true when
+    // sub[2]=='M'. Pointer-only submodule changes (S C..) keep subAdded/Deleted
+    // at -1 and skip the inner-diff spawn entirely.
+    bool isSubmodule = false;
+    bool subHasModifiedContent = false;
+    qint32 subAddedLines = -1;
+    qint32 subDeletedLines = -1;
+
     // For unmerged ('u') records: blob shas of ours / theirs sides.
     QString oursSha;
     QString theirsSha;

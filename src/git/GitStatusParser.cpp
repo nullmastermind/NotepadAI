@@ -63,6 +63,16 @@ GitStatusEntry makeEntry(GitStatusEntry::Section sec,
     return e;
 }
 
+// Decode the porcelain v2 `sub` field. Format: "<S|N><C|.><M|.><U|.>", where
+// S=submodule, C=commit changed, M=tracked content modified, U=has untracked.
+// For non-submodules ("N..."), all flags stay false.
+void applySubFlags(GitStatusEntry &e, const QByteArray &subField)
+{
+    if (subField.size() < 1 || subField.at(0) != 'S') return;
+    e.isSubmodule = true;
+    if (subField.size() >= 3 && subField.at(2) == 'M') e.subHasModifiedContent = true;
+}
+
 } // namespace
 
 bool GitStatusParser::isUnmerged(char x, char y)
@@ -115,6 +125,7 @@ GitStatusEntries GitStatusParser::parsePorcelainV2(const QByteArray &input,
             QList<QByteArray> fields = splitFields(rec, 8);
             if (fields.size() < 9) continue;
             const QByteArray &xyB = fields.at(1);
+            const QByteArray &subB = fields.at(2);
             const QByteArray &rawPath = fields.at(8);
             if (xyB.size() < 2) continue;
             const char x = xyB.at(0);
@@ -122,14 +133,18 @@ GitStatusEntries GitStatusParser::parsePorcelainV2(const QByteArray &input,
             const QString xy = QString::fromLatin1(xyB);
 
             if (x != '.' && x != ' ') {
-                result.append(makeEntry(GitStatusEntry::Staged,
-                                        xyToChange(x, y, true),
-                                        rawPath, {}, true, xy));
+                GitStatusEntry e = makeEntry(GitStatusEntry::Staged,
+                                             xyToChange(x, y, true),
+                                             rawPath, {}, true, xy);
+                applySubFlags(e, subB);
+                result.append(e);
             }
             if (y != '.' && y != ' ') {
-                result.append(makeEntry(GitStatusEntry::Tracked,
-                                        xyToChange(x, y, false),
-                                        rawPath, {}, false, xy));
+                GitStatusEntry e = makeEntry(GitStatusEntry::Tracked,
+                                             xyToChange(x, y, false),
+                                             rawPath, {}, false, xy);
+                applySubFlags(e, subB);
+                result.append(e);
             }
         }
         else if (marker == '2') {
@@ -138,6 +153,7 @@ GitStatusEntries GitStatusParser::parsePorcelainV2(const QByteArray &input,
             QList<QByteArray> fields = splitFields(rec, 9);
             if (fields.size() < 10) continue;
             const QByteArray &xyB = fields.at(1);
+            const QByteArray &subB = fields.at(2);
             const QByteArray &rawPath = fields.at(9);
             // Read the orig path (next nul-terminated segment).
             int origEnd = input.indexOf('\0', i);
@@ -150,14 +166,18 @@ GitStatusEntries GitStatusParser::parsePorcelainV2(const QByteArray &input,
             const QString xy = QString::fromLatin1(xyB);
 
             if (x != '.' && x != ' ') {
-                result.append(makeEntry(GitStatusEntry::Staged,
-                                        xyToChange(x, y, true),
-                                        rawPath, rawOrig, true, xy));
+                GitStatusEntry e = makeEntry(GitStatusEntry::Staged,
+                                             xyToChange(x, y, true),
+                                             rawPath, rawOrig, true, xy);
+                applySubFlags(e, subB);
+                result.append(e);
             }
             if (y != '.' && y != ' ') {
-                result.append(makeEntry(GitStatusEntry::Tracked,
-                                        xyToChange(x, y, false),
-                                        rawPath, rawOrig, false, xy));
+                GitStatusEntry e = makeEntry(GitStatusEntry::Tracked,
+                                             xyToChange(x, y, false),
+                                             rawPath, rawOrig, false, xy);
+                applySubFlags(e, subB);
+                result.append(e);
             }
         }
         else if (marker == 'u') {

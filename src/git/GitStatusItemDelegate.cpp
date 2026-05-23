@@ -88,6 +88,21 @@ void GitStatusItemDelegate::paint(QPainter *painter,
         closeParen = QStringLiteral(")");
     }
 
+    // Second parens — submodule inner-diff aggregate. Only when this is a
+    // submodule entry AND the controller has populated stats AND the totals
+    // are non-zero (skip "(+0 -0)" since it carries no information).
+    const bool isSubmodule = index.data(GitStatusModel::IsSubmoduleRole).toBool();
+    const int subAdded   = index.data(GitStatusModel::SubAddedLinesRole).toInt();
+    const int subDeleted = index.data(GitStatusModel::SubDeletedLinesRole).toInt();
+    QString subOpen, subPlus, subMinus, subClose;
+    if (isSubmodule && subAdded >= 0 && subDeleted >= 0
+        && (subAdded != 0 || subDeleted != 0)) {
+        subOpen  = QStringLiteral(" (");
+        subPlus  = QStringLiteral("+%1").arg(subAdded);
+        subMinus = QStringLiteral(" -%1").arg(subDeleted);
+        subClose = QStringLiteral(")");
+    }
+
     const QFontMetrics fm(opt.font);
     painter->save();
     painter->setFont(opt.font);
@@ -98,7 +113,9 @@ void GitStatusItemDelegate::paint(QPainter *painter,
     const int right = textRect.right();
 
     // Primary segment (change-colored) — elide if needed to leave room for numstat.
-    const int suffixWidth = fm.horizontalAdvance(numstatBinary + openParen + plusPart + minusPart + closeParen);
+    const int suffixWidth = fm.horizontalAdvance(
+        numstatBinary + openParen + plusPart + minusPart + closeParen
+        + subOpen + subPlus + subMinus + subClose);
     const int primaryAvail = qMax(0, right - x - suffixWidth);
     const QString elidedPrimary = fm.elidedText(primary, Qt::ElideMiddle, primaryAvail);
     painter->setPen(primaryColor);
@@ -122,6 +139,23 @@ void GitStatusItemDelegate::paint(QPainter *painter,
         x += fm.horizontalAdvance(minusPart);
         painter->setPen(parenColor);
         painter->drawText(x, baseline, closeParen);
+        x += fm.horizontalAdvance(closeParen);
+    }
+
+    if (!subPlus.isEmpty()) {
+        const auto &pal = GitDiffPalette::current(m_isDark);
+        const QColor parenColor = opt.palette.color(QPalette::PlaceholderText);
+        painter->setPen(parenColor);
+        painter->drawText(x, baseline, subOpen);
+        x += fm.horizontalAdvance(subOpen);
+        painter->setPen(pal.fgPlus);
+        painter->drawText(x, baseline, subPlus);
+        x += fm.horizontalAdvance(subPlus);
+        painter->setPen(pal.fgMinus);
+        painter->drawText(x, baseline, subMinus);
+        x += fm.horizontalAdvance(subMinus);
+        painter->setPen(parenColor);
+        painter->drawText(x, baseline, subClose);
     }
 
     // Focus rect if applicable
@@ -142,10 +176,15 @@ void GitStatusItemDelegate::paint(QPainter *painter,
 QSize GitStatusItemDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
     QSize s = QStyledItemDelegate::sizeHint(option, index);
-    // Reserve a little extra so numstat suffix never clips.
+    // Reserve a little extra so numstat suffix never clips. Submodules can
+    // carry two parens groups (pointer + inner diff), so reserve for both.
     if (!index.data(GitStatusModel::IsSectionRole).toBool()) {
         const QFontMetrics fm(option.font);
-        s.setWidth(s.width() + fm.horizontalAdvance(QStringLiteral(" (+99999 -99999)")));
+        const bool isSubmodule = index.data(GitStatusModel::IsSubmoduleRole).toBool();
+        const QString reserve = isSubmodule
+            ? QStringLiteral(" (+99999 -99999) (+99999 -99999)")
+            : QStringLiteral(" (+99999 -99999)");
+        s.setWidth(s.width() + fm.horizontalAdvance(reserve));
     }
     return s;
 }

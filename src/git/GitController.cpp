@@ -33,6 +33,9 @@
 #include <QFileInfo>
 #include <QTimer>
 
+#include <algorithm>
+#include <limits>
+
 namespace {
 constexpr int kTimeoutShort = 5000;
 constexpr int kTimeoutNormal = 30000;
@@ -604,7 +607,53 @@ void GitController::handleNumstatDone(const QByteArray &out, bool stagedSide)
     m_status->mergeNumstat(stats, stagedSide);
     // Emit only after the staged side completes (the second of the pair).
     // On empty repos we only run the unstaged op, so emit there too.
-    if (stagedSide || m_empty) emit numstatUpdated();
+    if (stagedSide || m_empty) {
+        emit numstatUpdated();
+        // Once per-file numstat is merged into the model, fan out submodule
+        // inner-diff probes (only for entries that actually have modified
+        // content — porcelain v2 already told us which ones).
+        enqueueSubmoduleStatsRefresh();
+    }
+}
+
+void GitController::enqueueSubmoduleStatsRefresh()
+{
+    if (m_currentRepo.isEmpty()) return;
+    const QStringList subs = m_status->modifiedSubmodulePaths();
+    if (subs.isEmpty()) return;
+
+    const QDir rootDir(m_currentRepo);
+    for (const QString &relPath : subs) {
+        const QString abs = QDir::cleanPath(rootDir.filePath(relPath));
+        Op op;
+        op.kind = OpKind::SubmoduleNumstat;
+        op.argv = { QStringLiteral("-c"), QStringLiteral("core.quotepath=false"),
+                    QStringLiteral("-C"), abs,
+                    QStringLiteral("diff"), QStringLiteral("--numstat"),
+                    QStringLiteral("-z"), QStringLiteral("--no-renames"),
+                    QStringLiteral("HEAD") };
+        op.timeoutMs = kTimeoutStatus;
+        op.meta.insert(QStringLiteral("subRelPath"), relPath);
+        enqueue(op);
+    }
+}
+
+void GitController::handleSubmoduleNumstatDone(const QByteArray &out, const QString &relPath)
+{
+    if (relPath.isEmpty()) return;
+    const auto stats = GitNumstatParser::parse(out);
+    qint64 added = 0;
+    qint64 deleted = 0;
+    for (auto it = stats.constBegin(); it != stats.constEnd(); ++it) {
+        if (it->isBinary) continue;
+        if (it->added   > 0) added   += it->added;
+        if (it->deleted > 0) deleted += it->deleted;
+    }
+    // Clamp to qint32 — single submodule with >2B added lines is pathological.
+    constexpr qint64 kMax = std::numeric_limits<qint32>::max();
+    m_status->mergeSubmoduleStats(relPath,
+                                  qint32(std::min(added,   kMax)),
+                                  qint32(std::min(deleted, kMax)));
 }
 
 void GitController::requestDiff(const QString &relPath, bool stagedSide)
@@ -705,7 +754,8 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
         }
         // Numstat ops are best-effort — a failure (e.g. unborn HEAD edge cases,
         // missing object) shouldn't tip the controller into Error or block UI.
-        if (kind == OpKind::NumstatStaged || kind == OpKind::NumstatUnstaged) {
+        if (kind == OpKind::NumstatStaged || kind == OpKind::NumstatUnstaged
+            || kind == OpKind::SubmoduleNumstat) {
             popAndAdvance();
             return;
         }
@@ -738,6 +788,10 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
         case OpKind::Status:          handleStatusDone(out); break;
         case OpKind::NumstatStaged:   handleNumstatDone(out, true); break;
         case OpKind::NumstatUnstaged: handleNumstatDone(out, false); break;
+        case OpKind::SubmoduleNumstat:
+            handleSubmoduleNumstatDone(out,
+                m_current.meta.value(QStringLiteral("subRelPath")).toString());
+            break;
         case OpKind::DiffPath:
             emit diffReady(m_current.meta.value(QStringLiteral("relPath")).toString(),
                            m_current.meta.value(QStringLiteral("stagedSide")).toBool(),

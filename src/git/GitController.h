@@ -131,6 +131,7 @@ private:
         Discover, Toplevel, SubmodulesList,
         HeadSym, HeadSha, Refs, Remotes, Status,
         NumstatStaged, NumstatUnstaged,
+        SubmoduleNumstat,
         DiffPath,
         DiffAllCached, DiffAllWorktree,
         Stage, Unstage, StageAll, UnstageAll,
@@ -202,6 +203,12 @@ private:
     void handleStatusDone(const QByteArray &out);
     void handleNumstatDone(const QByteArray &out, bool stagedSide);
     void enqueueNumstatRefresh();
+    // Submodule aggregate stats — one `git -C <subAbs> diff --numstat -z
+    // --no-renames HEAD` spawn per unique submodule entry that has modified
+    // content (sub field 'S.M.'). Pointer-only and untracked-only submodules
+    // are skipped so we never spawn a process whose result would be empty.
+    void enqueueSubmoduleStatsRefresh();
+    void handleSubmoduleNumstatDone(const QByteArray &out, const QString &relPath);
 
     QByteArray m_lastForEachRefOut;
     QByteArray m_lastHeadSymOut;

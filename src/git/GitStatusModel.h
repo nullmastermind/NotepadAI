@@ -50,7 +50,10 @@ public:
         IsBinaryRole,
         HasUnstableEncodingRole,
         OursShaRole,
-        TheirsShaRole
+        TheirsShaRole,
+        IsSubmoduleRole,
+        SubAddedLinesRole,
+        SubDeletedLinesRole
     };
 
     explicit GitStatusModel(QObject *parent = nullptr);
@@ -66,6 +69,15 @@ public:
     // Merge numstat hash (keyed by relPath) into the matching side. Emits
     // dataChanged for affected rows; safe to call repeatedly.
     void mergeNumstat(const QHash<QString, GitNumstatParser::Stat> &stats, bool stagedSide);
+
+    // Merge aggregated inner-submodule stats. Applies to ALL entries with the
+    // matching relPath (a submodule can show in both Staged and Tracked).
+    void mergeSubmoduleStats(const QString &relPath, qint32 added, qint32 deleted);
+
+    // Enumerate unique relPaths of submodule entries with modified content
+    // (sub field 'S.M.' / 'SCM.' / etc). Pointer-only changes are excluded —
+    // their inner diff is empty anyway, so spawning a process would waste cost.
+    QStringList modifiedSubmodulePaths() const;
 
     void setDarkPalette(bool isDark);
 
