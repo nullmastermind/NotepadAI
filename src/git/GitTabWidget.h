@@ -24,6 +24,7 @@
 
 #include <QPointer>
 #include <QString>
+#include <QTimer>
 #include <QWidget>
 
 class QComboBox;
@@ -132,6 +133,11 @@ private:
     // handler can pair the diff with the user-typed first line at trigger time.
     QString m_pendingAiSubjectHint;
     bool m_aiAwaitingDiff = false;
+
+    // Animated busy indicator for the status label during AI generation.
+    QTimer m_aiBusyTimer;
+    QString m_aiBusyBase;
+    int m_aiDotPhase = 0;
 };
 
 #endif // GIT_TAB_WIDGET_H

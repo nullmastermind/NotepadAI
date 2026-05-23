@@ -37,20 +37,59 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPalette>
+#include <QPixmap>
 #include <QPushButton>
 #include <QToolButton>
 #include <QTreeView>
 #include <QVBoxLayout>
+
+namespace {
+
+// Hand-painted stop glyph so the cancel affordance renders identically across
+// platforms regardless of which symbol fonts are installed. Earlier attempts
+// at U+25FC ◼ and U+25A0 ■ tofu'd on stock Windows when the active QFont fell
+// back to a non-symbol family.
+QIcon makeStopIcon(const QColor &color)
+{
+    const int size = 16;
+    const qreal dpr = 1.0;
+    QPixmap pm(static_cast<int>(size * dpr), static_cast<int>(size * dpr));
+    pm.setDevicePixelRatio(dpr);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(Qt::NoPen);
+    p.setBrush(color);
+    const qreal inset = 4.0;
+    p.drawRoundedRect(QRectF(inset, inset, size - 2 * inset, size - 2 * inset),
+                      1.5, 1.5);
+    return QIcon(pm);
+}
+
+} // namespace
 
 GitTabWidget::GitTabWidget(const QString &workspaceRoot, QWidget *parent)
     : QWidget(parent), m_workspaceRoot(workspaceRoot)
 {
     buildUi();
     updateActionsEnabled();
+
+    // Busy-indicator animation: cycle dot count 0→3 every 400ms so the status
+    // label visibly progresses during AI generation. Timer is a member (not a
+    // QTimer::singleShot per tick) so it's allocation-free once instantiated.
+    m_aiBusyTimer.setInterval(400);
+    connect(&m_aiBusyTimer, &QTimer::timeout, this, [this]() {
+        m_aiDotPhase = (m_aiDotPhase + 1) % 4;
+        const QString dots = QString(m_aiDotPhase, QLatin1Char('.'));
+        m_statusLabel->setText(m_aiBusyBase + dots);
+    });
 
     // AI generator wiring (singleton owned by NotepadNextApplication).
     if (auto *app = qobject_cast<NotepadNextApplication *>(QCoreApplication::instance())) {
@@ -799,15 +838,36 @@ void GitTabWidget::onGeneratorStateChanged(int state)
                        || s == State::Cancelling);
 
     if (isTarget && busy) {
-        btn->setText(QString::fromUtf8("\xE2\x97\xBC"));   // U+25FC ◼ stop
+        btn->setText(QString());
+        btn->setIcon(makeStopIcon(btn->palette().color(QPalette::ButtonText)));
         btn->setToolTip(tr("Cancel generation (Esc)"));
         m_composer->setGenerationActive(true);
         m_composer->setSubmitEnabled(false);
+
+        // Drive the animated status indicator. Phase resets so the user sees
+        // motion immediately on each state transition.
+        m_aiDotPhase = 0;
+        switch (s) {
+        case State::Authenticating: m_aiBusyBase = tr("AI: Connecting");  break;
+        case State::Streaming:      m_aiBusyBase = tr("AI: Generating");  break;
+        case State::Cancelling:     m_aiBusyBase = tr("AI: Cancelling");  break;
+        default: break;
+        }
+        m_statusLabel->setText(m_aiBusyBase);
+        if (!m_aiBusyTimer.isActive()) m_aiBusyTimer.start();
     } else {
+        btn->setIcon(QIcon());
         btn->setText(QString::fromUtf8("\xE2\x9C\xA8"));   // U+2728 ✨ sparkles
         btn->setToolTip(tr("Generate commit message with AI"));
         m_composer->setGenerationActive(false);
         updateActionsEnabled();   // re-derives commit button enabled state
+        if (m_aiBusyTimer.isActive()) m_aiBusyTimer.stop();
+        if (isTarget || s == State::Idle) {
+            // Clear the AI line so the status label doesn't keep a stale dot
+            // trail after completion / cancel.
+            m_aiBusyBase.clear();
+            m_statusLabel->clear();
+        }
     }
 }
 
