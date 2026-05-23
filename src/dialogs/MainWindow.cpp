@@ -1588,7 +1588,19 @@ void MainWindow::openFolderAsWorkspacePath(const QString &dir, bool showGitTab)
         if (!vacant && d->rootPath().isEmpty()) vacant = d;
     }
 
+    // Pull memoed UI state (tab/expanded/current) for this path, if any. The
+    // lookup is O(1) on a hash that was populated once by restoreOpenWorkspaces
+    // via loadAllWorkspaceStates. For paths opened mid-session (file menu /
+    // CLI / drag-drop) the hash is also valid because saveSettings keeps it in
+    // sync via persistWorkspaceStatesMerged on every clean exit.
+    const WorkspaceStateSnapshot savedState =
+        m_workspaceStateMemo.value(cleaned, WorkspaceStateSnapshot{});
+
     if (vacant && !anchor) {
+        // applySavedTreeState must precede setRootPath so the dock's
+        // directoryLoaded handler sees pendingExpansion populated when the
+        // first model load completes.
+        vacant->applySavedTreeState(savedState);
         vacant->setRootPath(dir);
         vacant->setVisible(true);
         vacant->raise();
@@ -1598,7 +1610,9 @@ void MainWindow::openFolderAsWorkspacePath(const QString &dir, bool showGitTab)
         return;
     }
 
-    auto *dock = new FolderAsWorkspaceDock(dir, this);
+    // Default ctor + explicit setRootPath sequence (rather than the 2-arg ctor
+    // that bakes setRootPath in) so applySavedTreeState lands between them.
+    auto *dock = new FolderAsWorkspaceDock(this);
     static int extraIdx = 0;
     // Counter-based name is stable across sessions for the steady-state spawn order
     // (initial dock takes Workspaces[0], extras take Workspaces[1..N] in order). Known
@@ -1621,6 +1635,8 @@ void MainWindow::openFolderAsWorkspacePath(const QString &dir, bool showGitTab)
         tabifyDockWidget(anchor, dock);
     }
 
+    dock->applySavedTreeState(savedState);
+    dock->setRootPath(dir);
     dock->setVisible(true);
     dock->raise();
     m_activeWorkspace = dock;
@@ -1638,6 +1654,27 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             CrashContext::setActiveWorkspaceRoot(currentWorkspaceRoot());
         }
     });
+
+    // Mid-session close: snapshot state into the on-disk memo so reopening
+    // this path later (from File menu, recent workspaces, or CLI) restores
+    // the user's tree expansion / active tab / current item. Without this,
+    // any state accumulated since the last clean exit or 60s autosave would
+    // be lost when the user closes a workspace dock.
+    connect(dock, &FolderAsWorkspaceDock::aboutToBeClosed, this,
+            [this](const QString &path, FolderAsWorkspaceDock *self) {
+        if (path.isEmpty() || !self) return;
+        const WorkspaceStateSnapshot snap = self->captureState();
+        m_workspaceStateMemo.insert(QDir::cleanPath(path), snap);
+        persistOneWorkspaceState(snap);
+        // The dirty bit no longer needs flushing for THIS dock — its state
+        // just went to disk. Leave the bit for other docks that may still
+        // have unflushed changes.
+    });
+
+    // User-driven tree / tab changes mark the workspace state dirty so the
+    // 60s autosave timer flushes them (defense vs crash mid-session).
+    connect(dock, &FolderAsWorkspaceDock::stateDirty, this,
+            [this]() { m_workspaceStateDirty = true; });
 }
 
 void MainWindow::wireWorkspaceGitSignals(FolderAsWorkspaceDock *dock)
@@ -1666,6 +1703,12 @@ void MainWindow::restoreOpenWorkspaces()
     // exist at restore time. Extra workspace docks are spawned on-demand, so we
     // recreate them here from the persisted path list before restoreWindowState
     // runs — that way their tab positions get restored too.
+
+    // Populate the workspace-state memo once, here, so openFolderAsWorkspacePath
+    // can do O(1) lookups during the restore loop (and afterwards for any
+    // mid-session opens via File menu / drag-drop / CLI).
+    loadAllWorkspaceStates();
+
     ApplicationSettings *settings = app->getSettings();
     const QStringList savedWorkspaces = settings->value("FolderAsWorkspace/Workspaces").toStringList();
 
@@ -2491,15 +2534,24 @@ void MainWindow::saveSettings() const
     settings->setValue("Editor/ZoomLevel", zoomLevel);
 
     QStringList openWorkspaces;
+    QVector<WorkspaceStateSnapshot> liveStates;
     for (const FolderAsWorkspaceDock *d : findChildren<FolderAsWorkspaceDock *>()) {
         const QString path = d->rootPath();
-        if (!path.isEmpty() && !openWorkspaces.contains(path)) {
-            openWorkspaces << path;
-        }
+        if (path.isEmpty() || openWorkspaces.contains(path)) continue;
+        openWorkspaces << path;
+        liveStates    << d->captureState();
     }
     settings->setValue("FolderAsWorkspace/Workspaces", openWorkspaces);
     settings->setValue("FolderAsWorkspace/ActiveWorkspace",
                        m_activeWorkspace ? m_activeWorkspace->rootPath() : QString());
+
+    // Snapshot all currently-open workspaces into the on-disk memo. Without
+    // this, any state accumulated since the last 60s autosave would be lost
+    // on a clean exit — strictly worse than the current behavior. Merge keeps
+    // memo entries for paths that aren't currently open (so reopening them
+    // later still restores their state), up to MAX_MEMOED via LRU eviction
+    // inside persistWorkspaceStatesMerged.
+    persistWorkspaceStatesMerged(liveStates);
 }
 
 void MainWindow::restoreSettings()
@@ -2884,4 +2936,133 @@ void MainWindow::languageMenuTriggered()
     QVariant v = act->data();
 
     setLanguage(editor, v.toString());
+}
+
+namespace {
+// Hard cap on memoed workspace states. 50 covers extreme power users (typical
+// is < 10). LRU eviction by lastUsedEpochMs keeps recently-visited workspaces.
+constexpr int MAX_MEMOED_WORKSPACE_STATES = 50;
+// On-disk schema version for each WorkspaceStates entry. Bump only on
+// breaking layout changes; load code skips unknown versions silently.
+constexpr int WORKSPACE_STATE_SCHEMA = 1;
+
+void writeWorkspaceStatesArray(ApplicationSettings *settings,
+                               const QHash<QString, WorkspaceStateSnapshot> &states)
+{
+    // Linearise + LRU-cap. Sort descending by lastUsedEpochMs; keep top N.
+    QVector<WorkspaceStateSnapshot> entries;
+    entries.reserve(states.size());
+    for (auto it = states.cbegin(); it != states.cend(); ++it) {
+        entries.append(it.value());
+    }
+    std::sort(entries.begin(), entries.end(),
+              [](const WorkspaceStateSnapshot &a, const WorkspaceStateSnapshot &b) {
+                  return a.lastUsedEpochMs > b.lastUsedEpochMs;
+              });
+    if (entries.size() > MAX_MEMOED_WORKSPACE_STATES) {
+        entries.resize(MAX_MEMOED_WORKSPACE_STATES);
+    }
+
+    settings->beginGroup("FolderAsWorkspace");
+    // Always clear the previous array before rewriting — partial overwrite
+    // would leave dangling indices when the new size is smaller than the old.
+    settings->remove("WorkspaceStates");
+    settings->beginWriteArray("WorkspaceStates", entries.size());
+    for (int i = 0; i < entries.size(); ++i) {
+        settings->setArrayIndex(i);
+        const WorkspaceStateSnapshot &s = entries[i];
+        settings->setValue("SchemaVersion", WORKSPACE_STATE_SCHEMA);
+        settings->setValue("RootPath",     s.rootPath);
+        settings->setValue("ActiveTab",    s.activeTabIndex);
+        settings->setValue("CurrentItem",  s.currentItemPath);
+        settings->setValue("LastUsed",     s.lastUsedEpochMs);
+
+        // Nested per-path keys (P0000, P0001, ...) deliberately avoid the
+        // QStringList CSV-escape path in QSettings INI: paths containing
+        // commas, quotes, or unusual whitespace round-trip safely as scalars.
+        settings->beginGroup("ExpandedFolders");
+        settings->remove("");  // wipe stale entries from a prior, larger list
+        settings->setValue("Count", s.expandedFolders.size());
+        for (int j = 0; j < s.expandedFolders.size(); ++j) {
+            settings->setValue(QStringLiteral("P%1").arg(j, 4, 10, QChar('0')),
+                               s.expandedFolders[j]);
+        }
+        settings->endGroup();
+    }
+    settings->endArray();
+    settings->endGroup();
+}
+} // namespace
+
+void MainWindow::loadAllWorkspaceStates() const
+{
+    m_workspaceStateMemo.clear();
+
+    ApplicationSettings *settings = app->getSettings();
+    settings->beginGroup("FolderAsWorkspace");
+    const int n = settings->beginReadArray("WorkspaceStates");
+    for (int i = 0; i < n; ++i) {
+        settings->setArrayIndex(i);
+
+        const int ver = settings->value("SchemaVersion", 0).toInt();
+        if (ver != WORKSPACE_STATE_SCHEMA) continue;  // forward-compat: skip unknown
+
+        WorkspaceStateSnapshot s;
+        s.rootPath = settings->value("RootPath").toString();
+        if (s.rootPath.isEmpty()) continue;  // corrupted/partial: skip
+
+        s.activeTabIndex  = settings->value("ActiveTab", 0).toInt();
+        s.currentItemPath = settings->value("CurrentItem").toString();
+        s.lastUsedEpochMs = settings->value("LastUsed", 0).toLongLong();
+
+        settings->beginGroup("ExpandedFolders");
+        const int count = settings->value("Count", 0).toInt();
+        s.expandedFolders.reserve(count);
+        for (int j = 0; j < count; ++j) {
+            const QString p = settings->value(
+                QStringLiteral("P%1").arg(j, 4, 10, QChar('0'))).toString();
+            if (!p.isEmpty()) s.expandedFolders << p;
+        }
+        settings->endGroup();
+
+        m_workspaceStateMemo.insert(QDir::cleanPath(s.rootPath), s);
+    }
+    settings->endArray();
+    settings->endGroup();
+}
+
+void MainWindow::persistWorkspaceStatesMerged(const QVector<WorkspaceStateSnapshot> &live) const
+{
+    // Merge: live snapshots take precedence over the existing memo for
+    // matching rootPath. Other memo entries (closed workspaces) survive.
+    for (const WorkspaceStateSnapshot &s : live) {
+        if (s.rootPath.isEmpty()) continue;
+        m_workspaceStateMemo.insert(QDir::cleanPath(s.rootPath), s);
+    }
+    writeWorkspaceStatesArray(app->getSettings(), m_workspaceStateMemo);
+}
+
+void MainWindow::persistOneWorkspaceState(const WorkspaceStateSnapshot &snapshot) const
+{
+    if (snapshot.rootPath.isEmpty()) return;
+    m_workspaceStateMemo.insert(QDir::cleanPath(snapshot.rootPath), snapshot);
+    writeWorkspaceStatesArray(app->getSettings(), m_workspaceStateMemo);
+}
+
+void MainWindow::saveWorkspaceStatesOnly()
+{
+    // 60s autosave path: snapshot live docks and flush. Deliberately does NOT
+    // touch MainWindow/geometry, MainWindow/windowState, Editor/ZoomLevel —
+    // those are expensive serialisations that don't change often and are
+    // covered by aboutToClose. We only rewrite the WorkspaceStates array.
+    QVector<WorkspaceStateSnapshot> live;
+    live.reserve(8);
+    QStringList seen;
+    for (const FolderAsWorkspaceDock *d : findChildren<FolderAsWorkspaceDock *>()) {
+        const QString path = d->rootPath();
+        if (path.isEmpty() || seen.contains(path)) continue;
+        seen << path;
+        live << d->captureState();
+    }
+    persistWorkspaceStatesMerged(live);
 }

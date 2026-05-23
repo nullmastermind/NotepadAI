@@ -26,12 +26,16 @@
 #include "ui_FolderAsWorkspaceDock.h"
 
 #include <QApplication>
+#include <QCloseEvent>
 #include <QCursor>
+#include <QDateTime>
 #include <QDir>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFileSystemModel>
 #include <QHelpEvent>
+#include <QItemSelectionModel>
+#include <QMetaObject>
 #include <QStyle>
 #include <QTabWidget>
 #include <QTimer>
@@ -103,6 +107,18 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(QWidget *parent) :
     ui->treeView->viewport()->installEventFilter(this);
 
     connect(ui->tabs, &QTabWidget::currentChanged, this, &FolderAsWorkspaceDock::onTabChanged);
+    connect(ui->tabs, &QTabWidget::currentChanged, this, [this](int) {
+        if (!m_programmaticToggle) emit stateDirty();
+    });
+
+    // Tree state restoration plumbing. directoryLoaded must be connected BEFORE
+    // setRootPath fires so the very first model-load (root level) is captured.
+    connect(model, &QFileSystemModel::directoryLoaded,
+            this, &FolderAsWorkspaceDock::onDirectoryLoaded);
+    connect(ui->treeView, &QTreeView::expanded,
+            this, &FolderAsWorkspaceDock::onTreeExpanded);
+    connect(ui->treeView, &QTreeView::collapsed,
+            this, &FolderAsWorkspaceDock::onTreeCollapsed);
 
     // The initial dock starts empty; MainWindow::restoreOpenWorkspaces assigns
     // Workspaces[0] into it via the vacant-reuse path in openFolderAsWorkspacePath.
@@ -147,6 +163,16 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(const QString &initialPath, QWidget
     ui->treeView->viewport()->installEventFilter(this);
 
     connect(ui->tabs, &QTabWidget::currentChanged, this, &FolderAsWorkspaceDock::onTabChanged);
+    connect(ui->tabs, &QTabWidget::currentChanged, this, [this](int) {
+        if (!m_programmaticToggle) emit stateDirty();
+    });
+
+    connect(model, &QFileSystemModel::directoryLoaded,
+            this, &FolderAsWorkspaceDock::onDirectoryLoaded);
+    connect(ui->treeView, &QTreeView::expanded,
+            this, &FolderAsWorkspaceDock::onTreeExpanded);
+    connect(ui->treeView, &QTreeView::collapsed,
+            this, &FolderAsWorkspaceDock::onTreeCollapsed);
 
     // Explicit-path ctor: skip the saved-setting load so additional workspaces
     // don't briefly flash the previous global root before showing their own.
@@ -318,4 +344,188 @@ void FolderAsWorkspaceDock::showGitTab()
         // (no currentChanged would fire on a no-op switch).
         ensureGitTab();
     }
+}
+
+void FolderAsWorkspaceDock::applySavedTreeState(const WorkspaceStateSnapshot &snapshot)
+{
+    // Pre-populate the parentDir → child map. directoryLoaded handler drains
+    // it as the model finishes loading each parent. Setup MUST happen before
+    // setRootPath() so the root's own directoryLoaded fires after we're ready.
+    m_pendingExpansion.clear();
+    m_userVetoed.clear();
+    for (const QString &p : snapshot.expandedFolders) {
+        if (p.isEmpty()) continue;
+        const QString cleaned = QDir::cleanPath(p);
+        const QString parent = QFileInfo(cleaned).absolutePath();
+        if (parent.isEmpty()) continue;
+        m_pendingExpansion.insert(QDir::cleanPath(parent), cleaned);
+    }
+
+    // Defer Git tab construction to the next event-loop tick so the GitController
+    // subprocess spawn doesn't extend window->show() latency. From the user's
+    // perspective the tab header is already at index=Git when the window paints;
+    // content populates a few ms later.
+    //
+    // Guarded by m_programmaticToggle so the resulting currentChanged emission
+    // doesn't mark workspace state dirty — this is a restore action, not a
+    // user-initiated tab switch.
+    if (snapshot.activeTabIndex == 1) {
+        QMetaObject::invokeMethod(this, [this]() {
+            m_programmaticToggle = true;
+            showGitTab();
+            m_programmaticToggle = false;
+        }, Qt::QueuedConnection);
+    }
+
+    // Stash the current item path on the dock so we can apply it after the
+    // first directoryLoaded for the row's parent. Reuse pendingExpansion's map
+    // semantics: a special sentinel value isn't needed — we just call
+    // scrollTo when directoryLoaded fires for the item's parent.
+    if (!snapshot.currentItemPath.isEmpty()) {
+        const QString cleaned = QDir::cleanPath(snapshot.currentItemPath);
+        // Inject into pendingExpansion's parent map so directoryLoaded picks it up
+        // for the scrollTo side-effect. Stored under a separate property to avoid
+        // confusing it with expansion entries; we use a Q_OBJECT dynamic property.
+        setProperty("pendingCurrentItem", cleaned);
+    } else {
+        setProperty("pendingCurrentItem", QVariant());
+    }
+}
+
+WorkspaceStateSnapshot FolderAsWorkspaceDock::captureState() const
+{
+    WorkspaceStateSnapshot s;
+    s.rootPath = QDir::cleanPath(rootPath());
+    s.activeTabIndex = ui->tabs->currentIndex();
+    s.lastUsedEpochMs = QDateTime::currentMSecsSinceEpoch();
+
+    if (auto *sel = ui->treeView->selectionModel(); sel) {
+        const QModelIndex curr = sel->currentIndex();
+        if (curr.isValid()) {
+            s.currentItemPath = QDir::cleanPath(model->filePath(curr));
+        }
+    }
+
+    // Walk the tree depth-first collecting expanded directory paths. Cost is
+    // O(visible expanded rows); cheap because only loaded rows can be expanded.
+    const QString root = s.rootPath;
+    const QModelIndex rootIdx = model->index(root);
+    if (rootIdx.isValid()) {
+        QList<QModelIndex> stack;
+        stack.reserve(64);
+        // Seed with direct children of root (root itself is the view's rootIndex,
+        // not part of the tree, so it's neither "expanded" nor capturable).
+        for (int r = 0, n = model->rowCount(rootIdx); r < n; ++r) {
+            stack.append(model->index(r, 0, rootIdx));
+        }
+        while (!stack.isEmpty()) {
+            const QModelIndex idx = stack.takeLast();
+            if (!idx.isValid() || !model->isDir(idx)) continue;
+            if (!ui->treeView->isExpanded(idx)) continue;
+            s.expandedFolders << QDir::cleanPath(model->filePath(idx));
+            const int n = model->rowCount(idx);
+            for (int r = 0; r < n; ++r) {
+                stack.append(model->index(r, 0, idx));
+            }
+        }
+    }
+    return s;
+}
+
+bool FolderAsWorkspaceDock::ancestorVetoed(const QString &cleanedChild) const
+{
+    if (m_userVetoed.isEmpty()) return false;
+    // Walk up parents until root. QFileInfo::absolutePath returns the cleaned
+    // parent for an already-cleaned input.
+    QString cur = QFileInfo(cleanedChild).absolutePath();
+    while (!cur.isEmpty() && cur != QFileInfo(cur).absolutePath()) {
+        if (m_userVetoed.contains(cur)) return true;
+        cur = QFileInfo(cur).absolutePath();
+    }
+    return false;
+}
+
+void FolderAsWorkspaceDock::onDirectoryLoaded(const QString &loadedPath)
+{
+    if (m_pendingExpansion.isEmpty() && !property("pendingCurrentItem").isValid()) {
+        return;  // O(1) short-circuit covers steady-state navigation
+    }
+
+    const QString key = QDir::cleanPath(loadedPath);
+
+    // 1) Drain expansion entries whose parent matches this loaded dir.
+    const QList<QString> children = m_pendingExpansion.values(key);
+    if (!children.isEmpty()) {
+        m_pendingExpansion.remove(key);
+        for (const QString &child : children) {
+            // Per-path veto: user explicitly collapsed this exact path during restore.
+            if (m_userVetoed.contains(child)) continue;
+            // Ancestor veto: any user-collapsed ancestor wipes the entire subtree.
+            if (ancestorVetoed(child)) continue;
+
+            const QModelIndex idx = model->index(child);
+            if (!idx.isValid() || !model->isDir(idx)) continue;  // stale path / now-file
+
+            m_programmaticToggle = true;
+            ui->treeView->setExpanded(idx, true);
+            m_programmaticToggle = false;
+            // Expanding triggers another async load → directoryLoaded(child)
+            // fires later → recursive drain.
+        }
+    }
+
+    // 2) If the saved current/selected item lives under this loaded parent,
+    // realise it now. Single-shot — clear after applying.
+    const QVariant pendingItemVar = property("pendingCurrentItem");
+    if (pendingItemVar.isValid()) {
+        const QString pendingItem = pendingItemVar.toString();
+        if (QFileInfo(pendingItem).absolutePath() == key) {
+            const QModelIndex itemIdx = model->index(pendingItem);
+            if (itemIdx.isValid()) {
+                m_programmaticToggle = true;
+                ui->treeView->setCurrentIndex(itemIdx);
+                ui->treeView->scrollTo(itemIdx, QAbstractItemView::PositionAtCenter);
+                m_programmaticToggle = false;
+            }
+            setProperty("pendingCurrentItem", QVariant());
+        }
+    }
+}
+
+void FolderAsWorkspaceDock::onTreeExpanded(const QModelIndex &index)
+{
+    if (m_programmaticToggle) return;
+    // User manually expanded — drop any prior veto on this path so future
+    // restore passes don't fight the user, then notify host to flush state.
+    const QString p = QDir::cleanPath(model->filePath(index));
+    m_userVetoed.remove(p);
+    emit stateDirty();
+}
+
+void FolderAsWorkspaceDock::onTreeCollapsed(const QModelIndex &index)
+{
+    if (m_programmaticToggle) return;
+    const QString p = QDir::cleanPath(model->filePath(index));
+    m_userVetoed.insert(p);
+    // Drop any still-pending expansion entries under this path so they don't
+    // re-expand a moment later when their parent finishes loading.
+    if (!m_pendingExpansion.isEmpty()) {
+        for (auto it = m_pendingExpansion.begin(); it != m_pendingExpansion.end(); ) {
+            if (it.value() == p || it.value().startsWith(p + QLatin1Char('/'))) {
+                it = m_pendingExpansion.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    emit stateDirty();
+}
+
+void FolderAsWorkspaceDock::closeEvent(QCloseEvent *event)
+{
+    // Emit synchronously while rootPath() and the tree are still queryable.
+    // WA_DeleteOnClose schedules destruction after closeEvent returns, so any
+    // host-side persistence must happen here.
+    emit aboutToBeClosed(rootPath(), this);
+    QDockWidget::closeEvent(event);
 }

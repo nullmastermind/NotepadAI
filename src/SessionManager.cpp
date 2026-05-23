@@ -131,11 +131,6 @@ void SessionManager::saveSession(MainWindow *window)
 
     clear();
 
-    // Early out if no flags are set
-    if (fileTypes == SessionManager::None) {
-        return;
-    }
-
     const ScintillaNext *currentEditor = window->currentEditor();
     int currentEditorIndex = 0;
     ApplicationSettings settings;;
@@ -144,11 +139,22 @@ void SessionManager::saveSession(MainWindow *window)
 
     settings.beginWriteArray("OpenedFiles");
 
+    // SavedFile entries (path + cursor + bookmarks) are written unconditionally,
+    // even when the matching flag is off. They are cheap (~200-300 bytes per file,
+    // INI-only, no content copy to disk) and persisting them lets the user enable
+    // "restore previous session" later without losing the tabs that were open at
+    // the time the setting was off. UnsavedFile/TempFile remain gated because
+    // they copy editor content into the session directory on every save (60s
+    // autosave) and can be expensive.
     int index = 0;
     for (const auto &editor : window->editors()) {
         SessionFileType editorType = determineType(editor);
 
-        if (fileTypes.testFlag(editorType)) {
+        const bool shouldStore =
+            editorType == SessionManager::SavedFile          // always
+            || fileTypes.testFlag(editorType);               // gated for Unsaved/Temp
+
+        if (shouldStore) {
             settings.setArrayIndex(index);
 
             if (editorType == SessionManager::SavedFile) {

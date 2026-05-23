@@ -673,6 +673,19 @@ MainWindow *NotepadNextApplication::createNewWindow()
 
         // Timer to autosave the session
         connect(&autoSaveTimer, &QTimer::timeout, this, &NotepadNextApplication::saveSession);
+
+        // Also flush per-workspace UI state (tree expand/collapse, inner tab,
+        // current item) when the dirty bit is set. Decoupled from saveSession
+        // so it can run cheaply — no MainWindow/geometry or windowState
+        // re-serialisation, just the WorkspaceStates array. Crash-resilient:
+        // a hang or kill between two timer fires loses at most ~60s of UI state.
+        connect(&autoSaveTimer, &QTimer::timeout, window, [w = window]() {
+            if (w && w->isWorkspaceStateDirty()) {
+                w->saveWorkspaceStatesOnly();
+                w->clearWorkspaceStateDirty();
+            }
+        });
+
         autoSaveTimer.start(60 * 1000);
     }
 

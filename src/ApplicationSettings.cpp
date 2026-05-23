@@ -52,7 +52,10 @@ CREATE_SETTING(Gui, ExitOnLastTabClosed, exitOnLastTabClosed, bool, false)
 
 CREATE_SETTING(Gui, CombineSearchResults, combineSearchResults, bool, false)
 
-CREATE_SETTING(App, RestorePreviousSession, restorePreviousSession, bool, false)
+// Default true — matches VSCode/Sublime/JetBrains norm. SavedFile entries are
+// also saved unconditionally inside SessionManager so users who toggle this
+// later still have data to load on the next restart.
+CREATE_SETTING(App, RestorePreviousSession, restorePreviousSession, bool, true)
 CREATE_SETTING(App, RestoreUnsavedFiles, restoreUnsavedFiles, bool, false)
 CREATE_SETTING(App, RestoreTempFiles, restoreTempFiles, bool, false)
 

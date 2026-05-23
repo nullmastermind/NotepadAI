@@ -23,6 +23,7 @@
 #include <QMainWindow>
 #include <QLabel>
 #include <QActionGroup>
+#include <QHash>
 #include <QPointer>
 
 #include "DockedEditor.h"
@@ -47,6 +48,7 @@ class TabsQuickActionsBar;
 class TerminalManager;
 class FolderAsWorkspaceDock;
 struct GitStatusEntry;
+struct WorkspaceStateSnapshot;
 
 class MainWindow : public QMainWindow
 {
@@ -133,6 +135,13 @@ public slots:
     void restoreOpenWorkspaces();
     void raiseSavedActiveWorkspace();
 
+    // Workspace-state persistence (per-dock inner tab + expanded folders +
+    // current item). Dirty bit flipped from FolderAsWorkspaceDock::stateDirty;
+    // 60s autosave path checks and runs saveWorkspaceStatesOnly().
+    bool isWorkspaceStateDirty() const { return m_workspaceStateDirty; }
+    void clearWorkspaceStateDirty() { m_workspaceStateDirty = false; }
+    void saveWorkspaceStatesOnly();
+
     void switchToEditor(const ScintillaNext *editor);
 
 signals:
@@ -174,6 +183,16 @@ private:
     FolderAsWorkspaceDock *activeWorkspaceDock() const;
     QString currentWorkspaceRoot() const;
 
+    // Workspace state on-disk memo, loaded once from QSettings at the start of
+    // restoreOpenWorkspaces and consulted per-dock from openFolderAsWorkspacePath.
+    void loadAllWorkspaceStates() const;
+    // Merge live snapshots with the on-disk memo, cap to MAX_MEMOED, write back.
+    // Called both from full saveSettings (aboutToClose) and from
+    // saveWorkspaceStatesOnly (60s autosave when dirty).
+    void persistWorkspaceStatesMerged(const QVector<WorkspaceStateSnapshot> &live) const;
+    // Persist a single snapshot (mid-session dock close path).
+    void persistOneWorkspaceState(const WorkspaceStateSnapshot &snapshot) const;
+
     enum class UserSaveAction { SaveAll, DiscardAll, Cancel };
     UserSaveAction promptForSave(const QVector<ScintillaNext *> &editors);
 
@@ -199,6 +218,12 @@ private:
     TerminalManager *terminalManager = Q_NULLPTR;
 
     QPointer<FolderAsWorkspaceDock> m_activeWorkspace;
+
+    // On-disk memo of per-workspace UI state keyed by cleanPath rootPath.
+    // Loaded once in restoreOpenWorkspaces; consulted in openFolderAsWorkspacePath.
+    // mutable so const helpers can lazy-fill it.
+    mutable QHash<QString, WorkspaceStateSnapshot> m_workspaceStateMemo;
+    bool m_workspaceStateDirty = false;
 };
 
 #endif // MAINWINDOW_H
