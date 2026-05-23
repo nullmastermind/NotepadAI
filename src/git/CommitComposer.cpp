@@ -84,8 +84,8 @@ CommitComposer::CommitComposer(QWidget *parent) : QWidget(parent)
     m_amend->setToolTip(tr("Amend the last commit"));
     m_signoff = new QCheckBox(tr("Sign off"), this);
     m_signoff->setToolTip(tr("Add Signed-off-by trailer"));
-    m_tracked = new QCheckBox(tr("Tracked only"), this);
-    m_tracked->setToolTip(tr("Commit only tracked changes (skip untracked)"));
+    m_tracked = new QCheckBox(tr("Commit Tracked"), this);
+    m_tracked->setToolTip(tr("Commit only modifications to tracked files (skip untracked, equivalent to git commit -a)"));
 
     m_commitBtn = new QPushButton(tr("Commit (Ctrl+Enter)"), this);
     m_commitBtn->setAccessibleName(tr("Commit"));

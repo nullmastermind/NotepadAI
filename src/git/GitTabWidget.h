@@ -77,6 +77,7 @@ private slots:
     void onBranchesUpdated();
     void onReposUpdated();
     void onOpSucceeded(const QString &name);
+    void onCommitSucceeded();
     void onError(const GitError &err);
     void onGitMissing();
     void onDirtyTreePrompt(const QString &target);

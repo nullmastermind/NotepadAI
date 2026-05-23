@@ -734,6 +734,7 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
         case OpKind::Pull:
         case OpKind::Push:
         case OpKind::ForcePush:
+            if (kind == OpKind::Commit) emit commitSucceeded();
             if (!humanName.isEmpty()) emit opSucceeded(humanName);
             scheduleDebouncedRefresh();
             break;

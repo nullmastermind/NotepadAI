@@ -103,6 +103,10 @@ signals:
     void reposUpdated();
     void remoteOpProgress(const QString &line);
     void opSucceeded(const QString &humanName);
+    // Fired in addition to opSucceeded after a successful Commit. Carries
+    // OpKind affinity stably (no humanName string matching, which broke under
+    // translations).
+    void commitSucceeded();
     void errorOccurred(const GitError &err);
     void gitMissing();
     void dirtyTreePromptRequested(const QString &targetBranch);

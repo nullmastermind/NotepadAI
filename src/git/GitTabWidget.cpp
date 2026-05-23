@@ -240,6 +240,10 @@ void GitTabWidget::buildUi()
         persistCommitDraft();
         updateActionsEnabled();
     });
+    connect(m_composer, &CommitComposer::amendToggled,
+            this, [this](bool) { updateActionsEnabled(); });
+    connect(m_composer, &CommitComposer::trackedOnlyToggled,
+            this, [this](bool) { updateActionsEnabled(); });
     connect(m_composer, &CommitComposer::aiTriggerRequested,
             this, &GitTabWidget::onAiTriggerRequested);
     connect(m_composer, &CommitComposer::aiCancelRequested,
@@ -305,6 +309,7 @@ void GitTabWidget::rebuildController()
     connect(m_controller, &GitController::branchesUpdated, this, &GitTabWidget::onBranchesUpdated);
     connect(m_controller, &GitController::reposUpdated, this, &GitTabWidget::onReposUpdated);
     connect(m_controller, &GitController::opSucceeded, this, &GitTabWidget::onOpSucceeded);
+    connect(m_controller, &GitController::commitSucceeded, this, &GitTabWidget::onCommitSucceeded);
     connect(m_controller, &GitController::errorOccurred, this, &GitTabWidget::onError);
     connect(m_controller, &GitController::gitMissing, this, &GitTabWidget::onGitMissing);
     connect(m_controller, &GitController::dirtyTreePromptRequested,
@@ -566,6 +571,19 @@ void GitTabWidget::onCommitRequested()
         showError(tr("Commit message is empty."));
         return;
     }
+
+    // Auto-stage everything when the user clicks Commit with an empty index.
+    // Matches VSCode/GitHub Desktop UX: "commit everything I changed". Skipped
+    // when amending (no new staging needed) or when "Commit Tracked" is on
+    // (git's own -a flag will handle tracked-modified pickup at commit time).
+    const auto *st = m_controller->statusModel();
+    const bool anyStaged = st && st->hasStaged();
+    const bool anyEntries = st && st->totalEntries() > 0;
+    if (!anyStaged && !m_composer->amendChecked()
+        && !m_composer->trackedOnly() && anyEntries) {
+        m_controller->stageAll();
+    }
+
     m_committing = true;
     m_controller->commit(m_composer->message(),
                          m_composer->amendChecked(),
@@ -656,13 +674,18 @@ void GitTabWidget::onStatusUpdated()
 void GitTabWidget::onOpSucceeded(const QString &name)
 {
     appendStatus(tr("%1 succeeded.").arg(name));
-    if (m_committing && name == QLatin1String("commit")) {
-        m_committing = false;
+    clearError();
+}
+
+void GitTabWidget::onCommitSucceeded()
+{
+    m_committing = false;
+    if (m_composer) {
         m_composer->clear();
         m_composer->setAmendChecked(false);
-        ApplicationSettings settings;
-        settings.remove(settingsKey(QStringLiteral("commitDraft")));
     }
+    ApplicationSettings settings;
+    settings.remove(settingsKey(QStringLiteral("commitDraft")));
     clearError();
 }
 
@@ -729,8 +752,18 @@ void GitTabWidget::updateActionsEnabled()
     m_unstageAllBtn->setEnabled(hasRepo && anyStaged);
 
     const QString msg = m_composer ? m_composer->message().trimmed() : QString();
+    const bool amend = m_composer && m_composer->amendChecked();
+    // Commit is viable whenever:
+    //   - there is a non-empty message OR we're amending, AND
+    //   - the index has something staged, OR the worktree has any entries
+    //     (we'll auto-`git add -A` before commit in onCommitRequested), OR
+    //     we're amending (no entries needed).
+    // The "Commit Tracked" checkbox (`-a`) is orthogonal — git itself handles
+    // the tracked-modified pickup at commit time.
+    const bool somethingToCommit = anyStaged || amend || anyEntries;
     const bool canCommit = hasRepo && !hasConflicts
-                           && (!msg.isEmpty() || (m_composer && m_composer->amendChecked()));
+                           && (!msg.isEmpty() || amend)
+                           && somethingToCommit;
     m_composer->setSubmitEnabled(canCommit);
 }
 
