@@ -1690,6 +1690,39 @@ void MainWindow::wireWorkspaceGitSignals(FolderAsWorkspaceDock *dock)
             this, [this](ScintillaNext *editor) {
                 dockedEditor->switchToEditor(editor);
             });
+
+    // Commit detail tab (History → click commit).
+    connect(dock, &FolderAsWorkspaceDock::gitOpenCommitDetailRequested,
+            this, [dock](const QByteArray &sha) {
+                dock->showGitCommitDetail(sha);
+            });
+    // *EditorCreated handlers must NOT call dockedEditor->addEditor — the
+    // editor is already added via the editorCreated → MainWindow::addEditor
+    // chain in EditorManager::createEditor. A second add reparents the editor
+    // to a fresh dock widget, leaving the first one as an empty placeholder.
+    // For file-at-sha the Created signal is the only chance to raise the new
+    // tab (no separate Rendered signal), so switch focus here.
+    connect(dock, &FolderAsWorkspaceDock::gitFileAtShaEditorCreated,
+            this, [this](ScintillaNext *editor) {
+                dockedEditor->switchToEditor(editor);
+            });
+    connect(dock, &FolderAsWorkspaceDock::gitCommitEditorRendered,
+            this, [this](ScintillaNext *editor) {
+                dockedEditor->switchToEditor(editor);
+            });
+    connect(dock, &FolderAsWorkspaceDock::gitCommitEditorFocus,
+            this, [this](ScintillaNext *editor) {
+                dockedEditor->switchToEditor(editor);
+            });
+    connect(dock, &FolderAsWorkspaceDock::gitFileAtShaEditorFocus,
+            this, [this](ScintillaNext *editor) {
+                dockedEditor->switchToEditor(editor);
+            });
+    connect(dock, &FolderAsWorkspaceDock::gitCommitDetailFailed,
+            this, [](const QByteArray &sha, const QString &message) {
+                qWarning("Commit detail failed for %s: %s",
+                         sha.constData(), qPrintable(message));
+            });
 }
 
 void MainWindow::restoreOpenWorkspaces()

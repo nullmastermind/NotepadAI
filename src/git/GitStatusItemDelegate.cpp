@@ -34,14 +34,6 @@ void GitStatusItemDelegate::setDarkPalette(bool dark)
     m_isDark = dark;
 }
 
-static QString numstatSuffix(int added, int deleted, bool isBinary)
-{
-    if (isBinary) return QStringLiteral(" (bin)");
-    if (added < 0 && deleted < 0) return QString();         // not yet ready
-    if (added == 0 && deleted == 0) return QString();
-    return QString();                                       // handled by caller (split paint)
-}
-
 void GitStatusItemDelegate::paint(QPainter *painter,
                                   const QStyleOptionViewItem &option,
                                   const QModelIndex &index) const
@@ -62,25 +54,38 @@ void GitStatusItemDelegate::paint(QPainter *painter,
     const QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget);
 
     const QString primary = index.data(Qt::DisplayRole).toString();
-    const QBrush primaryBrush = index.data(Qt::ForegroundRole).value<QBrush>();
-    const QColor primaryColor = primaryBrush.style() == Qt::NoBrush
-        ? opt.palette.color((opt.state & QStyle::State_Selected) ? QPalette::HighlightedText
-                                                                  : QPalette::Text)
-        : primaryBrush.color();
+    // Selection: standard Qt behaviour is HighlightedText overrides the
+    // model's ForegroundRole. Our delegate paints text manually, so we
+    // have to reproduce that — otherwise the change-color (e.g. Modified
+    // blue) painted on top of the Highlight blue is unreadable.
+    const bool selected = opt.state & QStyle::State_Selected;
+    QColor primaryColor;
+    if (selected) {
+        primaryColor = opt.palette.color(QPalette::HighlightedText);
+    } else {
+        const QBrush primaryBrush = index.data(Qt::ForegroundRole).value<QBrush>();
+        primaryColor = primaryBrush.style() == Qt::NoBrush
+            ? opt.palette.color(QPalette::Text)
+            : primaryBrush.color();
+    }
 
     const int added   = index.data(GitStatusModel::AddedLinesRole).toInt();
     const int deleted = index.data(GitStatusModel::DeletedLinesRole).toInt();
     const bool isBinary = index.data(GitStatusModel::IsBinaryRole).toBool();
 
     QString numstatBinary;
-    QString minusPart;
+    QString openParen;
     QString plusPart;
+    QString minusPart;
+    QString closeParen;
     if (isBinary) {
         numstatBinary = QStringLiteral(" (bin)");
     } else if (added >= 0 && deleted >= 0 && (added != 0 || deleted != 0)) {
-        // Match the format the user specified: "(-50 +1000)" — minus first.
-        minusPart = QStringLiteral(" -%1").arg(deleted);
-        plusPart  = QStringLiteral(" +%1").arg(added);
+        // Format: "name (+6 -3)" — plus first, then minus, parens neutral.
+        openParen  = QStringLiteral(" (");
+        plusPart   = QStringLiteral("+%1").arg(added);
+        minusPart  = QStringLiteral(" -%1").arg(deleted);
+        closeParen = QStringLiteral(")");
     }
 
     const QFontMetrics fm(opt.font);
@@ -93,7 +98,7 @@ void GitStatusItemDelegate::paint(QPainter *painter,
     const int right = textRect.right();
 
     // Primary segment (change-colored) — elide if needed to leave room for numstat.
-    const int suffixWidth = fm.horizontalAdvance(numstatBinary + minusPart + plusPart);
+    const int suffixWidth = fm.horizontalAdvance(numstatBinary + openParen + plusPart + minusPart + closeParen);
     const int primaryAvail = qMax(0, right - x - suffixWidth);
     const QString elidedPrimary = fm.elidedText(primary, Qt::ElideMiddle, primaryAvail);
     painter->setPen(primaryColor);
@@ -103,13 +108,20 @@ void GitStatusItemDelegate::paint(QPainter *painter,
     if (!numstatBinary.isEmpty()) {
         painter->setPen(opt.palette.color(QPalette::PlaceholderText));
         painter->drawText(x, baseline, numstatBinary);
-    } else if (!minusPart.isEmpty()) {
+    } else if (!plusPart.isEmpty()) {
         const auto &pal = GitDiffPalette::current(m_isDark);
+        const QColor parenColor = opt.palette.color(QPalette::PlaceholderText);
+        painter->setPen(parenColor);
+        painter->drawText(x, baseline, openParen);
+        x += fm.horizontalAdvance(openParen);
+        painter->setPen(pal.fgPlus);
+        painter->drawText(x, baseline, plusPart);
+        x += fm.horizontalAdvance(plusPart);
         painter->setPen(pal.fgMinus);
         painter->drawText(x, baseline, minusPart);
         x += fm.horizontalAdvance(minusPart);
-        painter->setPen(pal.fgPlus);
-        painter->drawText(x, baseline, plusPart);
+        painter->setPen(parenColor);
+        painter->drawText(x, baseline, closeParen);
     }
 
     // Focus rect if applicable
@@ -133,7 +145,7 @@ QSize GitStatusItemDelegate::sizeHint(const QStyleOptionViewItem &option, const 
     // Reserve a little extra so numstat suffix never clips.
     if (!index.data(GitStatusModel::IsSectionRole).toBool()) {
         const QFontMetrics fm(option.font);
-        s.setWidth(s.width() + fm.horizontalAdvance(QStringLiteral(" -99999 +99999")));
+        s.setWidth(s.width() + fm.horizontalAdvance(QStringLiteral(" (+99999 -99999)")));
     }
     return s;
 }

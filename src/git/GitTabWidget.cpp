@@ -20,15 +20,18 @@
 
 #include "ApplicationSettings.h"
 #include "BranchPickerPopup.h"
+#include "ChangesPanel.h"
+#include "CommitComposer.h"
+#include "GitError.h"
+#include "GitHistoryView.h"
+#include "GitRepoModel.h"
+#include "GitStatusEntry.h"
+#include "GitStatusModel.h"
+#include "GitTabSegmentedBar.h"
 #include "../ai/CommitMessageGenerator.h"
 #include "../NotepadNextApplication.h"
 #include "../dialogs/MainWindow.h"
 #include "../docks/FolderAsWorkspaceDock.h"
-#include "CommitComposer.h"
-#include "GitError.h"
-#include "GitRepoModel.h"
-#include "GitStatusEntry.h"
-#include "GitStatusModel.h"
 
 #include <QAction>
 #include <QComboBox>
@@ -36,9 +39,7 @@
 #include <QDir>
 #include <QFrame>
 #include <QHBoxLayout>
-#include <QHeaderView>
 #include <QIcon>
-#include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
@@ -46,16 +47,14 @@
 #include <QPalette>
 #include <QPixmap>
 #include <QPushButton>
+#include <QStackedWidget>
 #include <QToolButton>
-#include <QTreeView>
 #include <QVBoxLayout>
 
 namespace {
 
-// Hand-painted stop glyph so the cancel affordance renders identically across
-// platforms regardless of which symbol fonts are installed. Earlier attempts
-// at U+25FC ◼ and U+25A0 ■ tofu'd on stock Windows when the active QFont fell
-// back to a non-symbol family.
+// Hand-painted stop glyph for AI cancel — preserved verbatim from the
+// original GitTabWidget for visual parity.
 QIcon makeStopIcon(const QColor &color)
 {
     const int size = 16;
@@ -81,9 +80,7 @@ GitTabWidget::GitTabWidget(const QString &workspaceRoot, QWidget *parent)
     buildUi();
     updateActionsEnabled();
 
-    // Busy-indicator animation: cycle dot count 0→3 every 400ms so the status
-    // label visibly progresses during AI generation. Timer is a member (not a
-    // QTimer::singleShot per tick) so it's allocation-free once instantiated.
+    // AI busy indicator animation (mirror original GitTabWidget timing).
     m_aiBusyTimer.setInterval(400);
     connect(&m_aiBusyTimer, &QTimer::timeout, this, [this]() {
         m_aiDotPhase = (m_aiDotPhase + 1) % 4;
@@ -91,7 +88,6 @@ GitTabWidget::GitTabWidget(const QString &workspaceRoot, QWidget *parent)
         m_statusLabel->setText(m_aiBusyBase + dots);
     });
 
-    // AI generator wiring (singleton owned by NotepadNextApplication).
     if (auto *app = qobject_cast<NotepadNextApplication *>(QCoreApplication::instance())) {
         if (auto *gen = app->getCommitMessageGenerator()) {
             connect(gen, &ai::CommitMessageGenerator::stateChanged, this,
@@ -101,14 +97,13 @@ GitTabWidget::GitTabWidget(const QString &workspaceRoot, QWidget *parent)
             connect(gen, &ai::CommitMessageGenerator::errorOccurred,
                     this, &GitTabWidget::onGeneratorError);
         }
-        // Cancel in-flight generation if the user switches to a different
-        // workspace dock — the target composer becomes invisible / stale.
         if (auto *mw = qobject_cast<MainWindow *>(app->activeWindow())) {
             connect(mw, &MainWindow::activeWorkspaceChanged, this,
                     [this](FolderAsWorkspaceDock *, FolderAsWorkspaceDock *) {
                         if (auto *app2 = qobject_cast<NotepadNextApplication *>(QCoreApplication::instance())) {
                             if (auto *gen = app2->getCommitMessageGenerator()) {
-                                gen->cancelIfTarget(m_composer);
+                                CommitComposer *composer = m_changesPanel ? m_changesPanel->composer() : nullptr;
+                                if (composer) gen->cancelIfTarget(composer);
                             }
                         }
                     });
@@ -131,11 +126,12 @@ void GitTabWidget::buildUi()
     // Empty hint shown when no workspace is open.
     m_emptyHint = new QLabel(tr("Open a folder as workspace to use Git."), this);
     m_emptyHint->setAlignment(Qt::AlignCenter);
-    m_emptyHint->setStyleSheet(QStringLiteral("color: palette(mid); padding: 24px;"));
+    m_emptyHint->setStyleSheet(QStringLiteral(
+        "color: palette(placeholder-text); padding: 24px;"));
     m_emptyHint->hide();
     root->addWidget(m_emptyHint);
 
-    // Top row: repo combo + branch button + refresh + menu
+    // Top row: repo combo + branch button + refresh + menu (shared chrome).
     auto *topRow = new QHBoxLayout();
     topRow->setContentsMargins(0, 0, 0, 0);
     topRow->setSpacing(4);
@@ -166,7 +162,14 @@ void GitTabWidget::buildUi()
     topRow->addWidget(m_menuBtn);
     root->addLayout(topRow);
 
-    // Error banner (hidden by default)
+    // Segmented bar Changes / History.
+    m_segmentedBar = new GitTabSegmentedBar(this);
+    m_segmentedBar->setSegments({tr("Changes"), tr("History")});
+    connect(m_segmentedBar, &GitTabSegmentedBar::currentChanged,
+            this, &GitTabWidget::onTabChanged);
+    root->addWidget(m_segmentedBar);
+
+    // Error banner (shared across tabs).
     m_errorBanner = new QFrame(this);
     m_errorBanner->setFrameShape(QFrame::StyledPanel);
     m_errorBanner->setStyleSheet(
@@ -187,68 +190,68 @@ void GitTabWidget::buildUi()
     m_errorBanner->hide();
     root->addWidget(m_errorBanner);
 
-    // Stage / Unstage row
-    auto *stageRow = new QHBoxLayout();
-    stageRow->setContentsMargins(0, 0, 0, 0);
-    stageRow->setSpacing(4);
-    m_stageBtn = new QPushButton(tr("Stage"), this);
-    m_unstageBtn = new QPushButton(tr("Unstage"), this);
-    m_stageAllBtn = new QPushButton(tr("Stage All"), this);
-    m_unstageAllBtn = new QPushButton(tr("Unstage All"), this);
-    for (auto *b : {m_stageBtn, m_unstageBtn, m_stageAllBtn, m_unstageAllBtn}) {
-        b->setAutoDefault(false);
-        b->setDefault(false);
-    }
-    stageRow->addWidget(m_stageBtn);
-    stageRow->addWidget(m_unstageBtn);
-    stageRow->addStretch(1);
-    stageRow->addWidget(m_stageAllBtn);
-    stageRow->addWidget(m_unstageAllBtn);
-    root->addLayout(stageRow);
+    // Stacked content area: ChangesPanel + GitHistoryView.
+    m_stack = new QStackedWidget(this);
+    m_changesPanel = new ChangesPanel(m_stack);
+    m_historyView  = new GitHistoryView(m_stack);
+    m_stack->addWidget(m_changesPanel);   // index 0 — Changes
+    m_stack->addWidget(m_historyView);    // index 1 — History
+    root->addWidget(m_stack, 1);
 
-    // Status tree
-    m_tree = new QTreeView(this);
-    m_tree->setHeaderHidden(true);
-    m_tree->setRootIsDecorated(true);
-    m_tree->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    m_tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_tree->setUniformRowHeights(true);
-    m_tree->setFrameShape(QFrame::NoFrame);
-    root->addWidget(m_tree, 1);
-
-    // Commit composer
-    m_composer = new CommitComposer(this);
-    root->addWidget(m_composer);
-
-    // Status label
+    // Status label (shared).
     m_statusLabel = new QLabel(this);
-    m_statusLabel->setStyleSheet(QStringLiteral("color: palette(mid); font-size: 11px;"));
+    m_statusLabel->setStyleSheet(QStringLiteral(
+        "color: palette(placeholder-text); font-size: 11px;"));
     m_statusLabel->setWordWrap(true);
     root->addWidget(m_statusLabel);
 
+    // --- Connections ---
     connect(m_repoCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &GitTabWidget::onRepoSelected);
     connect(m_refreshBtn, &QToolButton::clicked, this, &GitTabWidget::onRefreshClicked);
     connect(m_branchBtn, &QToolButton::clicked, this, &GitTabWidget::onBranchButtonClicked);
     connect(m_menuBtn, &QToolButton::clicked, this, &GitTabWidget::onMenuButtonClicked);
-    connect(m_stageBtn, &QPushButton::clicked, this, &GitTabWidget::onStageClicked);
-    connect(m_unstageBtn, &QPushButton::clicked, this, &GitTabWidget::onUnstageClicked);
-    connect(m_stageAllBtn, &QPushButton::clicked, this, &GitTabWidget::onStageAllClicked);
-    connect(m_unstageAllBtn, &QPushButton::clicked, this, &GitTabWidget::onUnstageAllClicked);
-    connect(m_composer, &CommitComposer::submitRequested, this, &GitTabWidget::onCommitRequested);
-    connect(m_composer, &CommitComposer::messageChanged, this, [this]() {
+    connect(m_errorCloseBtn, &QToolButton::clicked, this, &GitTabWidget::clearError);
+
+    // ChangesPanel wiring — translate user actions into controller calls.
+    connect(m_changesPanel, &ChangesPanel::stageRequested, this,
+            [this](const QStringList &paths) {
+        if (m_controller) m_controller->stagePaths(paths);
+    });
+    connect(m_changesPanel, &ChangesPanel::unstageRequested, this,
+            [this](const QStringList &paths) {
+        if (m_controller) m_controller->unstagePaths(paths);
+    });
+    connect(m_changesPanel, &ChangesPanel::stageAllRequested, this, [this]() {
+        if (m_controller) m_controller->stageAll();
+    });
+    connect(m_changesPanel, &ChangesPanel::unstageAllRequested, this, [this]() {
+        if (m_controller) m_controller->unstageAll();
+    });
+    connect(m_changesPanel, &ChangesPanel::commitRequested,
+            this, &GitTabWidget::onCommitRequested);
+    connect(m_changesPanel, &ChangesPanel::composerMessageChanged, this, [this]() {
         persistCommitDraft();
         updateActionsEnabled();
     });
-    connect(m_composer, &CommitComposer::amendToggled,
-            this, [this](bool) { updateActionsEnabled(); });
-    connect(m_composer, &CommitComposer::trackedOnlyToggled,
-            this, [this](bool) { updateActionsEnabled(); });
-    connect(m_composer, &CommitComposer::aiTriggerRequested,
+    connect(m_changesPanel, &ChangesPanel::composerAmendToggled, this,
+            [this](bool) { updateActionsEnabled(); });
+    connect(m_changesPanel, &ChangesPanel::composerTrackedOnlyToggled, this,
+            [this](bool) { updateActionsEnabled(); });
+    connect(m_changesPanel, &ChangesPanel::aiTriggerRequested,
             this, &GitTabWidget::onAiTriggerRequested);
-    connect(m_composer, &CommitComposer::aiCancelRequested,
+    connect(m_changesPanel, &ChangesPanel::aiCancelRequested,
             this, &GitTabWidget::onAiCancelRequested);
-    connect(m_errorCloseBtn, &QToolButton::clicked, this, &GitTabWidget::clearError);
+    connect(m_changesPanel, &ChangesPanel::diffRequested,
+            this, &GitTabWidget::diffRequested);
+    connect(m_changesPanel, &ChangesPanel::fileActivated,
+            this, &GitTabWidget::onChangesFileActivated);
+    connect(m_changesPanel, &ChangesPanel::openSubmoduleRequested,
+            this, &GitTabWidget::onChangesOpenSubmoduleRequested);
+
+    // History view → forward openCommitDetailRequested up to the host.
+    connect(m_historyView, &GitHistoryView::openCommitDetailRequested,
+            this, &GitTabWidget::openCommitDetailRequested);
 }
 
 void GitTabWidget::setWorkspaceRoot(const QString &root)
@@ -273,7 +276,7 @@ void GitTabWidget::teardownController()
     if (!m_controller) return;
     m_controller->disconnect(this);
     m_controller->cancelCurrent();
-    m_tree->setModel(nullptr);
+    if (m_changesPanel) m_changesPanel->setStatusModel(nullptr);
     m_repoCombo->setModel(nullptr);
     m_controller->deleteLater();
     m_controller = nullptr;
@@ -282,7 +285,9 @@ void GitTabWidget::teardownController()
 void GitTabWidget::rebuildController()
 {
     teardownController();
-    m_composer->clear();
+    if (m_changesPanel && m_changesPanel->composer()) {
+        m_changesPanel->composer()->clear();
+    }
     m_statusLabel->clear();
     clearError();
 
@@ -293,7 +298,13 @@ void GitTabWidget::rebuildController()
     m_branchBtn->setEnabled(false);
     m_refreshBtn->setEnabled(hasWorkspace);
     m_menuBtn->setEnabled(false);
-    m_composer->setSubmitEnabled(false);
+    if (m_changesPanel && m_changesPanel->composer()) {
+        m_changesPanel->composer()->setSubmitEnabled(false);
+    }
+
+    if (m_historyView) {
+        m_historyView->setRepoRoot(QString());
+    }
 
     if (!hasWorkspace) {
         updateActionsEnabled();
@@ -302,7 +313,9 @@ void GitTabWidget::rebuildController()
 
     m_controller = new GitController(m_workspaceRoot, this);
     m_repoCombo->setModel(m_controller->repoModel());
-    m_tree->setModel(m_controller->statusModel());
+    if (m_changesPanel) {
+        m_changesPanel->setStatusModel(m_controller->statusModel());
+    }
 
     connect(m_controller, &GitController::stateChanged, this, &GitTabWidget::onControllerState);
     connect(m_controller, &GitController::statusUpdated, this, &GitTabWidget::onStatusUpdated);
@@ -318,11 +331,24 @@ void GitTabWidget::rebuildController()
             this, &GitTabWidget::onRemoteOpProgress);
     connect(m_controller, &GitController::fullDiffReady, this, &GitTabWidget::onFullDiffReady);
     connect(m_controller, &GitController::fullDiffFailed, this, &GitTabWidget::onFullDiffFailed);
-    connect(m_tree, &QTreeView::doubleClicked, this, &GitTabWidget::onTreeDoubleClicked);
-    connect(m_tree, &QTreeView::clicked, this, &GitTabWidget::onTreeClicked);
 
+    restoreSettingsForWorkspace();
     restoreCommitDraft();
     m_controller->initialize();
+}
+
+void GitTabWidget::restoreSettingsForWorkspace()
+{
+    ApplicationSettings settings;
+    const QString tabName = settings.value(settingsKey(QStringLiteral("HistoryActiveTab"))).toString();
+    const bool allBranches = settings.value(settingsKey(QStringLiteral("HistoryAllBranches"))).toBool();
+    if (m_historyView) {
+        m_historyView->setAllBranches(allBranches);
+    }
+    if (m_segmentedBar) {
+        m_segmentedBar->setCurrentIndex(tabName == QLatin1String("history")
+                                         ? kTabHistory : kTabChanges);
+    }
 }
 
 QString GitTabWidget::settingsKey(const QString &subkey) const
@@ -334,18 +360,37 @@ QString GitTabWidget::settingsKey(const QString &subkey) const
 
 void GitTabWidget::persistCommitDraft()
 {
-    if (!m_composer) return;
+    if (!m_changesPanel || !m_changesPanel->composer()) return;
     if (m_workspaceRoot.isEmpty()) return;
     ApplicationSettings settings;
-    settings.setValue(settingsKey(QStringLiteral("commitDraft")), m_composer->message());
+    settings.setValue(settingsKey(QStringLiteral("commitDraft")),
+                      m_changesPanel->composer()->message());
 }
 
 void GitTabWidget::restoreCommitDraft()
 {
-    if (!m_composer) return;
+    if (!m_changesPanel || !m_changesPanel->composer()) return;
     ApplicationSettings settings;
     const QString draft = settings.value(settingsKey(QStringLiteral("commitDraft"))).toString();
-    if (!draft.isEmpty()) m_composer->setMessage(draft);
+    if (!draft.isEmpty()) m_changesPanel->composer()->setMessage(draft);
+}
+
+void GitTabWidget::onTabChanged(int index)
+{
+    if (!m_stack) return;
+    m_stack->setCurrentIndex(index);
+    // Persist per-workspace.
+    if (!m_workspaceRoot.isEmpty()) {
+        ApplicationSettings settings;
+        settings.setValue(settingsKey(QStringLiteral("HistoryActiveTab")),
+                          index == kTabHistory ? QStringLiteral("history")
+                                                : QStringLiteral("changes"));
+    }
+    // When the user first opens the History tab, kick off a fetch if the repo
+    // root is set and the view hasn't loaded yet.
+    if (index == kTabHistory && m_controller && !m_controller->currentRepo().isEmpty()) {
+        m_historyView->setRepoRoot(m_controller->currentRepo());
+    }
 }
 
 void GitTabWidget::onReposUpdated()
@@ -364,7 +409,10 @@ void GitTabWidget::onReposUpdated()
 
     if (pick >= 0) {
         const auto *info = m_controller->repoModel()->infoAt(pick);
-        if (info) m_controller->selectRepo(info->toplevel);
+        if (info) {
+            m_controller->selectRepo(info->toplevel);
+            if (m_historyView) m_historyView->setRepoRoot(info->toplevel);
+        }
     }
     updateActionsEnabled();
 }
@@ -376,17 +424,17 @@ void GitTabWidget::onRepoSelected(int index)
     const auto *info = m_controller->repoModel()->infoAt(index);
     if (!info) return;
 
-    // Cancel any in-flight AI generation pinned to this composer when the user
-    // switches repos within the same dock — the diff context just changed.
     if (auto *app = qobject_cast<NotepadNextApplication *>(QCoreApplication::instance())) {
         if (auto *gen = app->getCommitMessageGenerator()) {
-            gen->cancelIfTarget(m_composer);
+            CommitComposer *composer = m_changesPanel ? m_changesPanel->composer() : nullptr;
+            if (composer) gen->cancelIfTarget(composer);
         }
     }
 
     ApplicationSettings settings;
     settings.setValue(settingsKey(QStringLiteral("lastRepo")), info->toplevel);
     m_controller->selectRepo(info->toplevel);
+    if (m_historyView) m_historyView->setRepoRoot(info->toplevel);
 }
 
 void GitTabWidget::onRefreshClicked()
@@ -423,7 +471,6 @@ void GitTabWidget::updateBranchButtonText()
 void GitTabWidget::onBranchButtonClicked()
 {
     if (!m_controller || m_controller->currentRepo().isEmpty()) return;
-
     if (!m_branchPicker) {
         m_branchPicker = new BranchPickerPopup(this);
         connect(m_branchPicker, &BranchPickerPopup::branchSelected,
@@ -442,7 +489,6 @@ void GitTabWidget::handleBranchSelected(const QString &name)
 {
     if (!m_controller) return;
     QString target = name;
-    // Remote ref like "origin/feature/x" → tracked local "feature/x".
     const QStringList remotes = m_controller->remotes();
     for (const auto &r : remotes) {
         const QString prefix = r + QLatin1Char('/');
@@ -535,116 +581,61 @@ void GitTabWidget::onMenuButtonClicked()
     menu.exec(m_menuBtn->mapToGlobal(m_menuBtn->rect().bottomLeft()));
 }
 
-void GitTabWidget::onStageClicked()
+void GitTabWidget::onCommitRequested(const QString &message, bool amend,
+                                      bool signoff, bool trackedOnly)
 {
     if (!m_controller) return;
-    const auto *st = m_controller->statusModel();
-    const QStringList paths = st->unstagedSelectionPaths(m_tree->selectionModel()->selectedIndexes());
-    if (paths.isEmpty()) return;
-    m_controller->stagePaths(paths);
-}
-
-void GitTabWidget::onUnstageClicked()
-{
-    if (!m_controller) return;
-    const auto *st = m_controller->statusModel();
-    const QStringList paths = st->stagedSelectionPaths(m_tree->selectionModel()->selectedIndexes());
-    if (paths.isEmpty()) return;
-    m_controller->unstagePaths(paths);
-}
-
-void GitTabWidget::onStageAllClicked()
-{
-    if (m_controller) m_controller->stageAll();
-}
-
-void GitTabWidget::onUnstageAllClicked()
-{
-    if (m_controller) m_controller->unstageAll();
-}
-
-void GitTabWidget::onCommitRequested()
-{
-    if (!m_controller) return;
-    const QString msg = m_composer->message().trimmed();
-    if (msg.isEmpty() && !m_composer->amendChecked()) {
+    const QString trimmedMsg = message.trimmed();
+    if (trimmedMsg.isEmpty() && !amend) {
         showError(tr("Commit message is empty."));
         return;
     }
 
-    // Auto-stage everything when the user clicks Commit with an empty index.
-    // Matches VSCode/GitHub Desktop UX: "commit everything I changed". Skipped
-    // when amending (no new staging needed) or when "Commit Tracked" is on
-    // (git's own -a flag will handle tracked-modified pickup at commit time).
     const auto *st = m_controller->statusModel();
     const bool anyStaged = st && st->hasStaged();
     const bool anyEntries = st && st->totalEntries() > 0;
-    if (!anyStaged && !m_composer->amendChecked()
-        && !m_composer->trackedOnly() && anyEntries) {
+    if (!anyStaged && !amend && !trackedOnly && anyEntries) {
         m_controller->stageAll();
     }
 
     m_committing = true;
-    m_controller->commit(m_composer->message(),
-                         m_composer->amendChecked(),
-                         m_composer->signoffChecked(),
-                         m_composer->trackedOnly());
+    m_controller->commit(message, amend, signoff, trackedOnly);
 }
 
-void GitTabWidget::onTreeClicked(const QModelIndex &index)
+void GitTabWidget::onChangesFileActivated(const QString &relPath)
 {
     if (!m_controller) return;
-    if (!index.isValid()) return;
-    if (index.data(GitStatusModel::IsSectionRole).toBool()) return;
-    const QString rel = index.data(GitStatusModel::RelPathRole).toString();
-    if (rel.isEmpty()) return;
     const QString repo = m_controller->currentRepo();
-    if (repo.isEmpty()) return;
-
-    const QString abs = QDir(repo).filePath(rel);
-    // Submodule heuristic: status entry whose worktree path is a directory.
-    // Catches both registered submodules and embedded git repos.
+    if (repo.isEmpty() || relPath.isEmpty()) return;
+    const QString abs = QDir(repo).filePath(relPath);
     if (QFileInfo(abs).isDir()) {
-        emit openSubmoduleRequested(abs);
-        return;
-    }
-
-    GitStatusEntry entry;
-    entry.relPath = rel;
-    entry.origRelPath = index.data(GitStatusModel::OrigPathRole).toString();
-    entry.change = static_cast<GitStatusEntry::Change>(
-        index.data(GitStatusModel::ChangeRole).toInt());
-    entry.stagedSide = index.data(GitStatusModel::StagedSideRole).toBool();
-    entry.section = static_cast<GitStatusEntry::Section>(
-        index.data(GitStatusModel::SectionRole).toInt());
-    entry.xy = index.data(GitStatusModel::XyRole).toString();
-    entry.hasUnstableEncoding = index.data(GitStatusModel::HasUnstableEncodingRole).toBool();
-    entry.isBinary = index.data(GitStatusModel::IsBinaryRole).toBool();
-    entry.addedLines = index.data(GitStatusModel::AddedLinesRole).toInt();
-    entry.deletedLines = index.data(GitStatusModel::DeletedLinesRole).toInt();
-    entry.oursSha = index.data(GitStatusModel::OursShaRole).toString();
-    entry.theirsSha = index.data(GitStatusModel::TheirsShaRole).toString();
-    emit diffRequested(entry);
-}
-
-void GitTabWidget::onTreeDoubleClicked(const QModelIndex &index)
-{
-    if (!m_controller) return;
-    if (!index.isValid()) return;
-    if (index.data(GitStatusModel::IsSectionRole).toBool()) return;
-    const QString rel = index.data(GitStatusModel::RelPathRole).toString();
-    if (rel.isEmpty()) return;
-    const QString repo = m_controller->currentRepo();
-    if (repo.isEmpty()) return;
-    const QString abs = QDir(repo).filePath(rel);
-    // Symmetric with onTreeClicked: a submodule entry is a directory, and
-    // fileActivated would funnel it into MainWindow::openFile which prompts
-    // "Create File?" on a non-file path. Route it through the workspace path.
-    if (QFileInfo(abs).isDir()) {
+        // Submodule: prefer in-place repo switch via the repo picker — the
+        // combo already lists submodules (see GitRepoModel) so the user
+        // expects double-click to "drill into" that repo, not spawn a new
+        // workspace. Fall back to openSubmoduleRequested only when the path
+        // isn't a known repo (rare: nested git dir not yet discovered).
+        auto *model = m_controller->repoModel();
+        int row = model ? model->indexOf(abs) : -1;
+        if (row < 0 && model) {
+            const QString canon = QDir(abs).canonicalPath();
+            if (!canon.isEmpty()) row = model->indexOf(canon);
+        }
+        if (row >= 0) {
+            m_repoCombo->setCurrentIndex(row);    // triggers onRepoSelected
+            return;
+        }
         emit openSubmoduleRequested(abs);
         return;
     }
     emit fileActivated(abs);
+}
+
+void GitTabWidget::onChangesOpenSubmoduleRequested(const QString &relPath)
+{
+    if (!m_controller) return;
+    const QString repo = m_controller->currentRepo();
+    if (repo.isEmpty() || relPath.isEmpty()) return;
+    emit openSubmoduleRequested(QDir(repo).filePath(relPath));
 }
 
 void GitTabWidget::onControllerState(GitController::State s)
@@ -660,14 +651,13 @@ void GitTabWidget::onControllerState(GitController::State s)
     case GitController::State::Discovering: appendStatus(tr("Discovering repositories…")); break;
     case GitController::State::Refreshing:  appendStatus(tr("Refreshing…")); break;
     case GitController::State::Running:     appendStatus(tr("Running…")); break;
-    case GitController::State::Error:       break; // error banner already shown
+    case GitController::State::Error:       break;
     }
 }
 
 void GitTabWidget::onStatusUpdated()
 {
-    // Expand all sections so changes are visible immediately.
-    m_tree->expandAll();
+    if (m_changesPanel) m_changesPanel->expandTree();
     updateActionsEnabled();
 }
 
@@ -680,9 +670,9 @@ void GitTabWidget::onOpSucceeded(const QString &name)
 void GitTabWidget::onCommitSucceeded()
 {
     m_committing = false;
-    if (m_composer) {
-        m_composer->clear();
-        m_composer->setAmendChecked(false);
+    if (m_changesPanel && m_changesPanel->composer()) {
+        m_changesPanel->composer()->clear();
+        m_changesPanel->composer()->setAmendChecked(false);
     }
     ApplicationSettings settings;
     settings.remove(settingsKey(QStringLiteral("commitDraft")));
@@ -709,8 +699,6 @@ void GitTabWidget::onGitMissing()
 
 void GitTabWidget::onDirtyTreePrompt(const QString &target)
 {
-    // The controller delegates the prompt back to the UI when it detects
-    // a dirty tree on its own (e.g. before checkout).
     QMessageBox box(QMessageBox::Question, tr("Working tree has changes"),
                     tr("Switch to '%1'? Your working tree has uncommitted changes.").arg(target),
                     QMessageBox::NoButton, this);
@@ -746,25 +734,10 @@ void GitTabWidget::updateActionsEnabled()
     m_branchBtn->setEnabled(hasRepo && !empty);
     m_menuBtn->setEnabled(hasRepo);
 
-    m_stageBtn->setEnabled(hasRepo);
-    m_unstageBtn->setEnabled(hasRepo && anyStaged);
-    m_stageAllBtn->setEnabled(hasRepo && anyEntries);
-    m_unstageAllBtn->setEnabled(hasRepo && anyStaged);
-
-    const QString msg = m_composer ? m_composer->message().trimmed() : QString();
-    const bool amend = m_composer && m_composer->amendChecked();
-    // Commit is viable whenever:
-    //   - there is a non-empty message OR we're amending, AND
-    //   - the index has something staged, OR the worktree has any entries
-    //     (we'll auto-`git add -A` before commit in onCommitRequested), OR
-    //     we're amending (no entries needed).
-    // The "Commit Tracked" checkbox (`-a`) is orthogonal — git itself handles
-    // the tracked-modified pickup at commit time.
-    const bool somethingToCommit = anyStaged || amend || anyEntries;
-    const bool canCommit = hasRepo && !hasConflicts
-                           && (!msg.isEmpty() || amend)
-                           && somethingToCommit;
-    m_composer->setSubmitEnabled(canCommit);
+    if (m_changesPanel) {
+        m_changesPanel->updateActionsEnabled(hasRepo, hasConflicts,
+                                              anyStaged, anyEntries);
+    }
 }
 
 void GitTabWidget::showError(const QString &text, const QString &hint)
@@ -786,7 +759,7 @@ void GitTabWidget::appendStatus(const QString &msg)
     m_statusLabel->setText(msg);
 }
 
-// --- AI commit-message generation --------------------------------------------
+// --- AI commit-message generation ---
 
 void GitTabWidget::onAiTriggerRequested()
 {
@@ -794,17 +767,17 @@ void GitTabWidget::onAiTriggerRequested()
     if (!app) return;
     auto *gen = app->getCommitMessageGenerator();
     if (!gen) return;
+    CommitComposer *composer = m_changesPanel ? m_changesPanel->composer() : nullptr;
+    if (!composer) return;
 
-    // If a generation is already in flight for this composer, treat the click
-    // as a cancel.
     using State = ai::CommitMessageGenerator::State;
     if (gen->state() != State::Idle) {
-        gen->cancelIfTarget(m_composer);
+        gen->cancelIfTarget(composer);
         return;
     }
 
     QString why;
-    if (!gen->canFireGenerate(m_workspaceRoot, m_composer, &why)) {
+    if (!gen->canFireGenerate(m_workspaceRoot, composer, &why)) {
         showError(why);
         return;
     }
@@ -813,7 +786,7 @@ void GitTabWidget::onAiTriggerRequested()
         return;
     }
 
-    m_pendingAiSubjectHint = m_composer->subjectLine();
+    m_pendingAiSubjectHint = composer->subjectLine();
     m_aiAwaitingDiff = true;
     clearError();
     m_controller->requestFullDiff();
@@ -823,7 +796,8 @@ void GitTabWidget::onAiCancelRequested()
 {
     if (auto *app = qobject_cast<NotepadNextApplication *>(QCoreApplication::instance())) {
         if (auto *gen = app->getCommitMessageGenerator()) {
-            gen->cancelIfTarget(m_composer);
+            CommitComposer *composer = m_changesPanel ? m_changesPanel->composer() : nullptr;
+            if (composer) gen->cancelIfTarget(composer);
         }
     }
     m_aiAwaitingDiff = false;
@@ -838,9 +812,11 @@ void GitTabWidget::onFullDiffReady(const QByteArray &diff)
     if (!app) return;
     auto *gen = app->getCommitMessageGenerator();
     if (!gen) return;
+    CommitComposer *composer = m_changesPanel ? m_changesPanel->composer() : nullptr;
+    if (!composer) return;
 
     const QString submoduleRoot = m_controller ? m_controller->currentRepo() : QString();
-    gen->trigger(m_workspaceRoot, submoduleRoot, m_composer, m_pendingAiSubjectHint, diff);
+    gen->trigger(m_workspaceRoot, submoduleRoot, composer, m_pendingAiSubjectHint, diff);
 }
 
 void GitTabWidget::onFullDiffFailed(const QString &message)
@@ -857,13 +833,14 @@ void GitTabWidget::onGeneratorStateChanged(int state)
     if (!app) return;
     auto *gen = app->getCommitMessageGenerator();
     if (!gen) return;
+    CommitComposer *composer = m_changesPanel ? m_changesPanel->composer() : nullptr;
+    if (!composer) return;
 
-    // Only react when this composer is the target.
     const bool isTarget = (gen->state() == State::Idle)
                           ? false
                           : (gen->currentRepoKey() == m_workspaceRoot);
 
-    QToolButton *btn = m_composer ? m_composer->aiButton() : nullptr;
+    QToolButton *btn = composer->aiButton();
     if (!btn) return;
 
     const auto s = static_cast<State>(state);
@@ -874,11 +851,9 @@ void GitTabWidget::onGeneratorStateChanged(int state)
         btn->setText(QString());
         btn->setIcon(makeStopIcon(btn->palette().color(QPalette::ButtonText)));
         btn->setToolTip(tr("Cancel generation (Esc)"));
-        m_composer->setGenerationActive(true);
-        m_composer->setSubmitEnabled(false);
+        composer->setGenerationActive(true);
+        composer->setSubmitEnabled(false);
 
-        // Drive the animated status indicator. Phase resets so the user sees
-        // motion immediately on each state transition.
         m_aiDotPhase = 0;
         switch (s) {
         case State::Authenticating: m_aiBusyBase = tr("AI: Connecting");  break;
@@ -890,14 +865,12 @@ void GitTabWidget::onGeneratorStateChanged(int state)
         if (!m_aiBusyTimer.isActive()) m_aiBusyTimer.start();
     } else {
         btn->setIcon(QIcon());
-        btn->setText(QString::fromUtf8("\xE2\x9C\xA8"));   // U+2728 ✨ sparkles
+        btn->setText(QString::fromUtf8("\xE2\x9C\xA8"));
         btn->setToolTip(tr("Generate commit message with AI"));
-        m_composer->setGenerationActive(false);
-        updateActionsEnabled();   // re-derives commit button enabled state
+        composer->setGenerationActive(false);
+        updateActionsEnabled();
         if (m_aiBusyTimer.isActive()) m_aiBusyTimer.stop();
         if (isTarget || s == State::Idle) {
-            // Clear the AI line so the status label doesn't keep a stale dot
-            // trail after completion / cancel.
             m_aiBusyBase.clear();
             m_statusLabel->clear();
         }
@@ -906,9 +879,5 @@ void GitTabWidget::onGeneratorStateChanged(int state)
 
 void GitTabWidget::onGeneratorError(const QString &message)
 {
-    // Only show if this composer is the one that triggered the request — but
-    // because the generator is a single global at most one error is active at
-    // a time, so display unconditionally.
     showError(tr("AI: %1").arg(message));
 }
-

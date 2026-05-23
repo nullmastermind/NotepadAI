@@ -500,3 +500,39 @@ target_sources(test_git_diff_word_span_alignment PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ProfileScope.h
 )
 add_test(NAME GitDiffWordSpanAlignment COMMAND test_git_diff_word_span_alignment)
+
+# --- GitLogParser: streaming \x1f/\x1e-separated git log records →
+#     GitCommitInfo. Edge cases: chunk splits mid-field, mid-record, merge
+#     commits with multiple parents, root commits with empty parents, UTF-8
+#     author names, malformed records dropped silently. ---
+qt_add_executable(test_git_log_parser test_git_log_parser.cpp)
+target_include_directories(test_git_log_parser PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/git
+)
+target_link_libraries(test_git_log_parser PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_git_log_parser PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/git/GitLogParser.cpp
+    ${CMAKE_SOURCE_DIR}/src/git/GitLogParser.h
+    ${CMAKE_SOURCE_DIR}/src/git/GitCommitInfo.h
+    ${CMAKE_SOURCE_DIR}/src/ProfileScope.cpp
+    ${CMAKE_SOURCE_DIR}/src/ProfileScope.h
+)
+add_test(NAME GitLogParser COMMAND test_git_log_parser)
+
+# --- GitHistoryModel: append / dedupe / clear / role accessors for the
+#     QAbstractListModel powering the History tab's QListView. ---
+qt_add_executable(test_git_history_model test_git_history_model.cpp)
+target_include_directories(test_git_history_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/git
+)
+target_link_libraries(test_git_history_model PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_git_history_model PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/git/GitHistoryModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/git/GitHistoryModel.h
+    ${CMAKE_SOURCE_DIR}/src/git/GitCommitInfo.h
+    ${CMAKE_SOURCE_DIR}/src/ProfileScope.cpp
+    ${CMAKE_SOURCE_DIR}/src/ProfileScope.h
+)
+add_test(NAME GitHistoryModel COMMAND test_git_history_model)

@@ -45,6 +45,12 @@ struct GitDiffPalette {
     QColor bgHunkHeader;
     QColor fgGutter;
 
+    // Commit-view-only tokens (header block of a commit detail tab).
+    // commitMetaFg = author / SHA / date muted label color.
+    // commitBodyFg = commit message body color (slightly stronger than meta).
+    QColor commitMetaFg;
+    QColor commitBodyFg;
+
     static const GitDiffPalette &light();
     static const GitDiffPalette &dark();
     static const GitDiffPalette &current(bool isDark);

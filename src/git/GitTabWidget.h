@@ -22,8 +22,10 @@
 #include "GitController.h"
 #include "GitStatusEntry.h"
 
+#include <QByteArray>
 #include <QPointer>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 #include <QWidget>
 
@@ -31,14 +33,14 @@ class QComboBox;
 class QFrame;
 class QLabel;
 class QMenu;
-class QModelIndex;
-class QPushButton;
+class QStackedWidget;
 class QToolButton;
-class QTreeView;
 
 class BranchPickerPopup;
-class CommitComposer;
+class ChangesPanel;
 class GitError;
+class GitHistoryView;
+class GitTabSegmentedBar;
 
 class GitTabWidget : public QWidget
 {
@@ -54,23 +56,20 @@ public:
 
 signals:
     void fileActivated(const QString &absPath);
-    // Single click on a status entry — host opens a diff preview tab.
     void diffRequested(const GitStatusEntry &entry);
-    // Click on a submodule entry — host opens the submodule as a new workspace.
     void openSubmoduleRequested(const QString &absPath);
+    // History tab: user clicked a commit row.
+    void openCommitDetailRequested(const QByteArray &sha);
 
 private slots:
     void onRepoSelected(int index);
     void onRefreshClicked();
     void onBranchButtonClicked();
     void onMenuButtonClicked();
-    void onStageClicked();
-    void onUnstageClicked();
-    void onStageAllClicked();
-    void onUnstageAllClicked();
-    void onCommitRequested();
-    void onTreeClicked(const QModelIndex &index);
-    void onTreeDoubleClicked(const QModelIndex &index);
+    void onCommitRequested(const QString &message, bool amend,
+                           bool signoff, bool trackedOnly);
+    void onChangesFileActivated(const QString &relPath);
+    void onChangesOpenSubmoduleRequested(const QString &relPath);
 
     void onControllerState(GitController::State s);
     void onStatusUpdated();
@@ -82,6 +81,8 @@ private slots:
     void onGitMissing();
     void onDirtyTreePrompt(const QString &target);
     void onRemoteOpProgress(const QString &line);
+
+    void onTabChanged(int index);
 
     // AI commit-message generation.
     void onAiTriggerRequested();
@@ -105,6 +106,7 @@ private:
     QString settingsKey(const QString &subkey) const;
     void handleBranchSelected(const QString &name);
     void handleCreateBranch(const QString &name, const QString &base);
+    void restoreSettingsForWorkspace();
 
     QString m_workspaceRoot;
     bool m_initialized = false;
@@ -114,31 +116,35 @@ private:
     GitController *m_controller = nullptr;
     QPointer<BranchPickerPopup> m_branchPicker;
 
+    // Header row.
     QComboBox *m_repoCombo = nullptr;
     QToolButton *m_branchBtn = nullptr;
     QToolButton *m_refreshBtn = nullptr;
     QToolButton *m_menuBtn = nullptr;
-    QPushButton *m_stageBtn = nullptr;
-    QPushButton *m_unstageBtn = nullptr;
-    QPushButton *m_stageAllBtn = nullptr;
-    QPushButton *m_unstageAllBtn = nullptr;
-    QTreeView *m_tree = nullptr;
-    CommitComposer *m_composer = nullptr;
+
+    // Segmented bar + stacked content.
+    GitTabSegmentedBar *m_segmentedBar = nullptr;
+    QStackedWidget     *m_stack = nullptr;
+    ChangesPanel       *m_changesPanel = nullptr;
+    GitHistoryView     *m_historyView = nullptr;
+
+    // Persistent chrome.
     QLabel *m_statusLabel = nullptr;
     QFrame *m_errorBanner = nullptr;
     QLabel *m_errorLabel = nullptr;
     QToolButton *m_errorCloseBtn = nullptr;
     QLabel *m_emptyHint = nullptr;
 
-    // AI generation: cache subject hint so the asynchronous fullDiffReady
-    // handler can pair the diff with the user-typed first line at trigger time.
+    // AI generation state.
     QString m_pendingAiSubjectHint;
     bool m_aiAwaitingDiff = false;
-
-    // Animated busy indicator for the status label during AI generation.
     QTimer m_aiBusyTimer;
     QString m_aiBusyBase;
     int m_aiDotPhase = 0;
+
+    // Tab indices in segmented bar / stack.
+    static constexpr int kTabChanges = 0;
+    static constexpr int kTabHistory = 1;
 };
 
 #endif // GIT_TAB_WIDGET_H

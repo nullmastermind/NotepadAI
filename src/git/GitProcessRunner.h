@@ -62,6 +62,25 @@ public:
     void cancel() override;
     bool isRunning() const override;
 
+    // Non-blocking cancel for hot-path / spam-friendly callers (history
+    // refresh). Detaches the in-flight process from this runner instance and
+    // SIGKILLs it without waiting. The callback (if any) is dropped; callers
+    // who care about late chunks must guard with a generation token.
+    // After cancelAsync() returns, isRunning() == false and a new run() can
+    // be issued in the same event-loop tick.
+    void cancelAsync();
+
+    // Optional stdout byte cap. When the buffered stdout exceeds this size
+    // the process is killed and the callback is invoked with the truncated
+    // bytes + a special exit code (kExitTruncated). 0 = unlimited (default).
+    void setMaxOutputBytes(qint64 bytes) { m_maxOutputBytes = bytes; }
+    qint64 maxOutputBytes() const { return m_maxOutputBytes; }
+
+    // Sentinel exit codes (in addition to the process's own).
+    static constexpr int kExitCancelled = -2;   // cancel() was invoked
+    static constexpr int kExitCrash     = -3;   // QProcess::CrashExit
+    static constexpr int kExitTruncated = -4;   // maxOutputBytes exceeded
+
     static bool gitAvailable();
     static QString gitExecutable();
     static QProcessEnvironment baseEnv();
@@ -89,6 +108,7 @@ private:
     QTimer *m_timeout = nullptr;
     QStringList m_argv;
     int m_inflightTimeoutMs = 0;
+    qint64 m_maxOutputBytes = 0;  // 0 = unlimited
 };
 
 #endif // GIT_PROCESS_RUNNER_H

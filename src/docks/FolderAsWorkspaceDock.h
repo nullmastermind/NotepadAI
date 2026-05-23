@@ -37,6 +37,7 @@ class QFileSystemModel;
 class QTimer;
 class GitTabWidget;
 class GitDiffViewController;
+class GitCommitView;
 class ScintillaNext;
 
 // Snapshot of per-workspace UI state. Carried verbatim between disk (QSettings
@@ -70,6 +71,11 @@ public:
     // Host (MainWindow) calls this in response to gitDiffRequested.
     void showGitDiffPreview(const GitStatusEntry &entry);
 
+    // Open the commit detail tab via the per-dock GitCommitView controller,
+    // creating it on first use. Host (MainWindow) calls this in response to
+    // gitOpenCommitDetailRequested.
+    void showGitCommitDetail(const QByteArray &sha);
+
     // Switch the tab widget to the Git page and lazy-construct it if needed.
     // Used when a workspace is opened via a path that implies "show me Git first"
     // (e.g. clicking a submodule in another workspace's Git status tree).
@@ -91,10 +97,18 @@ signals:
     // Forwarded from GitTabWidget once the Git tab is created.
     void gitDiffRequested(const GitStatusEntry &entry);
     void gitOpenSubmoduleRequested(const QString &absPath);
+    void gitOpenCommitDetailRequested(const QByteArray &sha);
     // Forwarded from the per-dock GitDiffViewController — host raises this
     // editor as the active tab so the user lands on the rendered diff.
     void gitDiffPreviewRendered(ScintillaNext *editor);
     void gitDiffPreviewFailed(const QString &relPath, const QString &message);
+    // From GitCommitView — host docks the new editor or focuses an existing one.
+    void gitCommitEditorCreated(ScintillaNext *editor);
+    void gitCommitEditorRendered(ScintillaNext *editor);
+    void gitCommitEditorFocus(ScintillaNext *editor);
+    void gitFileAtShaEditorCreated(ScintillaNext *editor);
+    void gitFileAtShaEditorFocus(ScintillaNext *editor);
+    void gitCommitDetailFailed(const QByteArray &sha, const QString &message);
 
     // Emitted from closeEvent BEFORE the dock destructs (WA_DeleteOnClose).
     // MainWindow snapshots state into FolderAsWorkspace/WorkspaceStates here
@@ -122,6 +136,7 @@ private:
     QFileSystemModel *model;
     GitTabWidget *gitTab = nullptr;
     GitDiffViewController *gitDiffViewController = nullptr;
+    GitCommitView         *gitCommitView = nullptr;
 
     QTimer *tooltipTimer;
     QPersistentModelIndex pendingTooltipIndex;
@@ -141,6 +156,7 @@ private:
 
     void ensureGitTab();
     GitDiffViewController *ensureGitDiffViewController();
+    GitCommitView         *ensureGitCommitView();
 
     // True if any cleaned-path ancestor of `child` (up to and including `key`'s
     // parent chain stop) is in m_userVetoed. O(depth), depth typically < 10.

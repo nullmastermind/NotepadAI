@@ -40,6 +40,11 @@ const GitDiffPalette &GitDiffPalette::light()
         x.fgHunkHeader  = QColor(0x65, 0x6D, 0x76);
         x.bgHunkHeader  = QColor(0xDD, 0xF4, 0xFF);   // accent.muted
         x.fgGutter      = QColor(0x8C, 0x95, 0x9F);
+
+        // Commit header tokens (light): meta = fg.muted (#656d76),
+        // body = fg.default near-black (#1f2328).
+        x.commitMetaFg  = QColor(0x65, 0x6D, 0x76);
+        x.commitBodyFg  = QColor(0x1F, 0x23, 0x28);
         return x;
     }();
     return p;
@@ -72,6 +77,11 @@ const GitDiffPalette &GitDiffPalette::dark()
         x.fgHunkHeader  = QColor(0x8B, 0x94, 0x9E);
         x.bgHunkHeader  = QColor(0x38, 0x8B, 0xFD, 0x40); // accent.muted alpha
         x.fgGutter      = QColor(0x6E, 0x76, 0x81);
+
+        // Commit header tokens (dark): meta = fg.muted (#8b949e),
+        // body = fg.default near-white (#e6edf3).
+        x.commitMetaFg  = QColor(0x8B, 0x94, 0x9E);
+        x.commitBodyFg  = QColor(0xE6, 0xED, 0xF3);
         return x;
     }();
     return p;

@@ -19,6 +19,7 @@
 
 #include "FolderAsWorkspaceDock.h"
 #include "ApplicationSettings.h"
+#include "GitCommitView.h"
 #include "GitController.h"
 #include "GitDiffViewController.h"
 #include "GitTabWidget.h"
@@ -295,6 +296,8 @@ void FolderAsWorkspaceDock::ensureGitTab()
             this, &FolderAsWorkspaceDock::gitDiffRequested);
     connect(gitTab, &GitTabWidget::openSubmoduleRequested,
             this, &FolderAsWorkspaceDock::gitOpenSubmoduleRequested);
+    connect(gitTab, &GitTabWidget::openCommitDetailRequested,
+            this, &FolderAsWorkspaceDock::gitOpenCommitDetailRequested);
     gitTab->initializeIfNeeded();
 }
 
@@ -330,6 +333,52 @@ void FolderAsWorkspaceDock::showGitDiffPreview(const GitStatusEntry &entry)
 {
     if (auto *c = ensureGitDiffViewController()) {
         c->showDiffFor(entry);
+    }
+}
+
+GitCommitView *FolderAsWorkspaceDock::ensureGitCommitView()
+{
+    if (gitCommitView) return gitCommitView;
+
+    ensureGitTab();
+    if (!gitTab || !gitTab->controller()) return nullptr;
+
+    auto *app = qobject_cast<NotepadNextApplication*>(qApp);
+    if (!app) return nullptr;
+
+    gitCommitView = new GitCommitView(gitTab->controller()->currentRepo(),
+                                       app->getEditorManager(), this);
+    gitCommitView->setDarkPalette(app->isEffectiveThemeDark());
+
+    connect(gitCommitView, &GitCommitView::newCommitEditorCreated,
+            this, &FolderAsWorkspaceDock::gitCommitEditorCreated);
+    connect(gitCommitView, &GitCommitView::commitDetailRendered,
+            this, &FolderAsWorkspaceDock::gitCommitEditorRendered);
+    connect(gitCommitView, &GitCommitView::focusExistingCommitEditor,
+            this, &FolderAsWorkspaceDock::gitCommitEditorFocus);
+    connect(gitCommitView, &GitCommitView::newFileAtShaEditorCreated,
+            this, &FolderAsWorkspaceDock::gitFileAtShaEditorCreated);
+    connect(gitCommitView, &GitCommitView::focusExistingFileAtShaEditor,
+            this, &FolderAsWorkspaceDock::gitFileAtShaEditorFocus);
+    connect(gitCommitView, &GitCommitView::fetchFailed,
+            this, &FolderAsWorkspaceDock::gitCommitDetailFailed);
+
+    connect(app, &NotepadNextApplication::effectiveThemeChanged,
+            gitCommitView, [this, app]() {
+                gitCommitView->setDarkPalette(app->isEffectiveThemeDark());
+            });
+
+    return gitCommitView;
+}
+
+void FolderAsWorkspaceDock::showGitCommitDetail(const QByteArray &sha)
+{
+    if (auto *c = ensureGitCommitView()) {
+        // Repo may have switched since constructor; sync.
+        if (gitTab && gitTab->controller()) {
+            c->setRepoRoot(gitTab->controller()->currentRepo());
+        }
+        c->openForSha(sha);
     }
 }
 

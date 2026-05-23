@@ -138,6 +138,8 @@ void GitDiffPainter::configureEditor(ScintillaNext *editor, const GitDiffPalette
     setStyleFB(editor, StyleAdded,      QColor(Qt::black),  QColor(Qt::transparent));
     setStyleFB(editor, StyleDeleted,    QColor(Qt::black),  QColor(Qt::transparent));
     setStyleFB(editor, StyleNoNewline,  pal.fgHunkHeader,   QColor(Qt::transparent));
+    setStyleFB(editor, StyleCommitMeta, pal.commitMetaFg,   QColor(Qt::transparent));
+    setStyleFB(editor, StyleCommitBody, pal.commitBodyFg,   QColor(Qt::transparent));
 
     configureLineMarkers(editor, pal);
 

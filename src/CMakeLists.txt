@@ -196,12 +196,22 @@ qt_add_executable(NotepadAI
 	git/BranchPickerPopup.h
 	git/BranchRefParser.cpp
 	git/BranchRefParser.h
+	git/ChangesPanel.cpp
+	git/ChangesPanel.h
 	git/CommitComposer.cpp
 	git/CommitComposer.h
 	git/FileEncodingDetector.cpp
 	git/FileEncodingDetector.h
 	git/GitController.cpp
 	git/GitController.h
+	git/GitCommitDetail.h
+	git/GitCommitFetcher.cpp
+	git/GitCommitFetcher.h
+	git/GitCommitInfo.h
+	git/GitCommitRenderer.cpp
+	git/GitCommitRenderer.h
+	git/GitCommitView.cpp
+	git/GitCommitView.h
 	git/GitDiffCache.cpp
 	git/GitDiffCache.h
 	git/GitDiffFetcher.cpp
@@ -219,10 +229,24 @@ qt_add_executable(NotepadAI
 	git/GitError.h
 	git/GitErrorClassifier.cpp
 	git/GitErrorClassifier.h
+	git/GitFileAtShaFetcher.cpp
+	git/GitFileAtShaFetcher.h
+	git/GitHistoryFetcher.cpp
+	git/GitHistoryFetcher.h
+	git/GitHistoryItemDelegate.cpp
+	git/GitHistoryItemDelegate.h
+	git/GitHistoryModel.cpp
+	git/GitHistoryModel.h
+	git/GitHistoryView.cpp
+	git/GitHistoryView.h
+	git/GitLogParser.cpp
+	git/GitLogParser.h
 	git/GitNumstatParser.cpp
 	git/GitNumstatParser.h
 	git/GitProcessRunner.cpp
 	git/GitProcessRunner.h
+	git/GitTabSegmentedBar.cpp
+	git/GitTabSegmentedBar.h
 	git/GitRepoDiscovery.cpp
 	git/GitRepoDiscovery.h
 	git/GitRepoInfo.h

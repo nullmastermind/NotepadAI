@@ -86,6 +86,32 @@ void GitProcessRunner::cancel()
     }
 }
 
+void GitProcessRunner::cancelAsync()
+{
+    // Detach the in-flight process from this runner instance and SIGKILL it
+    // without waiting. Used by hot-path callers (history refresh) where a
+    // blocking waitForFinished is unacceptable. The previous callback is
+    // dropped — callers must guard with a generation token.
+    if (!m_proc) return;
+    m_proc->disconnect(this);
+    if (m_proc->state() != QProcess::NotRunning) {
+        m_proc->kill();
+    }
+    // Hand ownership of the dying QProcess to the event loop. Its destructor
+    // closes file descriptors / pipes when Qt reaps it on the next iteration.
+    QProcess *dying = m_proc;
+    m_proc = nullptr;
+    dying->deleteLater();
+    m_cb = nullptr;
+    m_stdoutBuf.clear();
+    m_stderrBuf.clear();
+    m_stderrLineBuf.clear();
+    m_cancelled = false;
+    m_progressMode = false;
+    m_argv.clear();
+    if (m_timeout) m_timeout->stop();
+}
+
 void GitProcessRunner::reset()
 {
     if (m_proc) {
@@ -100,6 +126,7 @@ void GitProcessRunner::reset()
     m_progressMode = false;
     m_argv.clear();
     m_cb = nullptr;
+    // m_maxOutputBytes is a config (set by caller once) — don't clear here.
     if (m_timeout) m_timeout->stop();
 }
 
@@ -173,6 +200,19 @@ void GitProcessRunner::onReadyReadStdout()
 {
     if (!m_proc) return;
     m_stdoutBuf.append(m_proc->readAllStandardOutput());
+    // Output cap (history / commit-show paths set this to bound RAM).
+    // Kill the process when exceeded; onFinished will fire with code -4
+    // and the partial bytes already in m_stdoutBuf.
+    if (m_maxOutputBytes > 0 && m_stdoutBuf.size() > m_maxOutputBytes) {
+        if (!m_cancelled) {
+            m_cancelled = true;
+            // Reuse the cancellation sentinel but tag stderr so onFinished
+            // can override exit to kExitTruncated.
+            m_stderrBuf.append(QByteArrayLiteral("\n__GIT_TRUNCATED__"));
+            m_proc->kill();
+        }
+        return;
+    }
     // keepalive on activity
     if (m_inflightTimeoutMs > 0) m_timeout->start(m_inflightTimeoutMs);
 }
@@ -213,11 +253,14 @@ void GitProcessRunner::onFinished(int code, QProcess::ExitStatus status)
 
     int exit = code;
     QByteArray err = m_stderrBuf;
-    if (m_cancelled) {
-        exit = -2; // sentinel: cancelled
+    if (err.endsWith(QByteArrayLiteral("\n__GIT_TRUNCATED__"))) {
+        exit = kExitTruncated;
+        err.chop(static_cast<int>(qstrlen("\n__GIT_TRUNCATED__")));
+    } else if (m_cancelled) {
+        exit = kExitCancelled;
         if (err.isEmpty()) err = QByteArrayLiteral("cancelled");
     } else if (status == QProcess::CrashExit) {
-        exit = exit ? exit : -3;
+        exit = exit ? exit : kExitCrash;
     }
 
     Callback cb = std::move(m_cb);

@@ -42,13 +42,17 @@ class GitDiffPainter
 public:
     // Style IDs we own.
     enum StyleId : std::uint8_t {
-        StyleDefault    = 0,
-        StyleFileHeader = 1,
-        StyleHunkHeader = 2,
-        StyleContext    = 3,
-        StyleAdded      = 4,
-        StyleDeleted    = 5,
-        StyleNoNewline  = 6
+        StyleDefault     = 0,
+        StyleFileHeader  = 1,
+        StyleHunkHeader  = 2,
+        StyleContext     = 3,
+        StyleAdded       = 4,
+        StyleDeleted     = 5,
+        StyleNoNewline   = 6,
+        // Commit-view-only styles. Renderer prepends a commit header block
+        // (meta + body) before the per-file diff; these styles colour it.
+        StyleCommitMeta  = 7,
+        StyleCommitBody  = 8
     };
 
     // Configure the editor's styling (lexer off, our color palette installed,
