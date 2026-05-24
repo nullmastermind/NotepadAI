@@ -46,6 +46,7 @@ struct AcpMessage
     qint64 timestamp = 0; // ms since epoch
     std::optional<QString> command;
     std::optional<int> exitCode;
+    bool fromGoalAgent = false;
 };
 
 // One entry in the rendered transcript ordering. Either a pointer (by index)
@@ -147,7 +148,9 @@ public slots:
     // pairs; data is stored raw (NOT base64) — base64 encoding only happens
     // in toHistoryJson() / when sent over the wire.
     void appendUserMessage(const QString &text,
-                           const QVector<QPair<QByteArray, QString>> &images);
+                           const QVector<QPair<QByteArray, QString>> &images,
+                           bool fromGoalAgent = false);
+    void appendSystemMessage(const QString &text);
 
 signals:
     void metadataChanged();

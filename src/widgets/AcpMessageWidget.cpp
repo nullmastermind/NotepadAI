@@ -25,6 +25,7 @@
 #include <QRegularExpression>
 #include <QResizeEvent>
 #include <QScrollBar>
+#include <QStyle>
 #include <QTextBlock>
 #include <QTextBrowser>
 #include <QTextCursor>
@@ -39,10 +40,14 @@ namespace {
 
 constexpr const char *kFrameStyleUser =
     "AcpMessageWidget[role=\"user\"] { background: rgba(128, 128, 128, 38); border-radius: 6px; margin-left: 12px; }";
+constexpr const char *kFrameStyleUserGoal =
+    "AcpMessageWidget[role=\"user\"][goalAgent=\"true\"] { background: rgba(180, 140, 50, 48); border: 1px solid rgba(180, 140, 50, 80); border-radius: 6px; margin-left: 12px; }";
 constexpr const char *kFrameStyleAssistant =
     "AcpMessageWidget[role=\"assistant\"] { background: palette(base); border-radius: 6px; }";
 constexpr const char *kFrameStyleThought =
     "AcpMessageWidget[role=\"thought\"] { background: palette(base); border-radius: 6px; }";
+constexpr const char *kFrameStyleSystem =
+    "AcpMessageWidget[role=\"system\"] { background: rgba(180, 140, 50, 32); border: 1px solid rgba(180, 140, 50, 60); border-radius: 6px; }";
 
 // Inline message bubbles size to content — they must never show a scrollbar
 // (it would reserve viewport width and create a feedback loop where the height
@@ -86,8 +91,10 @@ AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
     setProperty("role", m_role);
     setFrameShape(QFrame::NoFrame);
     setStyleSheet(QString::fromLatin1(kFrameStyleUser) +
+                  QString::fromLatin1(kFrameStyleUserGoal) +
                   QString::fromLatin1(kFrameStyleAssistant) +
-                  QString::fromLatin1(kFrameStyleThought));
+                  QString::fromLatin1(kFrameStyleThought) +
+                  QString::fromLatin1(kFrameStyleSystem));
 
     m_layout = new QVBoxLayout(this);
     if (m_role == QLatin1String("thought")) {
@@ -141,6 +148,25 @@ AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
     m_rerenderTimer->setSingleShot(true);
     m_rerenderTimer->setInterval(80);
     connect(m_rerenderTimer, &QTimer::timeout, this, &AcpMessageWidget::rerender);
+}
+
+void AcpMessageWidget::setFromGoalAgent(bool goal)
+{
+    if (m_fromGoalAgent == goal) return;
+    m_fromGoalAgent = goal;
+    setProperty("goalAgent", goal);
+    if (goal && m_layout) {
+        auto *badge = new QLabel(tr("Goal"), this);
+        badge->setStyleSheet(QStringLiteral(
+            "QLabel { font-size: 9px; font-weight: 600; letter-spacing: 0.04em; "
+            "text-transform: uppercase; color: rgb(180, 140, 50); "
+            "background: palette(window); border: 1px solid rgba(180, 140, 50, 80); "
+            "border-radius: 3px; padding: 0px 5px; }"));
+        badge->setFixedHeight(badge->fontMetrics().height() + 4);
+        m_layout->insertWidget(0, badge);
+    }
+    style()->unpolish(this);
+    style()->polish(this);
 }
 
 void AcpMessageWidget::scheduleRerender()

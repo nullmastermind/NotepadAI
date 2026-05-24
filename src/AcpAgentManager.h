@@ -114,6 +114,7 @@ private:
     void teardownSession(Session &session);
 
     AcpAgentRegistry *m_registry = nullptr;
+    ApplicationSettings *m_settings = nullptr;
     AcpHistoryStore *m_historyStore = nullptr;
     QThread *m_historyThread = nullptr;
     QTimer *m_idleReaperTimer = nullptr;

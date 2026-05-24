@@ -18,8 +18,12 @@
 
 #include "AiAgentDock.h"
 
+#include "AcpAgentManager.h"
 #include "AcpConnection.h"
 #include "AcpSessionModel.h"
+#include "ApplicationSettings.h"
+#include "GoalAgent.h"
+#include "dialogs/SendWithGoalDialog.h"
 #include "widgets/AcpSessionView.h"
 
 #include <QCloseEvent>
@@ -34,6 +38,8 @@ AiAgentDock::AiAgentDock(QString sessionId,
                          AcpSessionModel *model,
                          AcpConnection *connection,
                          AcpAgentRegistry *registry,
+                         AcpAgentManager *agentManager,
+                         ApplicationSettings *appSettings,
                          QWidget *parent)
     : QDockWidget(parent)
     , m_sessionId(std::move(sessionId))
@@ -42,6 +48,8 @@ AiAgentDock::AiAgentDock(QString sessionId,
     , m_model(model)
     , m_connection(connection)
     , m_registry(registry)
+    , m_agentManager(agentManager)
+    , m_appSettings(appSettings)
 {
     setAttribute(Qt::WA_DeleteOnClose, true);
     setObjectName(QStringLiteral("AiAgentDock_%1").arg(m_sessionId));
@@ -75,6 +83,15 @@ void AiAgentDock::wireConnectionSignals()
         connect(m_view, &AcpSessionView::restartSessionRequested,
                 this, &AiAgentDock::onRestartFromView,
                 Qt::UniqueConnection);
+        connect(m_view, &AcpSessionView::sendWithGoalRequested,
+                this, &AiAgentDock::sendWithGoal,
+                Qt::UniqueConnection);
+        connect(m_view, &AcpSessionView::goalStopRequested,
+                this, [this]() {
+            if (m_goalAgent && m_goalAgent->status() == GoalAgent::Active) {
+                m_goalAgent->stop();
+            }
+        }, Qt::UniqueConnection);
     }
 }
 
@@ -212,4 +229,120 @@ void AiAgentDock::insertTextToInput(const QString &text)
     if (m_view) {
         m_view->insertTextToInput(text);
     }
+}
+
+void AiAgentDock::sendWithGoal()
+{
+    if (m_goalAgent && m_goalAgent->status() == GoalAgent::Active) {
+        QMessageBox::information(this, tr("Send with Goal"),
+                                 tr("A goal is already active on this session. "
+                                    "Stop the current goal before starting a new one."));
+        return;
+    }
+
+    SendWithGoalDialog dlg(m_registry, m_appSettings, this);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    const auto res = dlg.result();
+    if (res.successCriteriaList.isEmpty())
+        return;
+
+    if (m_goalAgent) {
+        m_goalAgent->deleteLater();
+        m_goalAgent = nullptr;
+    }
+
+    // Capture composer text BEFORE starting the goal — if empty, abort early
+    // without spawning the judge process.
+    QString composerText;
+    if (m_view) {
+        composerText = m_view->takeInputText();
+    }
+    if (composerText.isEmpty()) {
+        QMessageBox::information(this, tr("Send with Goal"),
+                                 tr("Type a message before sending with a goal."));
+        return;
+    }
+
+    m_goalAgent = new GoalAgent(m_agentManager, m_appSettings, this);
+    m_goalAgent->setTargetSession(m_connection, m_model);
+    connect(m_goalAgent, &GoalAgent::debugLogEntry, this, [this](const QString &entry) {
+        m_goalDebugLog.append(entry);
+    });
+    connect(m_goalAgent, &GoalAgent::statusChanged, this, [this](GoalAgent::Status s) {
+        if (!m_model) return;
+        switch (s) {
+        case GoalAgent::Active:
+            m_model->appendSystemMessage(tr("⟡ Goal started"));
+            if (m_view && m_goalAgent) {
+                m_view->setGoalActive(
+                    m_goalAgent->currentCriterionIndex() + 1,
+                    m_goalAgent->criteria().size(),
+                    0, m_goalAgent->maxIterations());
+            }
+            break;
+        case GoalAgent::Achieved:
+            m_model->appendSystemMessage(tr("✓ Goal achieved: %1").arg(
+                m_goalAgent ? m_goalAgent->lastActionText().left(200) : QString()));
+            if (m_view) m_view->setGoalTerminal(tr("Goal achieved"));
+            break;
+        case GoalAgent::Cancelled:
+            m_model->appendSystemMessage(tr("⊘ Goal cancelled"));
+            if (m_view) m_view->setGoalTerminal(tr("Goal stopped"));
+            break;
+        case GoalAgent::Failed:
+            m_model->appendSystemMessage(tr("✗ Goal failed"));
+            if (m_view) m_view->setGoalTerminal(tr("Goal failed"));
+            break;
+        default:
+            break;
+        }
+    });
+    connect(m_goalAgent, &GoalAgent::iterationChanged, this, [this](int critIdx, int iter) {
+        if (!m_model) return;
+        m_model->appendSystemMessage(tr("⟡ Goal: criterion %1, iteration %2/%3")
+            .arg(critIdx + 1).arg(iter).arg(m_goalAgent ? m_goalAgent->maxIterations() : 0));
+        if (m_view && m_goalAgent) {
+            m_view->setGoalActive(
+                critIdx + 1,
+                m_goalAgent->criteria().size(),
+                iter, m_goalAgent->maxIterations());
+        }
+    });
+    connect(m_goalAgent, &GoalAgent::criterionAdvanced, this, [this](int newIdx) {
+        if (!m_model) return;
+        m_model->appendSystemMessage(tr("⟡ Goal: advancing to criterion %1/%2")
+            .arg(newIdx + 1).arg(m_goalAgent ? m_goalAgent->criteria().size() : 0));
+        if (m_view && m_goalAgent) {
+            m_view->setGoalActive(
+                newIdx + 1,
+                m_goalAgent->criteria().size(),
+                0, m_goalAgent->maxIterations());
+        }
+    });
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = m_sessionId;
+    req.successCriteriaList = res.successCriteriaList;
+    req.agentId = res.agentId;
+    req.maxIterations = res.maxIterations;
+    req.promptTemplateId = res.promptTemplateId;
+
+    if (!m_goalAgent->start(req)) {
+        QMessageBox::warning(this, tr("Send with Goal"),
+                             tr("Failed to start goal. Check that the target session "
+                                "is connected and the goal-agent is available."));
+        m_goalAgent->deleteLater();
+        m_goalAgent = nullptr;
+        // Restore the text we took from the composer.
+        if (m_view) m_view->insertTextToInput(composerText);
+        return;
+    }
+
+    // Goal started — now send the composer text to the target session.
+    // The goal agent's promptEnded subscription is already wired, so it will
+    // catch the response.
+    m_model->appendUserMessage(composerText, {});
+    m_connection->sendPrompt(composerText, {});
 }

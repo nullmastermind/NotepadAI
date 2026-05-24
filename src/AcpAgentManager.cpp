@@ -24,6 +24,7 @@
 #include "AcpHistoryStore.h"
 #include "AcpSessionModel.h"
 #include "AiAgentDock.h"
+#include "ApplicationSettings.h"
 #include "ProfileScope.h"
 
 #include <QDateTime>
@@ -45,6 +46,7 @@ constexpr qint64 kDockGoneTimeoutMs = 60 * 60 * 1000;    // 1 hour
 
 AcpAgentManager::AcpAgentManager(ApplicationSettings *settings, QObject *parent)
     : QObject(parent)
+    , m_settings(settings)
 {
     m_registry = new AcpAgentRegistry(settings, this);
 
@@ -106,7 +108,7 @@ AiAgentDock *AcpAgentManager::openAgent(const QString &agentId, const QString &w
 
     wireConnectionToModel(conn, model);
 
-    auto *dock = new AiAgentDock(sessionId, agent.name, projectId, model, conn, m_registry, /*parent=*/nullptr);
+    auto *dock = new AiAgentDock(sessionId, agent.name, projectId, model, conn, m_registry, this, m_settings, /*parent=*/nullptr);
     connect(dock, &QObject::destroyed,
             this, &AcpAgentManager::onDockDestroyed);
     connect(dock, &AiAgentDock::restartRequested,

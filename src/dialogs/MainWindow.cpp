@@ -912,7 +912,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
             AcpAgentRegistry *registry = app->getAiAgentManager()
                 ? app->getAiAgentManager()->registry()
                 : new AcpAgentRegistry(app->getSettings(), this);
-            dlg = new AcpAgentSettingsDialog(registry, this);
+            dlg = new AcpAgentSettingsDialog(registry, app->getSettings(), this);
             dlg->setAttribute(Qt::WA_DeleteOnClose);
         }
 

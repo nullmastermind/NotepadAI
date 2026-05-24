@@ -19,19 +19,26 @@
 #include "AcpAgentSettingsDialog.h"
 #include "ui_AcpAgentSettingsDialog.h"
 
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QHeaderView>
 #include <QInputDialog>
+#include <QJsonDocument>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QTableWidgetItem>
 #include <QUuid>
 #include <QVBoxLayout>
 
 #include "AcpAgentRegistry.h"
+#include "ApplicationSettings.h"
+#include "GoalAgentSettings.h"
 
 
 namespace {
@@ -150,10 +157,13 @@ private:
 } // namespace
 
 
-AcpAgentSettingsDialog::AcpAgentSettingsDialog(AcpAgentRegistry *registry, QWidget *parent)
+AcpAgentSettingsDialog::AcpAgentSettingsDialog(AcpAgentRegistry *registry,
+                                               ApplicationSettings *appSettings,
+                                               QWidget *parent)
     : QDialog(parent)
     , ui(new Ui::AcpAgentSettingsDialog)
     , m_registry(registry)
+    , m_appSettings(appSettings)
 {
     ui->setupUi(this);
 
@@ -189,6 +199,9 @@ AcpAgentSettingsDialog::AcpAgentSettingsDialog(AcpAgentRegistry *registry, QWidg
     refreshDefaultAgentCombo();
     refreshAutoApproveCombo();
     onSelectionChanged();
+
+    buildGoalSection();
+    loadGoalSettings();
 }
 
 AcpAgentSettingsDialog::~AcpAgentSettingsDialog()
@@ -376,4 +389,254 @@ void AcpAgentSettingsDialog::onAutoApproveIndexChanged(int index)
     if (!policy.isEmpty()) {
         m_registry->setAutoApprovePolicy(policy);
     }
+}
+
+// --- Goal Agent Settings Section ---
+
+void AcpAgentSettingsDialog::buildGoalSection()
+{
+    if (!m_appSettings) return;
+
+    m_goalGroup = new QGroupBox(tr("Goal Agent"), this);
+    auto *goalLayout = new QFormLayout(m_goalGroup);
+
+    m_goalAgentCombo = new QComboBox(m_goalGroup);
+    goalLayout->addRow(tr("Goal-agent:"), m_goalAgentCombo);
+
+    m_goalMaxIterSpin = new QSpinBox(m_goalGroup);
+    m_goalMaxIterSpin->setRange(GoalAgentSettings::kMaxIterationsMin,
+                                GoalAgentSettings::kMaxIterationsMax);
+    goalLayout->addRow(tr("Default max iterations:"), m_goalMaxIterSpin);
+
+    auto *tplLabel = new QLabel(tr("Prompt template:"), m_goalGroup);
+    auto *tplRow = new QHBoxLayout();
+    m_goalTemplateCombo = new QComboBox(m_goalGroup);
+    m_goalTemplateCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    auto *tplNewBtn = new QPushButton(tr("New"), m_goalGroup);
+    auto *tplDelBtn = new QPushButton(tr("Delete"), m_goalGroup);
+    tplRow->addWidget(m_goalTemplateCombo);
+    tplRow->addWidget(tplNewBtn);
+    tplRow->addWidget(tplDelBtn);
+    goalLayout->addRow(tplLabel, tplRow);
+
+    m_goalTemplateEdit = new QPlainTextEdit(m_goalGroup);
+    m_goalTemplateEdit->setMinimumHeight(120);
+    m_goalTemplateEdit->setPlaceholderText(
+        tr("Prompt template content. Required placeholders: "
+           "{{goal}}, {{conversation}}, {{iteration}}, {{maxIterations}}, "
+           "{{criterionIndex}}, {{totalCriteria}}"));
+    goalLayout->addRow(tr("Content:"), m_goalTemplateEdit);
+
+    // Insert before the button box
+    auto *rootLayout = qobject_cast<QVBoxLayout *>(layout());
+    if (rootLayout) {
+        rootLayout->insertWidget(rootLayout->count() - 1, m_goalGroup);
+    }
+
+    connect(m_goalAgentCombo, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, &AcpAgentSettingsDialog::onGoalAgentChanged);
+    connect(m_goalMaxIterSpin, qOverload<int>(&QSpinBox::valueChanged),
+            this, &AcpAgentSettingsDialog::onGoalMaxIterChanged);
+    connect(m_goalTemplateCombo, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, &AcpAgentSettingsDialog::onGoalTemplateChanged);
+    connect(m_goalTemplateEdit, &QPlainTextEdit::textChanged,
+            this, &AcpAgentSettingsDialog::onGoalTemplateContentChanged);
+    connect(tplNewBtn, &QPushButton::clicked,
+            this, &AcpAgentSettingsDialog::onGoalTemplateNew);
+    connect(tplDelBtn, &QPushButton::clicked,
+            this, &AcpAgentSettingsDialog::onGoalTemplateDelete);
+}
+
+void AcpAgentSettingsDialog::loadGoalSettings()
+{
+    if (!m_appSettings || !m_goalGroup) return;
+    m_goalLoading = true;
+
+    const QString settingsJson = m_appSettings->get(
+        "Ai/GoalAgentSettings", QString());
+    GoalAgentSettings gs;
+    if (!settingsJson.isEmpty()) {
+        gs = GoalAgentSettings::fromJson(
+            QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+    }
+
+    // Populate goal-agent combo from registry
+    m_goalAgentCombo->clear();
+    if (m_registry) {
+        const auto agents = m_registry->agents();
+        for (const auto &a : agents) {
+            m_goalAgentCombo->addItem(a.name, a.id);
+        }
+        int idx = m_goalAgentCombo->findData(gs.agentId);
+        if (idx >= 0) m_goalAgentCombo->setCurrentIndex(idx);
+    }
+
+    m_goalMaxIterSpin->setValue(gs.defaultMaxIterations);
+    refreshGoalTemplateCombo();
+
+    m_goalLoading = false;
+}
+
+void AcpAgentSettingsDialog::saveGoalSettings()
+{
+    if (!m_appSettings || m_goalLoading) return;
+
+    const QString settingsJson = m_appSettings->get(
+        "Ai/GoalAgentSettings", QString());
+    GoalAgentSettings gs;
+    if (!settingsJson.isEmpty()) {
+        gs = GoalAgentSettings::fromJson(
+            QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+    }
+
+    gs.agentId = m_goalAgentCombo->currentData().toString();
+    gs.defaultMaxIterations = m_goalMaxIterSpin->value();
+
+    // Save current template content
+    const QString tplId = m_goalTemplateCombo->currentData().toString();
+    if (!tplId.isEmpty()) {
+        for (auto &tpl : gs.promptTemplates) {
+            if (tpl.id == tplId) {
+                tpl.content = m_goalTemplateEdit->toPlainText();
+                break;
+            }
+        }
+    }
+
+    m_appSettings->setValue(QStringLiteral("Ai/GoalAgentSettings"),
+                            QString::fromUtf8(QJsonDocument(gs.toJson()).toJson(QJsonDocument::Compact)));
+}
+
+void AcpAgentSettingsDialog::refreshGoalTemplateCombo()
+{
+    if (!m_appSettings || !m_goalTemplateCombo) return;
+
+    const QString settingsJson = m_appSettings->get(
+        "Ai/GoalAgentSettings", QString());
+    GoalAgentSettings gs;
+    if (!settingsJson.isEmpty()) {
+        gs = GoalAgentSettings::fromJson(
+            QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+    }
+
+    m_goalTemplateCombo->blockSignals(true);
+    const QString prevId = m_goalTemplateCombo->currentData().toString();
+    m_goalTemplateCombo->clear();
+    for (const auto &tpl : gs.promptTemplates) {
+        QString label = tpl.name;
+        if (tpl.id == QLatin1String(GoalAgentSettings::kDefaultTemplateId)) {
+            label += tr(" (built-in)");
+        }
+        m_goalTemplateCombo->addItem(label, tpl.id);
+    }
+    int idx = m_goalTemplateCombo->findData(prevId);
+    if (idx < 0) idx = 0;
+    m_goalTemplateCombo->setCurrentIndex(idx);
+    m_goalTemplateCombo->blockSignals(false);
+
+    // Load content for selected template
+    onGoalTemplateChanged(m_goalTemplateCombo->currentIndex());
+}
+
+void AcpAgentSettingsDialog::onGoalAgentChanged(int /*index*/)
+{
+    saveGoalSettings();
+}
+
+void AcpAgentSettingsDialog::onGoalMaxIterChanged(int /*value*/)
+{
+    saveGoalSettings();
+}
+
+void AcpAgentSettingsDialog::onGoalTemplateChanged(int index)
+{
+    if (!m_appSettings || index < 0) return;
+
+    const QString tplId = m_goalTemplateCombo->itemData(index).toString();
+    const QString settingsJson = m_appSettings->get(
+        "Ai/GoalAgentSettings", QString());
+    GoalAgentSettings gs;
+    if (!settingsJson.isEmpty()) {
+        gs = GoalAgentSettings::fromJson(
+            QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+    }
+
+    const GoalPromptTemplate *tpl = gs.findTemplate(tplId);
+    m_goalTemplateEdit->blockSignals(true);
+    m_goalTemplateEdit->setPlainText(tpl ? tpl->content : QString());
+    m_goalTemplateEdit->blockSignals(false);
+}
+
+void AcpAgentSettingsDialog::onGoalTemplateContentChanged()
+{
+    saveGoalSettings();
+}
+
+void AcpAgentSettingsDialog::onGoalTemplateNew()
+{
+    if (!m_appSettings) return;
+
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("New Prompt Template"),
+        tr("Template name:"), QLineEdit::Normal, QString(), &ok);
+    if (!ok || name.trimmed().isEmpty()) return;
+
+    const QString settingsJson = m_appSettings->get(
+        "Ai/GoalAgentSettings", QString());
+    GoalAgentSettings gs;
+    if (!settingsJson.isEmpty()) {
+        gs = GoalAgentSettings::fromJson(
+            QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+    }
+
+    GoalPromptTemplate tpl;
+    tpl.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    tpl.name = name.trimmed();
+    tpl.content = GoalAgentSettings::builtinPromptContent();
+    gs.promptTemplates.append(tpl);
+
+    m_appSettings->setValue(QStringLiteral("Ai/GoalAgentSettings"),
+                            QString::fromUtf8(QJsonDocument(gs.toJson()).toJson(QJsonDocument::Compact)));
+
+    m_goalLoading = true;
+    refreshGoalTemplateCombo();
+    int idx = m_goalTemplateCombo->findData(tpl.id);
+    if (idx >= 0) m_goalTemplateCombo->setCurrentIndex(idx);
+    m_goalLoading = false;
+}
+
+void AcpAgentSettingsDialog::onGoalTemplateDelete()
+{
+    if (!m_appSettings) return;
+
+    const QString tplId = m_goalTemplateCombo->currentData().toString();
+    if (tplId.isEmpty() || tplId == QLatin1String(GoalAgentSettings::kDefaultTemplateId)) {
+        QMessageBox::information(this, tr("Delete Template"),
+            tr("The built-in default template cannot be deleted."));
+        return;
+    }
+
+    const auto answer = QMessageBox::question(this, tr("Delete Template"),
+        tr("Delete template \"%1\"?").arg(m_goalTemplateCombo->currentText()),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (answer != QMessageBox::Yes) return;
+
+    const QString settingsJson = m_appSettings->get(
+        "Ai/GoalAgentSettings", QString());
+    GoalAgentSettings gs;
+    if (!settingsJson.isEmpty()) {
+        gs = GoalAgentSettings::fromJson(
+            QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+    }
+
+    gs.promptTemplates.removeIf([&](const GoalPromptTemplate &t) {
+        return t.id == tplId;
+    });
+
+    m_appSettings->setValue(QStringLiteral("Ai/GoalAgentSettings"),
+                            QString::fromUtf8(QJsonDocument(gs.toJson()).toJson(QJsonDocument::Compact)));
+
+    m_goalLoading = true;
+    refreshGoalTemplateCombo();
+    m_goalLoading = false;
 }

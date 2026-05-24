@@ -39,6 +39,7 @@ class QVBoxLayout;
 class AcpMessageWidget : public QFrame
 {
     Q_OBJECT
+    Q_PROPERTY(bool goalAgent READ isFromGoalAgent)
 
 public:
     AcpMessageWidget(QString role, QWidget *parent = nullptr);
@@ -58,6 +59,9 @@ public:
     // Mark a streaming thought as finished. Collapses the frame for the
     // "thought" role; no-op for other roles.
     void markStreamingDone();
+
+    void setFromGoalAgent(bool goal);
+    bool isFromGoalAgent() const { return m_fromGoalAgent; }
 
     bool isCollapsed() const { return m_collapsed; }
     QString role() const { return m_role; }
@@ -81,6 +85,7 @@ private:
     QString m_role;
     QString m_text;
     bool m_collapsed = false;
+    bool m_fromGoalAgent = false;
 
     QTextBrowser *m_browser = nullptr;     // assistant + non-thought rendered widgets
     QToolButton *m_thoughtHeader = nullptr; // thought role

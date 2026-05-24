@@ -121,6 +121,7 @@ signals:
 
     void requestFailed(const QString &message);
     void errorOccurred(AcpErrorClassifier::AcpErrorKind kind, const QString &friendly);
+    void debugLogAppended(const QString &line);
 
     // Emitted when the agent child process exits mid-session. Listeners
     // (AcpSessionView) surface an "Agent exited" banner with a Restart

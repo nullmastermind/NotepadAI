@@ -1239,6 +1239,7 @@ void AcpConnection::appendDebugLog(QString line)
                          m_debugLog.begin() + (m_debugLog.size() - kDebugLogMaxLines));
     }
     qCDebug(lcAcp).noquote() << prefixed;
+    emit debugLogAppended(prefixed);
 }
 
 void AcpConnection::appendDebugFrameLog(const char *direction, const QByteArray &bytes)

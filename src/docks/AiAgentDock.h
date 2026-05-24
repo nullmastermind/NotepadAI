@@ -22,10 +22,14 @@
 #include <QDockWidget>
 #include <QProcess>
 #include <QString>
+#include <QStringList>
 
+class AcpAgentManager;
 class AcpAgentRegistry;
 class AcpConnection;
 class AcpSessionModel;
+class ApplicationSettings;
+class GoalAgent;
 class QCloseEvent;
 
 // Dock widget hosting one ACP session. Group 4 ships with a placeholder
@@ -51,6 +55,8 @@ public:
                 AcpSessionModel *model,
                 AcpConnection *connection,
                 AcpAgentRegistry *registry,
+                AcpAgentManager *agentManager,
+                ApplicationSettings *appSettings,
                 QWidget *parent = nullptr);
     ~AiAgentDock() override;
 
@@ -58,7 +64,12 @@ public:
     AcpSessionModel *model() const { return m_model; }
     AcpConnection *connection() const { return m_connection; }
     QString workingDirectory() const { return m_workingDirectory; }
+    const QStringList &goalDebugLog() const { return m_goalDebugLog; }
     void insertTextToInput(const QString &text);
+
+    // Open the Send with Goal dialog and start a goal on this session.
+    // No-op if a goal is already active.
+    void sendWithGoal();
 
     // Replace the dock's inner session model + connection without destroying
     // the dock itself. The dock widget, its dock area, and its on-screen
@@ -98,8 +109,12 @@ private:
     AcpSessionModel *m_model;       // non-owning
     AcpConnection *m_connection;    // non-owning
     AcpAgentRegistry *m_registry;   // non-owning
+    AcpAgentManager *m_agentManager; // non-owning
+    ApplicationSettings *m_appSettings; // non-owning
+    GoalAgent *m_goalAgent = nullptr; // owned
     class AcpSessionView *m_view = nullptr; // owned via setWidget
     bool m_agentExited = false;
+    QStringList m_goalDebugLog;
 };
 
 #endif // AI_AGENT_DOCK_H

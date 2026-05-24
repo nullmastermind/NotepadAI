@@ -22,6 +22,7 @@
 #include <QHash>
 #include <QPointer>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QWidget>
 
@@ -70,6 +71,13 @@ public:
     void setBanner(const QString &text, BannerKind kind);
     void clearBanner();
     void insertTextToInput(const QString &text);
+    QString takeInputText();
+    QStringList goalDebugLog() const;
+
+    // Goal status feedback — called by the owning dock when goal state changes.
+    void setGoalActive(int criterionIndex, int totalCriteria, int iteration, int maxIterations);
+    void setGoalTerminal(const QString &statusText);
+    void clearGoalStatus();
 
     // Detach from the current model + connection and re-attach to a new pair
     // (typically after AcpAgentManager::restartSession). Clears the
@@ -83,6 +91,8 @@ signals:
     // Always actionable (independent of any error/exit banner state); the
     // dock decides whether to confirm before forwarding to the manager.
     void restartSessionRequested();
+    void sendWithGoalRequested();
+    void goalStopRequested();
 
 private slots:
     void onShowDebugLogClicked();
@@ -166,6 +176,7 @@ private:
     // ACP debug log popup (non-modal, lazily created on first click).
     QPointer<QDialog> m_debugDialog;
     QPlainTextEdit *m_debugDialogText = nullptr;
+    QCheckBox *m_debugDialogOnlyGoal = nullptr;
 
     // Transcript
     QScrollArea *m_scroll = nullptr;
@@ -185,11 +196,17 @@ private:
     // Attachments
     AcpImageAttachmentList *m_attachmentList = nullptr;
 
+    // Goal status row (visible only while a goal is active)
+    QFrame *m_goalStatusRow = nullptr;
+    QLabel *m_goalStatusLabel = nullptr;
+    QToolButton *m_goalStopBtn = nullptr;
+
     // Input + buttons
     QPlainTextEdit *m_input = nullptr;
     QPushButton *m_sendBtn = nullptr;
     QPushButton *m_cancelBtn = nullptr;
     QToolButton *m_attachBtn = nullptr;
+    QToolButton *m_sendWithGoalBtn = nullptr;
 
     // Usage
     AcpUsageIndicator *m_usageIndicator = nullptr;
@@ -198,6 +215,12 @@ private:
     QLabel *m_elapsedLabel = nullptr;
     QTimer *m_elapsedTimer = nullptr;
     int m_elapsedMs = 0;
+
+    // Goal heartbeat — shown at the transcript tail while a goal is active.
+    QLabel *m_goalElapsedLabel = nullptr;
+    QTimer *m_goalElapsedTimer = nullptr;
+    int m_goalElapsedMs = 0;
+    int m_goalTerminalGeneration = 0;
 
     // Tracking
     QHash<int, AcpMessageWidget *> m_messageWidgets;

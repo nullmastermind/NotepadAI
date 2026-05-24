@@ -27,6 +27,7 @@
 #include "AcpSessionModel.h"
 #include "AcpToolCallCard.h"
 #include "AcpUsageIndicator.h"
+#include "AiAgentDock.h"
 #include "ApplicationSettings.h"
 
 #include <QBuffer>
@@ -251,6 +252,12 @@ void AcpSessionView::buildUi()
     m_elapsedLabel->hide();
     m_transcriptLayout->addWidget(m_elapsedLabel);
 
+    m_goalElapsedLabel = new QLabel(m_transcriptHost);
+    m_goalElapsedLabel->setStyleSheet(QStringLiteral(
+        "QLabel { color: rgb(180, 140, 50); font-style: italic; font-weight: 600; font-size: 11px; }"));
+    m_goalElapsedLabel->hide();
+    m_transcriptLayout->addWidget(m_goalElapsedLabel);
+
     m_transcriptLayout->addStretch();
 
     m_scroll->setWidget(m_transcriptHost);
@@ -340,6 +347,31 @@ void AcpSessionView::buildUi()
     m_attachmentList = new AcpImageAttachmentList(this);
     outer->addWidget(m_attachmentList);
 
+    // 5b. Goal status row — hidden until a goal is active.
+    m_goalStatusRow = new QFrame(this);
+    m_goalStatusRow->setFrameShape(QFrame::NoFrame);
+    m_goalStatusRow->setStyleSheet(QStringLiteral(
+        "QFrame { background: rgba(180, 140, 50, 32); border: 1px solid rgba(180, 140, 50, 60); border-radius: 4px; }"));
+    auto *goalRowLayout = new QHBoxLayout(m_goalStatusRow);
+    goalRowLayout->setContentsMargins(8, 4, 8, 4);
+    goalRowLayout->setSpacing(6);
+    m_goalStatusLabel = new QLabel(m_goalStatusRow);
+    m_goalStatusLabel->setStyleSheet(QStringLiteral(
+        "QLabel { background: transparent; border: none; color: rgb(180, 140, 50); font-weight: 600; font-size: 11px; }"));
+    goalRowLayout->addWidget(m_goalStatusLabel, 1);
+    m_goalStopBtn = new QToolButton(m_goalStatusRow);
+    m_goalStopBtn->setText(tr("Stop"));
+    m_goalStopBtn->setAutoRaise(true);
+    m_goalStopBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_goalStopBtn->setStyleSheet(QStringLiteral(
+        "QToolButton { background: transparent; border: none; color: rgb(180, 100, 50); font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 3px; }"
+        "QToolButton:hover { background: rgba(180, 100, 50, 40); }"));
+    m_goalStopBtn->setToolTip(tr("Stop the running goal"));
+    connect(m_goalStopBtn, &QToolButton::clicked, this, &AcpSessionView::goalStopRequested);
+    goalRowLayout->addWidget(m_goalStopBtn);
+    m_goalStatusRow->hide();
+    outer->addWidget(m_goalStatusRow);
+
     // 6. Input.
     auto *cb = new ChatInputEditCb(m_attachmentList, this);
     cb->onSubmit = [this]() { onSendClicked(); };
@@ -375,8 +407,31 @@ void AcpSessionView::buildUi()
     m_elapsedTimer->setInterval(100); // 0.1 s precision
     connect(m_elapsedTimer, &QTimer::timeout, this, &AcpSessionView::onElapsedTick);
 
+    m_goalElapsedTimer = new QTimer(this);
+    m_goalElapsedTimer->setInterval(100);
+    connect(m_goalElapsedTimer, &QTimer::timeout, this, [this]() {
+        m_goalElapsedMs += 100;
+        if (m_goalElapsedLabel) {
+            const int whole = m_goalElapsedMs / 1000;
+            const int tenths = (m_goalElapsedMs % 1000) / 100;
+            m_goalElapsedLabel->setText(tr("Goal running · %1.%2s").arg(whole).arg(tenths));
+        }
+    });
+
     btnRow->addWidget(m_cancelBtn);
     btnRow->addWidget(m_sendBtn);
+
+    m_sendWithGoalBtn = new QToolButton(this);
+    m_sendWithGoalBtn->setText(tr("Goal"));
+    m_sendWithGoalBtn->setAutoRaise(true);
+    m_sendWithGoalBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_sendWithGoalBtn->setToolTip(tr("Send with Goal — evaluate success criteria automatically"));
+    m_sendWithGoalBtn->setStyleSheet(QStringLiteral(
+        "QToolButton { color: palette(placeholder-text); padding: 1px 6px; border: 1px solid transparent; border-radius: 3px; }"
+        "QToolButton:hover { color: palette(text); border: 1px solid palette(mid); }"));
+    connect(m_sendWithGoalBtn, &QToolButton::clicked, this, &AcpSessionView::sendWithGoalRequested);
+    btnRow->addWidget(m_sendWithGoalBtn);
+
     outer->addLayout(btnRow);
 
     connect(m_sendBtn,   &QPushButton::clicked, this, &AcpSessionView::onSendClicked);
@@ -492,6 +547,9 @@ void AcpSessionView::hydrateFromModel()
             && entry.messageIndex < messages.size()) {
             const AcpMessage &msg = messages.at(entry.messageIndex);
             auto *w = new AcpMessageWidget(msg.role, m_transcriptHost);
+            if (msg.fromGoalAgent) {
+                w->setFromGoalAgent(true);
+            }
             w->setContent(msg.content);
             insertTimelineWidget(w);
             m_messageWidgets.insert(entry.messageIndex, w);
@@ -600,6 +658,11 @@ void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)
     if (m_elapsedLabel) m_elapsedLabel->hide();
     resetElapsed();
 
+    // Stop goal heartbeat on rebind.
+    if (m_goalElapsedTimer) m_goalElapsedTimer->stop();
+    if (m_goalElapsedLabel) m_goalElapsedLabel->hide();
+    clearGoalStatus();
+
     // If the debug-log popup is open, repoint its content at the new
     // connection's log so the user sees the freshly-restarted session.
     if (m_debugDialog && m_debugDialogText) {
@@ -655,6 +718,9 @@ void AcpSessionView::appendMessageWidget(int idx)
     const AcpMessage &msg = m_model->messages().at(idx);
 
     auto *w = new AcpMessageWidget(msg.role, m_transcriptHost);
+    if (msg.fromGoalAgent) {
+        w->setFromGoalAgent(true);
+    }
     w->setContent(msg.content);
     insertTimelineWidget(w);
     m_messageWidgets.insert(idx, w);
@@ -870,9 +936,20 @@ void AcpSessionView::onIsProcessingChanged(bool processing)
         resetElapsed();
         if (m_elapsedLabel) m_elapsedLabel->show();
         if (m_elapsedTimer) m_elapsedTimer->start();
+        // Hide goal heartbeat while agent heartbeat is active.
+        if (m_goalElapsedLabel) m_goalElapsedLabel->hide();
     } else {
         if (m_elapsedTimer) m_elapsedTimer->stop();
         if (m_elapsedLabel) m_elapsedLabel->hide();
+        // Restore goal heartbeat if goal timer is still running, and reset
+        // the counter so it shows time since the last turn ended.
+        if (m_goalElapsedTimer && m_goalElapsedTimer->isActive()) {
+            m_goalElapsedMs = 0;
+            if (m_goalElapsedLabel) {
+                m_goalElapsedLabel->setText(tr("Goal running · 0.0s"));
+                m_goalElapsedLabel->show();
+            }
+        }
     }
 }
 
@@ -953,6 +1030,81 @@ void AcpSessionView::insertTextToInput(const QString &text)
     m_input->setTextCursor(cursor);
     m_input->insertPlainText(toInsert);
     m_input->setFocus();
+}
+
+QString AcpSessionView::takeInputText()
+{
+    if (!m_input) return {};
+    const QString text = m_input->toPlainText().trimmed();
+    m_input->clear();
+    return text;
+}
+
+QStringList AcpSessionView::goalDebugLog() const
+{
+    auto *dock = qobject_cast<AiAgentDock *>(parentWidget());
+    if (dock) return dock->goalDebugLog();
+    return {};
+}
+
+void AcpSessionView::setGoalActive(int criterionIndex, int totalCriteria, int iteration, int maxIterations)
+{
+    if (!m_goalStatusRow) return;
+    QString text;
+    if (totalCriteria > 1) {
+        text = tr("Goal %1/%2 · iter %3/%4")
+                   .arg(criterionIndex).arg(totalCriteria)
+                   .arg(iteration).arg(maxIterations);
+    } else {
+        text = tr("Goal · iter %1/%2").arg(iteration).arg(maxIterations);
+    }
+    m_goalStatusLabel->setText(text);
+    m_goalStopBtn->show();
+    m_goalStatusRow->show();
+    ++m_goalTerminalGeneration; // invalidate any pending auto-hide from a prior goal
+
+    // Start the goal transcript heartbeat only on first activation.
+    // Subsequent calls (iteration/criterion updates) keep the counter running.
+    bool alreadyRunning = m_goalElapsedTimer && m_goalElapsedTimer->isActive();
+    if (!alreadyRunning) {
+        m_goalElapsedMs = 0;
+        if (m_goalElapsedLabel) {
+            m_goalElapsedLabel->setText(tr("Goal running · 0.0s"));
+            bool agentProcessing = m_model && m_model->isProcessing();
+            if (!agentProcessing) {
+                m_goalElapsedLabel->show();
+            }
+        }
+        if (m_goalElapsedTimer) {
+            m_goalElapsedTimer->start();
+        }
+    }
+}
+
+void AcpSessionView::setGoalTerminal(const QString &statusText)
+{
+    if (!m_goalStatusRow) return;
+    m_goalStatusLabel->setText(statusText);
+    m_goalStopBtn->hide();
+    m_goalStatusRow->show();
+
+    // Stop the goal transcript heartbeat.
+    if (m_goalElapsedTimer) m_goalElapsedTimer->stop();
+    if (m_goalElapsedLabel) m_goalElapsedLabel->hide();
+
+    const int gen = ++m_goalTerminalGeneration;
+    QTimer::singleShot(5000, this, [this, gen]() {
+        if (gen != m_goalTerminalGeneration) return;
+        clearGoalStatus();
+    });
+}
+
+void AcpSessionView::clearGoalStatus()
+{
+    if (!m_goalStatusRow) return;
+    m_goalStatusRow->hide();
+    if (m_goalElapsedTimer) m_goalElapsedTimer->stop();
+    if (m_goalElapsedLabel) m_goalElapsedLabel->hide();
 }
 
 void AcpSessionView::onSendClicked()
@@ -1142,10 +1294,14 @@ void AcpSessionView::onShowDebugLogClicked()
 {
     auto refresh = [this]() {
         if (!m_debugDialogText) return;
-        if (m_connection) {
-            m_debugDialogText->setPlainText(m_connection->debugLog().join(QLatin1Char('\n')));
+        if (m_debugDialogOnlyGoal && m_debugDialogOnlyGoal->isChecked()) {
+            m_debugDialogText->setPlainText(goalDebugLog().join(QLatin1Char('\n')));
+        } else if (m_connection) {
+            QStringList combined = m_connection->debugLog();
+            combined.append(goalDebugLog());
+            m_debugDialogText->setPlainText(combined.join(QLatin1Char('\n')));
         } else {
-            m_debugDialogText->setPlainText(tr("(no active connection)"));
+            m_debugDialogText->setPlainText(goalDebugLog().join(QLatin1Char('\n')));
         }
         m_debugDialogText->verticalScrollBar()->setValue(
             m_debugDialogText->verticalScrollBar()->maximum());
@@ -1180,28 +1336,37 @@ void AcpSessionView::onShowDebugLogClicked()
     auto *refreshBtn = new QPushButton(tr("Refresh"), dlg);
     auto *copyBtn = new QPushButton(tr("Copy all"), dlg);
     auto *clearBtn = new QPushButton(tr("Clear buffer"), dlg);
+    auto *onlyGoalCheck = new QCheckBox(tr("Only Goal"), dlg);
     auto *closeBtn = new QPushButton(tr("Close"), dlg);
     btnRow->addWidget(refreshBtn);
     btnRow->addWidget(copyBtn);
     btnRow->addWidget(clearBtn);
+    btnRow->addWidget(onlyGoalCheck);
     btnRow->addStretch();
     btnRow->addWidget(closeBtn);
     layout->addLayout(btnRow);
 
     m_debugDialog = dlg;
     m_debugDialogText = text;
+    m_debugDialogOnlyGoal = onlyGoalCheck;
 
     QPointer<AcpSessionView> self(this);
     connect(refreshBtn, &QPushButton::clicked, dlg, [self]() {
         if (!self || !self->m_debugDialogText) return;
-        if (self->m_connection) {
-            self->m_debugDialogText->setPlainText(
-                self->m_connection->debugLog().join(QLatin1Char('\n')));
+        if (self->m_debugDialogOnlyGoal && self->m_debugDialogOnlyGoal->isChecked()) {
+            self->m_debugDialogText->setPlainText(self->goalDebugLog().join(QLatin1Char('\n')));
+        } else if (self->m_connection) {
+            QStringList combined = self->m_connection->debugLog();
+            combined.append(self->goalDebugLog());
+            self->m_debugDialogText->setPlainText(combined.join(QLatin1Char('\n')));
         } else {
-            self->m_debugDialogText->setPlainText(tr("(no active connection)"));
+            self->m_debugDialogText->setPlainText(self->goalDebugLog().join(QLatin1Char('\n')));
         }
         self->m_debugDialogText->verticalScrollBar()->setValue(
             self->m_debugDialogText->verticalScrollBar()->maximum());
+    });
+    connect(onlyGoalCheck, &QCheckBox::toggled, dlg, [self, refreshBtn]() {
+        if (refreshBtn) refreshBtn->click();
     });
     connect(copyBtn, &QPushButton::clicked, dlg, [text]() {
         QGuiApplication::clipboard()->setText(text->toPlainText());
@@ -1214,7 +1379,10 @@ void AcpSessionView::onShowDebugLogClicked()
     });
     connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::close);
     connect(dlg, &QDialog::destroyed, this, [self]() {
-        if (self) self->m_debugDialogText = nullptr;
+        if (self) {
+            self->m_debugDialogText = nullptr;
+            self->m_debugDialogOnlyGoal = nullptr;
+        }
     });
 
     refresh();

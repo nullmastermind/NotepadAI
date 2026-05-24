@@ -11,6 +11,10 @@ qt_add_executable(NotepadAI
 	AcpSessionModel.h
 	ActionUtils.h
 	ApplicationSettings.h
+	GoalActionParser.h
+	GoalAgent.h
+	GoalAgentSettings.h
+	GoalPromptRenderer.h
 	ByteArrayUtils.h
 	ColorPickerDelegate.h
 	ComboBoxDelegate.h
@@ -76,6 +80,10 @@ qt_add_executable(NotepadAI
 	AcpHistoryStore.cpp
 	AcpProtocol.cpp
 	AcpSessionModel.cpp
+	GoalActionParser.cpp
+	GoalAgent.cpp
+	GoalAgentSettings.cpp
+	GoalPromptRenderer.cpp
 	ColorPickerDelegate.cpp
 	ComboBoxDelegate.cpp
 	Converter.cpp
@@ -166,6 +174,8 @@ qt_add_executable(NotepadAI
 	dialogs/AcpAgentSettingsDialog.cpp
 	dialogs/AcpAgentSettingsDialog.h
 	dialogs/AcpAgentSettingsDialog.ui
+	dialogs/SendWithGoalDialog.cpp
+	dialogs/SendWithGoalDialog.h
 	dialogs/ColumnEditorDialog.cpp
 	dialogs/ColumnEditorDialog.h
 	dialogs/ColumnEditorDialog.ui

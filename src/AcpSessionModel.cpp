@@ -207,6 +207,7 @@ void AcpSessionModel::loadFromDisk()
         if (ec.isDouble()) {
             msg.exitCode = ec.toInt();
         }
+        msg.fromGoalAgent = mo.value(QStringLiteral("fromGoalAgent")).toBool(false);
         m_messages.append(msg);
     }
 
@@ -282,6 +283,9 @@ QJsonObject AcpSessionModel::toHistoryJson() const
         }
         if (m.exitCode.has_value()) {
             mo.insert(QStringLiteral("exitCode"), *m.exitCode);
+        }
+        if (m.fromGoalAgent) {
+            mo.insert(QStringLiteral("fromGoalAgent"), true);
         }
         msgs.append(mo);
     }
@@ -644,11 +648,13 @@ void AcpSessionModel::onPromptEnded()
 }
 
 void AcpSessionModel::appendUserMessage(const QString &text,
-                                       const QVector<QPair<QByteArray, QString>> &images)
+                                       const QVector<QPair<QByteArray, QString>> &images,
+                                       bool fromGoalAgent)
 {
     AcpMessage msg;
     msg.role = QStringLiteral("user");
     msg.timestamp = QDateTime::currentMSecsSinceEpoch();
+    msg.fromGoalAgent = fromGoalAgent;
     if (!text.isEmpty()) {
         AcpContentBlock tb;
         tb.kind = AcpContentBlock::Kind::Text;
@@ -674,6 +680,28 @@ void AcpSessionModel::appendUserMessage(const QString &text,
     // A user-initiated message also closes any streaming assistant/thought.
     m_streamingAssistantMessageIndex = -1;
     m_streamingThoughtMessageIndex = -1;
+
+    emit messageAppended(idx);
+    schedulePersistIfNeeded();
+}
+
+void AcpSessionModel::appendSystemMessage(const QString &text)
+{
+    AcpMessage msg;
+    msg.role = QStringLiteral("system");
+    msg.timestamp = QDateTime::currentMSecsSinceEpoch();
+    AcpContentBlock tb;
+    tb.kind = AcpContentBlock::Kind::Text;
+    tb.text = text;
+    msg.content.append(tb);
+    m_messages.append(msg);
+    const int idx = m_messages.size() - 1;
+
+    AcpTimelineEntry entry;
+    entry.kind = AcpTimelineEntry::Kind::Message;
+    entry.messageIndex = idx;
+    entry.groupId = m_currentGroupId;
+    m_timeline.append(entry);
 
     emit messageAppended(idx);
     schedulePersistIfNeeded();
