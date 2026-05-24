@@ -1684,6 +1684,44 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
     // 60s autosave timer flushes them (defense vs crash mid-session).
     connect(dock, &FolderAsWorkspaceDock::stateDirty, this,
             [this]() { m_workspaceStateDirty = true; });
+
+    connect(dock, &FolderAsWorkspaceDock::treeContextMenuRequested, this,
+            [this](QMenu *menu, const QString &absPath, bool isDir) {
+        const auto docks = findChildren<AiAgentDock *>();
+        if (docks.isEmpty()) return;
+
+        AiAgentDock *targetDock = nullptr;
+        for (auto *d : docks) {
+            if (d->isVisible()) {
+                targetDock = d;
+                break;
+            }
+        }
+        if (!targetDock) {
+            targetDock = docks.first();
+        }
+
+        auto *sendToAi = new QAction(tr("Send to AI"), menu);
+        connect(sendToAi, &QAction::triggered, this, [this, absPath, isDir, targetDock]() {
+            QString relPath = absPath;
+            const QString wsRoot = currentWorkspaceRoot();
+            if (!wsRoot.isEmpty() && relPath.startsWith(wsRoot)) {
+                relPath = relPath.mid(wsRoot.length());
+                if (relPath.startsWith(QLatin1Char('/')) || relPath.startsWith(QLatin1Char('\\')))
+                    relPath = relPath.mid(1);
+            }
+            QString text;
+            if (isDir && !relPath.endsWith(QLatin1Char('/'))) {
+                text = QStringLiteral("@%1/ ").arg(relPath);
+            } else {
+                text = QStringLiteral("@%1 ").arg(relPath);
+            }
+            targetDock->insertTextToInput(text);
+            targetDock->setVisible(true);
+            targetDock->raise();
+        });
+        menu->addAction(sendToAi);
+    });
 }
 
 void MainWindow::wireWorkspaceGitSignals(FolderAsWorkspaceDock *dock)
@@ -2769,7 +2807,7 @@ void MainWindow::addEditor(ScintillaNext *editor)
 
                 QString text;
                 if (!mention.isEmpty()) {
-                    text = mention + QStringLiteral("\n");
+                    text = mention + QStringLiteral(" ");
                 }
                 targetDock->insertTextToInput(text);
                 targetDock->setVisible(true);
@@ -3027,7 +3065,42 @@ void MainWindow::tabBarRightClicked(ScintillaNext *editor)
         actionNames = settings->value("Gui/TabBarContextMenu").toStringList();
     }
 
-    buildMenu(actionNames)->popup(QCursor::pos());
+    auto *menu = buildMenu(actionNames);
+
+    // "Send to AI" — when an AI dock exists and the editor has a file path.
+    AiAgentDock *targetDock = nullptr;
+    if (editor->isFile()) {
+        const auto docks = findChildren<AiAgentDock *>();
+        for (auto *d : docks) {
+            if (d->isVisible()) {
+                targetDock = d;
+                break;
+            }
+        }
+        if (!targetDock && !docks.isEmpty()) {
+            targetDock = docks.first();
+        }
+    }
+    if (targetDock) {
+        menu->addSeparator();
+        auto *sendToAi = new QAction(tr("Send to AI"), menu);
+        connect(sendToAi, &QAction::triggered, this, [this, editor, targetDock]() {
+            QString filePath = editor->getFilePath();
+            const QString wsRoot = currentWorkspaceRoot();
+            if (!wsRoot.isEmpty() && filePath.startsWith(wsRoot)) {
+                filePath = filePath.mid(wsRoot.length());
+                if (filePath.startsWith(QLatin1Char('/')) || filePath.startsWith(QLatin1Char('\\')))
+                    filePath = filePath.mid(1);
+            }
+            const QString text = QStringLiteral("@%1 ").arg(filePath);
+            targetDock->insertTextToInput(text);
+            targetDock->setVisible(true);
+            targetDock->raise();
+        });
+        menu->addAction(sendToAi);
+    }
+
+    menu->popup(QCursor::pos());
 }
 
 void MainWindow::languageMenuTriggered()

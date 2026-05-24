@@ -39,6 +39,7 @@
 #include <QFileInfo>
 #include <QHelpEvent>
 #include <QItemSelectionModel>
+#include <QMenu>
 #include <QMetaObject>
 #include <QStyle>
 #include <QTabWidget>
@@ -80,6 +81,8 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(QWidget *parent) :
             emit fileDoubleClicked(model->filePath(index));
         }
     });
+
+    wireTreeContextMenu();
 
     const int wakeUpDelay = QApplication::style()->styleHint(QStyle::SH_ToolTip_WakeUpDelay);
     tooltipTimer->setSingleShot(true);
@@ -138,6 +141,8 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(const QString &initialPath, QWidget
             emit fileDoubleClicked(model->filePath(index));
         }
     });
+
+    wireTreeContextMenu();
 
     const int wakeUpDelay = QApplication::style()->styleHint(QStyle::SH_ToolTip_WakeUpDelay);
     tooltipTimer->setSingleShot(true);
@@ -207,6 +212,30 @@ void FolderAsWorkspaceDock::wireFileTreeGitDecorations()
                     });
         }
     }
+}
+
+void FolderAsWorkspaceDock::wireTreeContextMenu()
+{
+    ui->treeView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(ui->treeView, &QTreeView::customContextMenuRequested, this, [this](const QPoint &pos) {
+        const QModelIndex index = ui->treeView->indexAt(pos);
+        if (!index.isValid()) return;
+
+        const QString absPath = model->filePath(index);
+        const bool isDir = model->isDir(index);
+
+        auto *menu = new QMenu(this);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+
+        emit treeContextMenuRequested(menu, absPath, isDir);
+
+        if (menu->isEmpty()) {
+            delete menu;
+            return;
+        }
+
+        menu->popup(ui->treeView->viewport()->mapToGlobal(pos));
+    });
 }
 
 void FolderAsWorkspaceDock::maybeScheduleGitTabForDecoration()

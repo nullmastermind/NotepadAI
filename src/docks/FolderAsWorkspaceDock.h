@@ -35,6 +35,7 @@ class FolderAsWorkspaceDock;
 }
 
 class FolderAsWorkspaceFsModel;
+class QMenu;
 class QTimer;
 class GitTabWidget;
 class GitDiffViewController;
@@ -121,6 +122,7 @@ signals:
     // switch, current item change). MainWindow uses this to set its
     // workspace-state dirty bit for the 60s autosave path.
     void stateDirty();
+    void treeContextMenuRequested(QMenu *menu, const QString &path, bool isDir);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -209,6 +211,7 @@ private:
     // from each ctor. Safe to call when qApp is not the NotepadNextApplication
     // (tests instantiate the dock standalone): the theme connect is skipped.
     void wireFileTreeGitDecorations();
+    void wireTreeContextMenu();
 
     // Schedule a deferred ensureGitTab() if the workspace has a directory
     // and the file-tree decoration setting is enabled. No-op if gitTab is

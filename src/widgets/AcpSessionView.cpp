@@ -932,8 +932,26 @@ void AcpSessionView::onErrorOccurred(AcpErrorClassifier::AcpErrorKind kind, cons
 void AcpSessionView::insertTextToInput(const QString &text)
 {
     if (!m_input) return;
-    m_input->moveCursor(QTextCursor::End);
-    m_input->insertPlainText(text);
+    QTextCursor cursor = m_input->textCursor();
+    const int pos = cursor.position();
+    const QString doc = m_input->toPlainText();
+
+    if (pos > 0) {
+        const QChar before = doc.at(pos - 1);
+        if (before != QLatin1Char(' ') && before != QLatin1Char('\n')) {
+            cursor.insertText(QStringLiteral(" "));
+        }
+    }
+
+    QString toInsert = text;
+    const bool atEnd = pos >= doc.size();
+    const QChar after = atEnd ? QLatin1Char('\n') : doc.at(pos);
+    if (toInsert.endsWith(QLatin1Char(' ')) && (after == QLatin1Char(' ') || after == QLatin1Char('\n'))) {
+        toInsert.chop(1);
+    }
+
+    m_input->setTextCursor(cursor);
+    m_input->insertPlainText(toInsert);
     m_input->setFocus();
 }
 
