@@ -30,6 +30,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QItemSelectionModel>
+#include <QMenu>
 #include <QPushButton>
 #include <QTreeView>
 #include <QVBoxLayout>
@@ -122,6 +123,26 @@ void ChangesPanel::buildUi()
             this, &ChangesPanel::onTreeClicked);
     connect(m_tree, &QTreeView::doubleClicked,
             this, &ChangesPanel::onTreeDoubleClicked);
+
+    m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_tree, &QTreeView::customContextMenuRequested, this, [this](const QPoint &pos) {
+        const QModelIndex index = m_tree->indexAt(pos);
+        if (!index.isValid()) return;
+        if (index.data(GitStatusModel::IsSectionRole).toBool()) return;
+        const QString rel = index.data(GitStatusModel::RelPathRole).toString();
+        if (rel.isEmpty()) return;
+
+        auto *menu = new QMenu(this);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+
+        emit treeContextMenuRequested(menu, rel);
+
+        if (menu->isEmpty()) {
+            delete menu;
+            return;
+        }
+        menu->popup(m_tree->viewport()->mapToGlobal(pos));
+    });
 }
 
 void ChangesPanel::setStatusModel(GitStatusModel *model)

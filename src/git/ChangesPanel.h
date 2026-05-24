@@ -26,6 +26,7 @@
 #include <QStringList>
 #include <QWidget>
 
+class QMenu;
 class QModelIndex;
 class QPushButton;
 class QTreeView;
@@ -92,6 +93,7 @@ signals:
     void fileActivated(const QString &absPath);
     void diffRequested(const GitStatusEntry &entry);
     void openSubmoduleRequested(const QString &absPath);
+    void treeContextMenuRequested(QMenu *menu, const QString &relPath);
 
 private slots:
     void onStageClicked();

@@ -272,6 +272,8 @@ void GitTabWidget::buildUi()
             this, &GitTabWidget::onChangesFileActivated);
     connect(m_changesPanel, &ChangesPanel::openSubmoduleRequested,
             this, &GitTabWidget::onChangesOpenSubmoduleRequested);
+    connect(m_changesPanel, &ChangesPanel::treeContextMenuRequested,
+            this, &GitTabWidget::changesTreeContextMenuRequested);
 
     // History view → forward openCommitDetailRequested up to the host.
     connect(m_historyView, &GitHistoryView::openCommitDetailRequested,

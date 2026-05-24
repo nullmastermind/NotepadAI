@@ -101,6 +101,7 @@ signals:
     void gitDiffRequested(const GitStatusEntry &entry);
     void gitOpenSubmoduleRequested(const QString &absPath);
     void gitOpenCommitDetailRequested(const QByteArray &sha);
+    void gitChangesContextMenuRequested(QMenu *menu, const QString &relPath);
     // Forwarded from the per-dock GitDiffViewController — host raises this
     // editor as the active tab so the user lands on the rendered diff.
     void gitDiffPreviewRendered(ScintillaNext *editor);

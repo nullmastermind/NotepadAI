@@ -1774,6 +1774,32 @@ void MainWindow::wireWorkspaceGitSignals(FolderAsWorkspaceDock *dock)
                 qWarning("Commit detail failed for %s: %s",
                          sha.constData(), qPrintable(message));
             });
+
+    connect(dock, &FolderAsWorkspaceDock::gitChangesContextMenuRequested, this,
+            [this](QMenu *menu, const QString &relPath) {
+        const auto docks = findChildren<AiAgentDock *>();
+        if (docks.isEmpty()) return;
+
+        AiAgentDock *targetDock = nullptr;
+        for (auto *d : docks) {
+            if (d->isVisible()) {
+                targetDock = d;
+                break;
+            }
+        }
+        if (!targetDock) {
+            targetDock = docks.first();
+        }
+
+        auto *sendToAi = new QAction(tr("Send to AI"), menu);
+        connect(sendToAi, &QAction::triggered, this, [this, relPath, targetDock]() {
+            const QString text = QStringLiteral("@%1 ").arg(relPath);
+            targetDock->insertTextToInput(text);
+            targetDock->setVisible(true);
+            targetDock->raise();
+        });
+        menu->addAction(sendToAi);
+    });
 }
 
 void MainWindow::restoreOpenWorkspaces()
@@ -2767,9 +2793,10 @@ void MainWindow::addEditor(ScintillaNext *editor)
         menu->addMenu(ui->menuClearMarks);
 
         // "Send to AI" — prepend when text is selected and an AI dock exists.
+        // Skip for diff/history views and unsaved buffers — they have no real file path.
         const bool hasSelection = editor->selectionStart() != editor->selectionEnd();
         AiAgentDock *targetDock = nullptr;
-        if (hasSelection) {
+        if (hasSelection && editor->isFile() && !app->getEditorManager()->isDiffView(editor)) {
             const auto docks = findChildren<AiAgentDock *>();
             for (auto *d : docks) {
                 if (d->isVisible()) {

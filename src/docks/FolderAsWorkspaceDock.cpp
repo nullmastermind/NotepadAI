@@ -372,6 +372,8 @@ void FolderAsWorkspaceDock::ensureGitTab()
             this, &FolderAsWorkspaceDock::gitOpenSubmoduleRequested);
     connect(gitTab, &GitTabWidget::openCommitDetailRequested,
             this, &FolderAsWorkspaceDock::gitOpenCommitDetailRequested);
+    connect(gitTab, &GitTabWidget::changesTreeContextMenuRequested,
+            this, &FolderAsWorkspaceDock::gitChangesContextMenuRequested);
 
     // File-tree decoration: subscribe to status changes so the FsModel
     // repaints only the rows that changed. The controller is created lazily

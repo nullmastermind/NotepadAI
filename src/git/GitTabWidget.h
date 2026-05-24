@@ -58,8 +58,8 @@ signals:
     void fileActivated(const QString &absPath);
     void diffRequested(const GitStatusEntry &entry);
     void openSubmoduleRequested(const QString &absPath);
-    // History tab: user clicked a commit row.
     void openCommitDetailRequested(const QByteArray &sha);
+    void changesTreeContextMenuRequested(QMenu *menu, const QString &relPath);
 
 private slots:
     void onRepoSelected(int index);
