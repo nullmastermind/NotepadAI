@@ -18,6 +18,7 @@
 
 #include "AcpToolCallCard.h"
 
+#include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -235,9 +236,10 @@ AcpToolCallCard::AcpToolCallCard(const AcpProtocol::AcpToolCall &initial, QWidge
     , m_status(initial.status)
     , m_groupId(initial.groupId)
     , m_content(initial.content)
+    , m_rawInput(initial.rawInput)
 {
-    setFrameShape(QFrame::StyledPanel);
-    setStyleSheet(QStringLiteral("AcpToolCallCard { background: palette(base); border: 1px solid palette(mid); border-radius: 4px; }"));
+    setFrameShape(QFrame::NoFrame);
+    setStyleSheet(QStringLiteral("AcpToolCallCard { background: palette(base); border-radius: 4px; }"));
 
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(6, 4, 6, 4);
@@ -298,6 +300,9 @@ void AcpToolCallCard::apply(const AcpProtocol::AcpToolCallUpdate &update)
     if (update.content.has_value()) {
         m_content = *update.content;
     }
+    if (update.rawInput.has_value()) {
+        m_rawInput = *update.rawInput;
+    }
     refreshHeader();
     rerenderBody();
     maybeAutoExpandForDiff();
@@ -330,10 +335,152 @@ QString AcpToolCallCard::statusGlyph() const
     return QStringLiteral("⏳");
 }
 
+QString AcpToolCallCard::computeEnrichedTitle() const
+{
+    if (m_title == QLatin1String("TaskOutput")) {
+        return m_status == QLatin1String("running")
+            ? tr("Waiting for background jobs...")
+            : tr("Background jobs complete");
+    }
+
+    QString t = m_title.isEmpty() ? m_id : m_title;
+    const QString tLower = t.toLower();
+
+    if (t.contains(QLatin1String("codebase-retrieval"))) {
+        const QString req = m_rawInput.value(QStringLiteral("information_request")).toString();
+        if (!req.isEmpty())
+            return QStringLiteral("Context Engine: \"%1\"").arg(req);
+        return QStringLiteral("Context Engine");
+    }
+
+    if (tLower == QLatin1String("skill")) {
+        const QString skill = m_rawInput.value(QStringLiteral("skill")).toString();
+        if (!skill.isEmpty())
+            return QStringLiteral("Skill: %1").arg(skill);
+        return QStringLiteral("Skill");
+    }
+
+    if (tLower == QLatin1String("agent") || tLower == QLatin1String("task")) {
+        const QString type = m_rawInput.value(QStringLiteral("subagent_type")).toString();
+        const QString desc = m_rawInput.value(QStringLiteral("description")).toString();
+        if (!type.isEmpty() && !desc.isEmpty())
+            return QStringLiteral("Agent %1: %2").arg(type, desc);
+        if (!type.isEmpty())
+            return QStringLiteral("Agent %1").arg(type);
+        if (!desc.isEmpty())
+            return QStringLiteral("Agent: %1").arg(desc);
+        return t;
+    }
+    if (t.startsWith(QLatin1String("sub-agent-"))) {
+        const int colonIdx = t.indexOf(QLatin1Char(':'));
+        if (colonIdx >= 0) {
+            const QString type = t.mid(10, colonIdx - 10);
+            const QString desc = t.mid(colonIdx + 1).trimmed();
+            return QStringLiteral("Agent %1: %2").arg(type, desc);
+        }
+        return t.mid(10);
+    }
+
+    static const QStringList readTitles = {
+        QStringLiteral("read"), QStringLiteral("read file")
+    };
+    if (readTitles.contains(tLower)) {
+        const QString path = m_rawInput.value(QStringLiteral("file_path")).toString();
+        if (!path.isEmpty())
+            return QStringLiteral("Read: %1").arg(path);
+        return t;
+    }
+
+    static const QStringList writeTitles = {
+        QStringLiteral("write"), QStringLiteral("write file")
+    };
+    if (writeTitles.contains(tLower)) {
+        const QString path = m_rawInput.value(QStringLiteral("file_path")).toString();
+        if (!path.isEmpty())
+            return QStringLiteral("Write: %1").arg(path);
+        return t;
+    }
+
+    static const QStringList editTitles = {
+        QStringLiteral("edit"), QStringLiteral("edit file")
+    };
+    if (editTitles.contains(tLower)) {
+        const QString path = m_rawInput.value(QStringLiteral("file_path")).toString();
+        if (!path.isEmpty())
+            return QStringLiteral("Edit: %1").arg(path);
+        return t;
+    }
+
+    static const QStringList bashTitles = {
+        QStringLiteral("bash"), QStringLiteral("terminal")
+    };
+    if (bashTitles.contains(tLower)) {
+        QString cmd = m_rawInput.value(QStringLiteral("command")).toString();
+        if (!cmd.isEmpty()) {
+            const int nl = cmd.indexOf(QLatin1Char('\n'));
+            if (nl >= 0) cmd.truncate(nl);
+            return QStringLiteral("Bash: %1").arg(cmd);
+        }
+        const QString desc = m_rawInput.value(QStringLiteral("description")).toString();
+        if (!desc.isEmpty())
+            return QStringLiteral("Bash: %1").arg(desc);
+        return t;
+    }
+
+    static const QStringList grepTitles = {
+        QStringLiteral("grep"), QStringLiteral("search")
+    };
+    if (grepTitles.contains(tLower)) {
+        const QString pattern = m_rawInput.value(QStringLiteral("pattern")).toString();
+        if (!pattern.isEmpty())
+            return QStringLiteral("Grep: %1").arg(pattern);
+        return t;
+    }
+
+    static const QStringList globTitles = {
+        QStringLiteral("glob"), QStringLiteral("find")
+    };
+    if (globTitles.contains(tLower)) {
+        const QString pattern = m_rawInput.value(QStringLiteral("pattern")).toString();
+        if (!pattern.isEmpty())
+            return QStringLiteral("Glob: %1").arg(pattern);
+        return t;
+    }
+
+    static const QStringList webSearchTitles = {
+        QStringLiteral("websearch"), QStringLiteral("web search")
+    };
+    if (webSearchTitles.contains(tLower)) {
+        const QString query = m_rawInput.value(QStringLiteral("query")).toString();
+        if (!query.isEmpty())
+            return QStringLiteral("Search: \"%1\"").arg(query);
+        return t;
+    }
+
+    static const QStringList webFetchTitles = {
+        QStringLiteral("webfetch"), QStringLiteral("web fetch")
+    };
+    if (webFetchTitles.contains(tLower)) {
+        const QString url = m_rawInput.value(QStringLiteral("url")).toString();
+        if (!url.isEmpty())
+            return QStringLiteral("Fetch: %1").arg(url);
+        return t;
+    }
+
+    return t;
+}
+
 void AcpToolCallCard::refreshHeader()
 {
     m_statusIcon->setText(statusGlyph());
-    m_titleLabel->setText(m_title.isEmpty() ? tr("Tool call") : m_title);
+    const QString enriched = computeEnrichedTitle();
+    const int availableWidth = m_titleLabel->width();
+    if (availableWidth > 0) {
+        const QFontMetrics fm(m_titleLabel->font());
+        m_titleLabel->setText(fm.elidedText(enriched, Qt::ElideRight, availableWidth));
+    } else {
+        m_titleLabel->setText(enriched);
+    }
 }
 
 void AcpToolCallCard::rerenderBody()
@@ -476,6 +623,7 @@ void AcpToolCallCard::refitBodyHeight()
 void AcpToolCallCard::resizeEvent(QResizeEvent *event)
 {
     QFrame::resizeEvent(event);
+    refreshHeader();
     refitBodyHeight();
 }
 

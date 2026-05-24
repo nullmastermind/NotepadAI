@@ -88,6 +88,7 @@ struct AcpToolCall
     QString title;
     QString status;
     QJsonArray content;
+    QJsonObject rawInput;
     int groupId{0};
 };
 
@@ -96,6 +97,7 @@ struct AcpToolCallUpdate
     QString id;
     std::optional<QString> status;
     std::optional<QJsonArray> content;
+    std::optional<QJsonObject> rawInput;
 };
 
 struct AcpPlanEntry

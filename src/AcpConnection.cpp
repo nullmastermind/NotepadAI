@@ -682,6 +682,7 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         tc.title = update.value(QStringLiteral("title")).toString();
         tc.status = update.value(QStringLiteral("status")).toString();
         tc.content = update.value(QStringLiteral("content")).toArray();
+        tc.rawInput = update.value(QStringLiteral("rawInput")).toObject();
         tc.groupId = update.value(QStringLiteral("groupId")).toInt(0);
         emit toolCallReceived(tc);
     } else if (kind == QLatin1String("tool_call_update")) {
@@ -695,6 +696,10 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         const QJsonValue c = update.value(QStringLiteral("content"));
         if (c.isArray()) {
             u.content = c.toArray();
+        }
+        const QJsonValue ri = update.value(QStringLiteral("rawInput"));
+        if (ri.isObject()) {
+            u.rawInput = ri.toObject();
         }
         emit toolCallUpdated(u);
     } else if (kind == QLatin1String("plan")) {

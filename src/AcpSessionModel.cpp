@@ -222,6 +222,7 @@ void AcpSessionModel::loadFromDisk()
         tc.title = to.value(QStringLiteral("title")).toString();
         tc.status = to.value(QStringLiteral("status")).toString();
         tc.content = to.value(QStringLiteral("content")).toArray();
+        tc.rawInput = to.value(QStringLiteral("rawInput")).toObject();
         tc.groupId = to.value(QStringLiteral("groupId")).toInt();
         if (!tc.id.isEmpty()) {
             m_toolCalls.insert(tc.id, tc);
@@ -295,6 +296,35 @@ QJsonObject AcpSessionModel::toHistoryJson() const
         to.insert(QStringLiteral("status"), tc.status);
         to.insert(QStringLiteral("content"), tc.content);
         to.insert(QStringLiteral("groupId"), tc.groupId);
+        if (!tc.rawInput.isEmpty()) {
+            QJsonObject slim;
+            auto copyField = [&](const QLatin1String &key) {
+                if (tc.rawInput.contains(key))
+                    slim.insert(key, tc.rawInput.value(key));
+            };
+            copyField(QLatin1String("file_path"));
+            copyField(QLatin1String("pattern"));
+            copyField(QLatin1String("query"));
+            copyField(QLatin1String("url"));
+            copyField(QLatin1String("information_request"));
+            copyField(QLatin1String("skill"));
+            copyField(QLatin1String("subagent_type"));
+            if (tc.rawInput.contains(QLatin1String("command"))) {
+                QString cmd = tc.rawInput.value(QLatin1String("command")).toString();
+                const int nl = cmd.indexOf(QLatin1Char('\n'));
+                if (nl >= 0) cmd.truncate(nl);
+                if (cmd.size() > 200) cmd.truncate(200);
+                slim.insert(QStringLiteral("command"), cmd);
+            }
+            if (tc.rawInput.contains(QLatin1String("description"))) {
+                QString desc = tc.rawInput.value(QLatin1String("description")).toString();
+                if (desc.size() > 200) desc.truncate(200);
+                slim.insert(QStringLiteral("description"), desc);
+            }
+            if (!slim.isEmpty()) {
+                to.insert(QStringLiteral("rawInput"), slim);
+            }
+        }
         tcs.append(to);
     }
     obj.insert(QStringLiteral("toolCalls"), tcs);
@@ -495,6 +525,9 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         if (update.content.has_value()) {
             tc.content = *update.content;
         }
+        if (update.rawInput.has_value()) {
+            tc.rawInput = *update.rawInput;
+        }
         tc.groupId = m_currentGroupId;
         m_toolCalls.insert(update.id, tc);
 
@@ -509,6 +542,9 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         }
         if (update.content.has_value()) {
             it.value().content = *update.content;
+        }
+        if (update.rawInput.has_value()) {
+            it.value().rawInput = *update.rawInput;
         }
     }
     emit toolCallAddedOrUpdated(update.id);

@@ -755,6 +755,9 @@ void AcpSessionView::onToolCallAddedOrUpdated(const QString &toolCallId)
         upd.id = tc.id;
         upd.status = tc.status;
         upd.content = tc.content;
+        if (!tc.rawInput.isEmpty()) {
+            upd.rawInput = tc.rawInput;
+        }
         card->apply(upd);
     }
 }

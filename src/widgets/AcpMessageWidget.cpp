@@ -84,7 +84,7 @@ AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
     , m_role(std::move(role))
 {
     setProperty("role", m_role);
-    setFrameShape(QFrame::StyledPanel);
+    setFrameShape(QFrame::NoFrame);
     setStyleSheet(QString::fromLatin1(kFrameStyleUser) +
                   QString::fromLatin1(kFrameStyleAssistant) +
                   QString::fromLatin1(kFrameStyleThought));

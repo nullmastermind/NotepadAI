@@ -20,6 +20,7 @@
 #define ACP_TOOL_CALL_CARD_H
 
 #include <QFrame>
+#include <QJsonObject>
 #include <QString>
 
 #include "AcpProtocol.h"
@@ -55,12 +56,14 @@ private:
     void maybeAutoExpandForDiff();
     bool hasDiffContent() const;
     QString statusGlyph() const;
+    QString computeEnrichedTitle() const;
 
     QString m_id;
     QString m_title;
     QString m_status;
     int m_groupId = 0;
     QJsonArray m_content;
+    QJsonObject m_rawInput;
 
     bool m_collapsed = false;
     bool m_userToggled = false;          // user has explicitly clicked the chevron
