@@ -225,6 +225,8 @@ target_link_libraries(test_acp_history_store PRIVATE Qt6::Core Qt6::Test)
 target_sources(test_acp_history_store PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.h
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.h
 )
 add_test(NAME AcpHistoryStore COMMAND test_acp_history_store)
 
@@ -239,6 +241,8 @@ target_sources(test_acp_session_model PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.h
 )
 add_test(NAME AcpSessionModel COMMAND test_acp_session_model)
 
@@ -255,6 +259,8 @@ target_sources(test_acp_session_model_persistence_integration PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.h
 )
 add_test(NAME AcpSessionModelPersistenceIntegration COMMAND test_acp_session_model_persistence_integration)
 
@@ -285,6 +291,8 @@ target_sources(test_acp_agent_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.h
     ${CMAKE_SOURCE_DIR}/src/ProfileScope.cpp
     ${CMAKE_SOURCE_DIR}/src/ProfileScope.h
     ${CMAKE_SOURCE_DIR}/src/docks/AiAgentDock.cpp
@@ -343,6 +351,8 @@ target_sources(test_acp_agent_exit_restart PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.h
     ${CMAKE_SOURCE_DIR}/src/ProfileScope.cpp
     ${CMAKE_SOURCE_DIR}/src/ProfileScope.h
     ${CMAKE_SOURCE_DIR}/src/docks/AiAgentDock.cpp
@@ -399,6 +409,8 @@ target_sources(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.h
     ${CMAKE_SOURCE_DIR}/src/docks/AiAgentDock.cpp
     ${CMAKE_SOURCE_DIR}/src/docks/AiAgentDock.h
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpImageAttachmentList.cpp
@@ -490,6 +502,8 @@ target_sources(test_shutdown_diagnostics PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ShutdownDiagnostics.h
     ${CMAKE_SOURCE_DIR}/src/ProfileScope.cpp
     ${CMAKE_SOURCE_DIR}/src/ProfileScope.h
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.h
 )
 target_compile_definitions(test_shutdown_diagnostics PRIVATE APP_VERSION="test")
 add_test(NAME ShutdownDiagnostics COMMAND test_shutdown_diagnostics)
