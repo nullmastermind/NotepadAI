@@ -18,6 +18,7 @@
 
 #include "BranchPickerPopup.h"
 
+#include <QGuiApplication>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QListView>

@@ -31,7 +31,11 @@ jobs:
         shell: bash
         run: |
           VER="${GITHUB_REF_NAME#v}"
-          sed -i 's/^\([[:space:]]*VERSION[[:space:]]*\).*/\1'"$VER"'/' CMakeLists.txt
+          if [[ "$OSTYPE" == darwin* ]]; then
+            sed -i '' 's/^\([[:space:]]*VERSION[[:space:]]*\).*/\1'"$VER"'/' CMakeLists.txt
+          else
+            sed -i 's/^\([[:space:]]*VERSION[[:space:]]*\).*/\1'"$VER"'/' CMakeLists.txt
+          fi
           grep -n '^[[:space:]]*VERSION' CMakeLists.txt
 
       - name: Install Qt

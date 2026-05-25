@@ -72,7 +72,7 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
 
 private slots:
-    void onCommitsAppended(const QVector<class GitCommitInfo> &chunk);
+    void onCommitsAppended(const QVector<struct GitCommitInfo> &chunk);
     void onFetchStarted();
     void onFetchFinished(bool reachedEnd, const QString &errorMessage);
     void onRowActivated(const QModelIndex &index);

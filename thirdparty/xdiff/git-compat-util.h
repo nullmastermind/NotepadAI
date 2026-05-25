@@ -12,6 +12,7 @@
 #define GIT_COMPAT_UTIL_H
 
 #include <ctype.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
