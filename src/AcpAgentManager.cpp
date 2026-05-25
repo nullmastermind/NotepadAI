@@ -350,6 +350,33 @@ void AcpAgentManager::wireConnectionToModel(AcpConnection *conn, AcpSessionModel
                                   "gitWorkingTreeDirtied",
                                   Q_ARG(QString, path));
     });
+
+    // Trigger git refresh when an agent completes a file-modifying tool call
+    // (Edit/Write). Most agents write files directly and only send tool_call
+    // notifications — they don't use the ACP fs/write_text_file call above.
+    connect(model, &AcpSessionModel::toolCallAddedOrUpdated, this,
+            [model, conn](const QString &toolCallId) {
+        const auto it = model->toolCalls().constFind(toolCallId);
+        if (it == model->toolCalls().constEnd())
+            return;
+        const auto &tc = it.value();
+        if (tc.status != QLatin1String("completed"))
+            return;
+        const QString titleLower = tc.title.toLower();
+        if (titleLower != QLatin1String("edit") &&
+            titleLower != QLatin1String("write") &&
+            titleLower != QLatin1String("edit file") &&
+            titleLower != QLatin1String("write file"))
+            return;
+        QString path = tc.rawInput[QLatin1String("file_path")].toString();
+        if (path.isEmpty())
+            path = conn->workingDirectory();
+        if (path.isEmpty())
+            return;
+        QMetaObject::invokeMethod(QCoreApplication::instance(),
+                                  "gitWorkingTreeDirtied",
+                                  Q_ARG(QString, path));
+    });
 }
 
 void AcpAgentManager::teardownSession(Session &session)
