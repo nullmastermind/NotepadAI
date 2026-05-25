@@ -1,70 +1,45 @@
-# Notepad Next
+# NotepadAI
 
-![Build Notepad Next](https://github.com/dail8859/NotepadNext/workflows/Build%20Notepad%20Next/badge.svg)
-
-A cross-platform, reimplementation of Notepad++.
-
-Though the application overall is stable and usable, it should not be considered safe for critically important work.
-
-There are numerous bugs and half working implementations. Pull requests are greatly appreciated.
+A fast, cross-platform code editor with built-in AI agents, Git integration, and an embedded terminal. Built on [Notepad Next](https://github.com/dail8859/NotepadNext) (a Notepad++ reimplementation in Qt/C++).
 
 ![screenshot](/doc/screenshot.png)
 
-# Installation
+## Features
 
-Packages are available for Windows, Linux, and MacOS.
+- **AI Agent Integration** — Chat with Claude Code, Gemini, or any ACP-compatible agent directly inside the editor. Agents can read/write files, run terminal commands, and understand your workspace context.
+- **Git Integration** — Inline blame, gutter diff indicators, commit history viewer, staging/unstaging, branch picker, and file-tree decorations. No external Git GUI needed.
+- **Embedded Terminal** — Full PTY terminal with mouse reporting, image passthrough, and persistent task registry. Open terminals in workspace or file directory.
+- **Notepad++ Compatibility** — Familiar tabbed interface, syntax highlighting for 80+ languages via Scintilla/Lexilla, macro recording, session management, and Notepad++ config import.
+- **Lightweight & Fast** — Native C++20/Qt 6 with zero-copy hot paths, precompiled headers, and Control Flow Guard. Starts in milliseconds.
+- **Cross-platform** — Windows, Linux (AppImage), and macOS (dmg).
 
-Below are the supported distribution mechanisms. There may be other ways to download/install the application, but this project will likely not be able to offer any support for those since they are made available by other individuals.
+## Installation
 
-## Windows
-Windows packages are available as an installer or a stand-alone zip file on the [release](https://github.com/dail8859/NotepadNext/releases) page. The installer provides additional components such as an auto-updater and Windows context menu integration. You can easily install it with Winget:
+Download binaries from the [Releases](https://github.com/nullmastermind/NotepadAI/releases) page.
 
-```powershell
-winget install dail8859.NotepadNext
-```
+| Platform | Format |
+|----------|--------|
+| Windows  | Installer (.exe) or portable zip |
+| Linux    | AppImage |
+| macOS    | Disk image (.dmg) |
 
-## Linux
-Linux packages can be obtained by downloading the stand-alone AppImage on the [release](https://github.com/dail8859/NotepadNext/releases) page or by installing the [flatpak](https://flathub.org/apps/details/com.github.dail8859.NotepadNext) by executing:
+## Building from Source
 
-```bash
-flatpak install flathub com.github.dail8859.NotepadNext
-```
-
-If you are using Ubuntu and prefer an up-to-date deb version, you can use the [PPA supporting Ubuntu 22.04 and newer](https://launchpad.net/~quentiumyt/+archive/ubuntu/notepadnext) provided by
-[Quentin Lienhardt](https://github.com/QuentiumYT). You can add it by executing:
-
-```bash
-sudo add-apt-repository ppa:quentiumyt/notepadnext
-sudo apt update
-sudo apt install notepadnext
-```
-
-## MacOS
-MacOS disk images can be downloaded from the [release](https://github.com/dail8859/NotepadNext/releases) page.
-
-It can also be installed using brew:
-```bash
-brew tap dail8859/notepadnext
-brew install notepadnext
-```
-
-#### MacOS Tweaks
-
-By default, MacOS enables font smoothing which causes text to appear quite differently from the Windows version. This can be disabled system-wide using the following command:
+Requirements: CMake 3.21+, Qt 6.5+, Ninja, a C++20 compiler (MSVC, GCC, or Clang).
 
 ```bash
-defaults -currentHost write -g AppleFontSmoothing -int 0
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
 ```
 
-A restart is required for this to take effect.
+See [doc/Building.md](doc/Building.md) for platform-specific details.
 
-# Development
-Current development is done using QtCreator with the Microsoft Visual C++ (msvc) compiler. Qt 6.5 is the currently supported Qt version. Older versions of Qt are likely to work but are not tested. Any fixes for older versions will be accepted as long as they do not introduce complex fixes. This application is also known to build successfully on various Linux distributions and macOS. Other platforms/compilers should be usable with minor modifications.
+## AI Agents
 
-If you are familiar with building C++ Qt desktop applications with Qt Creator, then this should be as simple as opening `CMakeLists` and build/run the project.
+NotepadAI speaks the [Agent Client Protocol (ACP)](doc/AcpAgents.md) over stdio. The default built-in agent is Claude Code. Add custom agents via Settings with any command that implements ACP's JSON-RPC 2.0 wire format.
 
-If you are new to building C++ Qt desktop applications, there is a more detailed guide [here](/doc/Building.md).
+## License
 
+[GNU General Public License v3](https://www.gnu.org/licenses/gpl-3.0.txt)
 
-# License
-This code is released under the [GNU General Public License version 3](https://www.gnu.org/licenses/gpl-3.0.txt).
+Based on Notepad Next by Justin Dailey. AI and Git extensions by [nullmastermind](https://github.com/nullmastermind).
