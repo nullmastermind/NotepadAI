@@ -181,12 +181,12 @@ void AcpConnection::spawn(const AcpAgentDefinition &agent, const QString &workin
 #endif
 
     m_process->setProgram(argv.program);
+#ifdef Q_OS_WIN
     if (!argv.nativeArgumentsLine.isEmpty()) {
-        // Windows-only path. The CMD `/D /S /C "<line>"` form must be passed
-        // verbatim — QProcess::setArguments would re-quote our hand-built
-        // command line and break paths with spaces.
         m_process->setNativeArguments(argv.nativeArgumentsLine);
-    } else {
+    } else
+#endif
+    {
         m_process->setArguments(argv.arguments);
     }
 
