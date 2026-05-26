@@ -2181,6 +2181,8 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
 
 void MainWindow::wireWorkspaceGitSignals(FolderAsWorkspaceDock *dock)
 {
+    dock->setGitOperationManager(m_gitOpMgr);
+
     connect(dock, &FolderAsWorkspaceDock::gitDiffRequested,
             this, [dock](const GitStatusEntry &entry) {
                 dock->showGitDiffPreview(entry);
@@ -2246,6 +2248,52 @@ void MainWindow::wireWorkspaceGitSignals(FolderAsWorkspaceDock *dock)
             dock->raise();
         });
         menu->addAction(sendToAi);
+    });
+
+    connect(dock, &FolderAsWorkspaceDock::gitMergeRequested, this,
+            [this](FolderAsWorkspaceDock *wsDock) {
+        auto *ctrl = wsDock->gitTabWidget() ? wsDock->gitTabWidget()->controller() : nullptr;
+        if (!ctrl) return;
+        auto *picker = new BranchPickerPopup(this);
+        picker->setAttribute(Qt::WA_DeleteOnClose);
+        picker->setSelectOnly(true, tr("Select branch to merge into %1…").arg(ctrl->currentBranch()));
+        picker->setBranches(ctrl->branchesLocal(), ctrl->branchesRemote(),
+                           ctrl->currentBranch());
+        connect(picker, &BranchPickerPopup::branchSelected, this,
+            [this, ctrl](const QString &branch) {
+                m_gitOpMgr->startMerge(ctrl, branch);
+            });
+        picker->popupAt(QCursor::pos());
+    });
+    connect(dock, &FolderAsWorkspaceDock::gitRebaseRequested, this,
+            [this](FolderAsWorkspaceDock *wsDock) {
+        auto *ctrl = wsDock->gitTabWidget() ? wsDock->gitTabWidget()->controller() : nullptr;
+        if (!ctrl) return;
+        auto *picker = new BranchPickerPopup(this);
+        picker->setAttribute(Qt::WA_DeleteOnClose);
+        picker->setSelectOnly(true, tr("Select branch to rebase onto…"));
+        picker->setBranches(ctrl->branchesLocal(), ctrl->branchesRemote(),
+                           ctrl->currentBranch());
+        connect(picker, &BranchPickerPopup::branchSelected, this,
+            [this, ctrl](const QString &branch) {
+                m_gitOpMgr->startRebase(ctrl, branch);
+            });
+        picker->popupAt(QCursor::pos());
+    });
+    connect(dock, &FolderAsWorkspaceDock::gitInteractiveRebaseRequested, this,
+            [this](FolderAsWorkspaceDock *wsDock) {
+        auto *ctrl = wsDock->gitTabWidget() ? wsDock->gitTabWidget()->controller() : nullptr;
+        if (!ctrl) return;
+        auto *picker = new BranchPickerPopup(this);
+        picker->setAttribute(Qt::WA_DeleteOnClose);
+        picker->setSelectOnly(true, tr("Select branch for interactive rebase…"));
+        picker->setBranches(ctrl->branchesLocal(), ctrl->branchesRemote(),
+                           ctrl->currentBranch());
+        connect(picker, &BranchPickerPopup::branchSelected, this,
+            [this, ctrl](const QString &branch) {
+                m_gitOpMgr->startInteractiveRebase(ctrl, branch);
+            });
+        picker->popupAt(QCursor::pos());
     });
 }
 
@@ -3800,116 +3848,10 @@ void MainWindow::saveWorkspaceStatesOnly()
     persistWorkspaceStatesMerged(live);
 }
 
-// --- Git Operation Menu & Wiring ---
+// --- Git Operation Wiring ---
 
 void MainWindow::setupGitOperationMenu()
 {
-    auto *menuGit = menuBar()->addMenu(tr("&Git"));
-
-    auto *actionMerge = menuGit->addAction(tr("Merge Branch..."));
-    auto *actionRebase = menuGit->addAction(tr("Rebase Current Branch..."));
-    auto *actionInteractiveRebase = menuGit->addAction(tr("Interactive Rebase..."));
-    menuGit->addSeparator();
-    auto *actionContinue = menuGit->addAction(tr("Continue"));
-    auto *actionSkip = menuGit->addAction(tr("Skip"));
-    auto *actionAbort = menuGit->addAction(tr("Abort"));
-
-    connect(menuGit, &QMenu::aboutToShow, this, [=]() {
-        const QString wsRoot = currentWorkspaceRoot();
-        bool hasWorkspace = !wsRoot.isEmpty();
-        auto state = m_gitOpMgr->state(wsRoot);
-        bool idle = (state == GitOperationManager::OperationState::Idle);
-        bool suspended = (state == GitOperationManager::OperationState::RebaseSuspended ||
-                          state == GitOperationManager::OperationState::RebaseSuspendedEdit ||
-                          state == GitOperationManager::OperationState::MergeConflicted);
-
-        actionMerge->setEnabled(hasWorkspace && idle);
-        actionRebase->setEnabled(hasWorkspace && idle);
-        actionInteractiveRebase->setEnabled(hasWorkspace && idle);
-        actionContinue->setEnabled(hasWorkspace && suspended);
-        actionSkip->setEnabled(hasWorkspace &&
-            (state == GitOperationManager::OperationState::RebaseSuspended));
-        actionAbort->setEnabled(hasWorkspace && suspended);
-    });
-
-    connect(actionMerge, &QAction::triggered, this, [this]() {
-        auto *dock = activeWorkspaceDock();
-        if (!dock) return;
-        auto *ctrl = dock->gitTabWidget() ? dock->gitTabWidget()->controller() : nullptr;
-        if (!ctrl) return;
-        // Use BranchPickerPopup for branch selection
-        auto *picker = new BranchPickerPopup(this);
-        picker->setBranches(ctrl->branchesLocal(), ctrl->branchesRemote(),
-                           ctrl->currentBranch());
-        connect(picker, &BranchPickerPopup::checkoutRequested, this,
-            [this, ctrl](const QString &branch) {
-                m_gitOpMgr->startMerge(ctrl, branch);
-            });
-        picker->popupAt(QCursor::pos());
-    });
-
-    connect(actionRebase, &QAction::triggered, this, [this]() {
-        auto *dock = activeWorkspaceDock();
-        if (!dock) return;
-        auto *ctrl = dock->gitTabWidget() ? dock->gitTabWidget()->controller() : nullptr;
-        if (!ctrl) return;
-        auto *picker = new BranchPickerPopup(this);
-        picker->setBranches(ctrl->branchesLocal(), ctrl->branchesRemote(),
-                           ctrl->currentBranch());
-        connect(picker, &BranchPickerPopup::checkoutRequested, this,
-            [this, ctrl](const QString &branch) {
-                m_gitOpMgr->startRebase(ctrl, branch);
-            });
-        picker->popupAt(QCursor::pos());
-    });
-
-    connect(actionInteractiveRebase, &QAction::triggered, this, [this]() {
-        auto *dock = activeWorkspaceDock();
-        if (!dock) return;
-        auto *ctrl = dock->gitTabWidget() ? dock->gitTabWidget()->controller() : nullptr;
-        if (!ctrl) return;
-        auto *picker = new BranchPickerPopup(this);
-        picker->setBranches(ctrl->branchesLocal(), ctrl->branchesRemote(),
-                           ctrl->currentBranch());
-        connect(picker, &BranchPickerPopup::checkoutRequested, this,
-            [this, ctrl](const QString &branch) {
-                m_gitOpMgr->startInteractiveRebase(ctrl, branch);
-            });
-        picker->popupAt(QCursor::pos());
-    });
-
-    connect(actionContinue, &QAction::triggered, this, [this]() {
-        auto *dock = activeWorkspaceDock();
-        if (!dock) return;
-        auto *ctrl = dock->gitTabWidget() ? dock->gitTabWidget()->controller() : nullptr;
-        if (!ctrl) return;
-        auto state = m_gitOpMgr->state(ctrl->currentRepo());
-        if (state == GitOperationManager::OperationState::MergeConflicted)
-            m_gitOpMgr->commitMerge(ctrl);
-        else
-            m_gitOpMgr->continueRebase(ctrl);
-    });
-
-    connect(actionSkip, &QAction::triggered, this, [this]() {
-        auto *dock = activeWorkspaceDock();
-        if (!dock) return;
-        auto *ctrl = dock->gitTabWidget() ? dock->gitTabWidget()->controller() : nullptr;
-        if (!ctrl) return;
-        m_gitOpMgr->skipRebase(ctrl);
-    });
-
-    connect(actionAbort, &QAction::triggered, this, [this]() {
-        auto *dock = activeWorkspaceDock();
-        if (!dock) return;
-        auto *ctrl = dock->gitTabWidget() ? dock->gitTabWidget()->controller() : nullptr;
-        if (!ctrl) return;
-        auto state = m_gitOpMgr->state(ctrl->currentRepo());
-        if (state == GitOperationManager::OperationState::MergeConflicted)
-            m_gitOpMgr->abortMerge(ctrl);
-        else
-            m_gitOpMgr->abortRebase(ctrl);
-    });
-
     // Connect operation manager signals to UI
     connect(m_gitOpMgr, &GitOperationManager::mergeConflicted, this,
             &MainWindow::showConflictListDock);

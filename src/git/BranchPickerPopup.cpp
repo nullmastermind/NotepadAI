@@ -109,6 +109,15 @@ void BranchPickerPopup::popupAt(const QPoint &globalPos)
     m_filter->setFocus();
 }
 
+void BranchPickerPopup::setSelectOnly(bool on, const QString &title)
+{
+    m_selectOnly = on;
+    if (on && !title.isEmpty())
+        m_filter->setPlaceholderText(title);
+    else
+        m_filter->setPlaceholderText(tr("Search branches…"));
+}
+
 void BranchPickerPopup::rebuild()
 {
     m_model->clear();
@@ -133,9 +142,14 @@ void BranchPickerPopup::rebuild()
     if (!locals.isEmpty()) {
         addHeader(tr("── Local ──"));
         for (const auto &b : locals) {
-            QString display = b;
-            if (b == m_current) display = QStringLiteral("✓ ") + b + QStringLiteral("  ›");
-            else                display = QStringLiteral("   ") + b + QStringLiteral("  ›");
+            QString display;
+            if (m_selectOnly) {
+                display = (b == m_current) ? QStringLiteral("✓ ") + b
+                                           : QStringLiteral("   ") + b;
+            } else {
+                display = (b == m_current) ? QStringLiteral("✓ ") + b + QStringLiteral("  ›")
+                                           : QStringLiteral("   ") + b + QStringLiteral("  ›");
+            }
             auto *it = new QStandardItem(display);
             it->setData(0, RoleKind);
             it->setData(b, RolePayload);
@@ -149,7 +163,9 @@ void BranchPickerPopup::rebuild()
     if (!remotes.isEmpty()) {
         addHeader(tr("── Remote ──"));
         for (const auto &b : remotes) {
-            auto *it = new QStandardItem(QStringLiteral("   ") + b + QStringLiteral("  ›"));
+            QString display = m_selectOnly ? QStringLiteral("   ") + b
+                                           : QStringLiteral("   ") + b + QStringLiteral("  ›");
+            auto *it = new QStandardItem(display);
             it->setData(1, RoleKind);
             it->setData(b, RolePayload);
             m_model->appendRow(it);
@@ -176,6 +192,13 @@ void BranchPickerPopup::onActivated(const QModelIndex &index)
     if (!index.isValid()) return;
     auto *it = m_model->itemFromIndex(index);
     if (!it || !it->isEnabled()) return;
+
+    if (m_selectOnly) {
+        const QString payload = it->data(RolePayload).toString();
+        emit branchSelected(payload);
+        close();
+        return;
+    }
     showItemMenu(index);
 }
 

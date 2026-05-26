@@ -249,6 +249,12 @@ void FolderAsWorkspaceDock::wireTreeContextMenu()
     });
 }
 
+void FolderAsWorkspaceDock::setGitOperationManager(GitOperationManager *mgr)
+{
+    m_gitOpMgr = mgr;
+    if (gitTab) gitTab->setOperationManager(mgr);
+}
+
 void FolderAsWorkspaceDock::maybeScheduleGitTabForDecoration()
 {
     if (m_gitTabScheduled || gitTab != nullptr) return;
@@ -365,6 +371,7 @@ void FolderAsWorkspaceDock::ensureGitTab()
         return;
     }
     gitTab = new GitTabWidget(rootPath(), this);
+    if (m_gitOpMgr) gitTab->setOperationManager(m_gitOpMgr);
     auto *layout = qobject_cast<QVBoxLayout *>(ui->gitTab->layout());
     if (layout) {
         layout->addWidget(gitTab);
@@ -385,6 +392,15 @@ void FolderAsWorkspaceDock::ensureGitTab()
             this, &FolderAsWorkspaceDock::gitOpenCommitDetailRequested);
     connect(gitTab, &GitTabWidget::changesTreeContextMenuRequested,
             this, &FolderAsWorkspaceDock::gitChangesContextMenuRequested);
+    connect(gitTab, &GitTabWidget::mergeRequested, this, [this]() {
+        emit gitMergeRequested(this);
+    });
+    connect(gitTab, &GitTabWidget::rebaseRequested, this, [this]() {
+        emit gitRebaseRequested(this);
+    });
+    connect(gitTab, &GitTabWidget::interactiveRebaseRequested, this, [this]() {
+        emit gitInteractiveRebaseRequested(this);
+    });
 
     // File-tree decoration: subscribe to status changes so the FsModel
     // repaints only the rows that changed. The controller is created lazily

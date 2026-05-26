@@ -40,6 +40,7 @@ class QTimer;
 class GitTabWidget;
 class GitDiffViewController;
 class GitCommitView;
+class GitOperationManager;
 class ScintillaNext;
 class SubmoduleStatusFetcher;
 
@@ -65,6 +66,8 @@ public:
 
     void setRootPath(const QString dir);
     QString rootPath() const;
+
+    void setGitOperationManager(GitOperationManager *mgr);
 
     // Returns the lazily-created Git tab, or nullptr if the user has never
     // opened the Git tab in this dock yet.
@@ -103,6 +106,9 @@ signals:
     void gitOpenSubmoduleRequested(const QString &absPath);
     void gitOpenCommitDetailRequested(const QByteArray &sha);
     void gitChangesContextMenuRequested(QMenu *menu, const GitStatusEntry &entry);
+    void gitMergeRequested(FolderAsWorkspaceDock *dock);
+    void gitRebaseRequested(FolderAsWorkspaceDock *dock);
+    void gitInteractiveRebaseRequested(FolderAsWorkspaceDock *dock);
     // Forwarded from the per-dock GitDiffViewController — host raises this
     // editor as the active tab so the user lands on the rendered diff.
     void gitDiffPreviewRendered(ScintillaNext *editor);
@@ -152,6 +158,7 @@ private:
     GitTabWidget *gitTab = nullptr;
     GitDiffViewController *gitDiffViewController = nullptr;
     GitCommitView         *gitCommitView = nullptr;
+    GitOperationManager   *m_gitOpMgr = nullptr;
 
     QTimer *tooltipTimer;
     QPersistentModelIndex pendingTooltipIndex;

@@ -24,6 +24,7 @@
 #include "CommitComposer.h"
 #include "GitError.h"
 #include "GitHistoryView.h"
+#include "GitOperationManager.h"
 #include "GitRepoModel.h"
 #include "GitStatusEntry.h"
 #include "GitStatusModel.h"
@@ -188,6 +189,54 @@ void GitTabWidget::buildUi()
     topRow->addWidget(m_refreshBtn);
     topRow->addWidget(m_menuBtn);
     root->addLayout(topRow);
+
+    // Operation-state banner — visible when a merge/rebase is in progress.
+    m_opBanner = new QFrame(this);
+    m_opBanner->setFrameShape(QFrame::StyledPanel);
+    m_opBanner->setStyleSheet(QStringLiteral(
+        "QFrame { background: palette(alternate-base); border: 1px solid palette(mid);"
+        " border-radius: 4px; }"
+        "QLabel { background: transparent; border: none; }"));
+    {
+        auto *opLay = new QHBoxLayout(m_opBanner);
+        opLay->setContentsMargins(8, 4, 4, 4);
+        opLay->setSpacing(6);
+        m_opLabel = new QLabel(m_opBanner);
+        m_opLabel->setWordWrap(false);
+        opLay->addWidget(m_opLabel, 1);
+        m_opContinueBtn = new QPushButton(tr("Continue"), m_opBanner);
+        m_opContinueBtn->setFlat(true);
+        m_opSkipBtn = new QPushButton(tr("Skip"), m_opBanner);
+        m_opSkipBtn->setFlat(true);
+        m_opAbortBtn = new QPushButton(tr("Abort"), m_opBanner);
+        m_opAbortBtn->setFlat(true);
+        opLay->addWidget(m_opContinueBtn);
+        opLay->addWidget(m_opSkipBtn);
+        opLay->addWidget(m_opAbortBtn);
+    }
+    m_opBanner->hide();
+    root->addWidget(m_opBanner);
+
+    connect(m_opContinueBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_opMgr || !m_controller) return;
+        auto state = m_opMgr->state(m_controller->currentRepo());
+        if (state == GitOperationManager::OperationState::MergeConflicted)
+            m_opMgr->commitMerge(m_controller);
+        else
+            m_opMgr->continueRebase(m_controller);
+    });
+    connect(m_opSkipBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_opMgr || !m_controller) return;
+        m_opMgr->skipRebase(m_controller);
+    });
+    connect(m_opAbortBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_opMgr || !m_controller) return;
+        auto state = m_opMgr->state(m_controller->currentRepo());
+        if (state == GitOperationManager::OperationState::MergeConflicted)
+            m_opMgr->abortMerge(m_controller);
+        else
+            m_opMgr->abortRebase(m_controller);
+    });
 
     // Status label — created here, added to layout at the bottom.
     m_statusLabel = new QLabel(this);
@@ -371,6 +420,49 @@ void GitTabWidget::initializeIfNeeded()
     rebuildController();
 }
 
+void GitTabWidget::setOperationManager(GitOperationManager *mgr)
+{
+    if (m_opMgr == mgr) return;
+    if (m_opMgr) m_opMgr->disconnect(this);
+    m_opMgr = mgr;
+    if (m_opMgr) {
+        connect(m_opMgr, &GitOperationManager::operationStateChanged, this,
+                [this](const QString &repoPath, GitOperationManager::OperationState) {
+                    if (m_controller && m_controller->currentRepo() == repoPath)
+                        updateOpBanner();
+                });
+    }
+    updateOpBanner();
+}
+
+void GitTabWidget::updateOpBanner()
+{
+    if (!m_opMgr || !m_controller || m_controller->currentRepo().isEmpty()) {
+        m_opBanner->hide();
+        return;
+    }
+    auto state = m_opMgr->state(m_controller->currentRepo());
+    bool isRebase = (state == GitOperationManager::OperationState::RebaseSuspended ||
+                     state == GitOperationManager::OperationState::RebaseSuspendedEdit);
+    bool isMerge = (state == GitOperationManager::OperationState::MergeConflicted);
+
+    if (!isRebase && !isMerge) {
+        m_opBanner->hide();
+        return;
+    }
+
+    if (isMerge)
+        m_opLabel->setText(tr("Merge in progress"));
+    else
+        m_opLabel->setText(tr("Rebase in progress"));
+
+    m_opContinueBtn->setText(isMerge ? tr("Commit Merge") : tr("Continue"));
+    m_opContinueBtn->setVisible(true);
+    m_opSkipBtn->setVisible(isRebase);
+    m_opAbortBtn->setVisible(true);
+    m_opBanner->show();
+}
+
 void GitTabWidget::teardownController()
 {
     if (!m_controller) return;
@@ -440,6 +532,7 @@ void GitTabWidget::rebuildController()
     restoreSettingsForWorkspace();
     restoreCommitDraft();
     m_controller->initialize();
+    updateOpBanner();
 }
 
 void GitTabWidget::restoreSettingsForWorkspace()
@@ -729,6 +822,23 @@ void GitTabWidget::onMenuButtonClicked()
             m_controller->forcePush();
         }
     });
+
+    // Merge / Rebase section.
+    menu.addSeparator();
+    auto opState = m_opMgr ? m_opMgr->state(m_controller->currentRepo())
+                           : GitOperationManager::OperationState::Idle;
+    bool opIdle = (opState == GitOperationManager::OperationState::Idle);
+
+    QAction *aMerge = menu.addAction(tr("Merge Branch..."));
+    QAction *aRebase = menu.addAction(tr("Rebase Current Branch..."));
+    QAction *aIRebase = menu.addAction(tr("Interactive Rebase..."));
+    aMerge->setEnabled(opIdle);
+    aRebase->setEnabled(opIdle);
+    aIRebase->setEnabled(opIdle);
+
+    connect(aMerge, &QAction::triggered, this, &GitTabWidget::mergeRequested);
+    connect(aRebase, &QAction::triggered, this, &GitTabWidget::rebaseRequested);
+    connect(aIRebase, &QAction::triggered, this, &GitTabWidget::interactiveRebaseRequested);
 
     menu.exec(m_menuBtn->mapToGlobal(m_menuBtn->rect().bottomLeft()));
 }

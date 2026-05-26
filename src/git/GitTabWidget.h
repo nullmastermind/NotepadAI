@@ -20,6 +20,7 @@
 #define GIT_TAB_WIDGET_H
 
 #include "GitController.h"
+#include "GitOperationManager.h"
 #include "GitStatusEntry.h"
 
 #include <QByteArray>
@@ -33,6 +34,7 @@ class QComboBox;
 class QFrame;
 class QLabel;
 class QMenu;
+class QPushButton;
 class QScrollArea;
 class QStackedWidget;
 class QToolButton;
@@ -52,6 +54,7 @@ public:
 
     void setWorkspaceRoot(const QString &root);
     void initializeIfNeeded();
+    void setOperationManager(GitOperationManager *mgr);
 
     GitController *controller() const { return m_controller; }
 
@@ -61,6 +64,9 @@ signals:
     void openSubmoduleRequested(const QString &absPath);
     void openCommitDetailRequested(const QByteArray &sha);
     void changesTreeContextMenuRequested(QMenu *menu, const GitStatusEntry &entry);
+    void mergeRequested();
+    void rebaseRequested();
+    void interactiveRebaseRequested();
 
 private slots:
     void onRepoSelected(int index);
@@ -110,6 +116,7 @@ private:
     void handleCreateBranch(const QString &name, const QString &base, bool setUpstream);
     void handleSetUpstream(const QString &remoteBranch);
     void restoreSettingsForWorkspace();
+    void updateOpBanner();
 
     QString m_workspaceRoot;
     bool m_initialized = false;
@@ -117,6 +124,7 @@ private:
     bool m_committing = false;
 
     GitController *m_controller = nullptr;
+    GitOperationManager *m_opMgr = nullptr;
     QPointer<BranchPickerPopup> m_branchPicker;
 
     // Header row.
@@ -144,6 +152,13 @@ private:
     QToolButton *m_errorCopyBtn = nullptr;
     QToolButton *m_errorCloseBtn = nullptr;
     QLabel *m_emptyHint = nullptr;
+
+    // Operation-state banner (merge/rebase in progress).
+    QFrame *m_opBanner = nullptr;
+    QLabel *m_opLabel = nullptr;
+    QPushButton *m_opContinueBtn = nullptr;
+    QPushButton *m_opSkipBtn = nullptr;
+    QPushButton *m_opAbortBtn = nullptr;
 
     // AI generation state.
     QString m_pendingAiSubjectHint;
