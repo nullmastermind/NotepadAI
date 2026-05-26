@@ -82,7 +82,8 @@ bool PromptImprover::canImprove(QString *whyNot) const
 void PromptImprover::trigger(const QString &userDraft,
                              const QString &workingDirectory,
                              const QList<AcpProtocol::AcpCommandInfo> &commands,
-                             const QString &chatHistory)
+                             const QString &chatHistory,
+                             const QVector<QPair<QByteArray, QString>> &images)
 {
     QString why;
     if (!canImprove(&why)) {
@@ -101,7 +102,20 @@ void PromptImprover::trigger(const QString &userDraft,
     }
 
     const QString rules = loadRules(workingDirectory);
-    const QString systemPrompt = buildSystemPrompt(rules, commands);
+
+    constexpr qint64 kImageBudget = 10LL * 1024 * 1024;
+    QVector<QPair<QByteArray, QString>> budgetedImages;
+    qint64 totalBytes = 0;
+    for (const auto &img : images) {
+        if (totalBytes + img.first.size() > kImageBudget) break;
+        budgetedImages.append(img);
+        totalBytes += img.first.size();
+    }
+    if (budgetedImages.size() < images.size()) {
+        emit imagesBudgeted(budgetedImages.size(), images.size());
+    }
+
+    const QString systemPrompt = buildSystemPrompt(rules, commands, budgetedImages.size());
 
     m_responseBuffer.clear();
 
@@ -119,6 +133,7 @@ void PromptImprover::trigger(const QString &userDraft,
     req.prompt = userMessage;
     req.maxTokens = 4096;
     req.idleTimeoutSec = m_settings->commitMessageStreamIdleTimeoutSec();
+    req.images = budgetedImages;
 
     setState(State::Streaming);
     m_http->openStream(req);
@@ -172,9 +187,20 @@ void PromptImprover::onStreamError(int httpStatus, const QString &message)
 
 QString PromptImprover::buildSystemPrompt(
     const QString &rules,
-    const QList<AcpProtocol::AcpCommandInfo> &commands) const
+    const QList<AcpProtocol::AcpCommandInfo> &commands,
+    int imageCount) const
 {
     QString prompt = kSystemTemplate;
+
+    if (imageCount > 0) {
+        prompt += QStringLiteral(
+            "- The user has attached %1 image(s) alongside their draft. Examine the "
+            "visual content and incorporate what you see into the improved prompt — "
+            "reference specific UI elements, layouts, errors, or details visible in "
+            "the images to make the prompt more concrete. Do not narrate what you see "
+            "in the images; weave their context into the rewritten prompt naturally.\n")
+            .arg(imageCount);
+    }
 
     if (!rules.isEmpty()) {
         prompt += QStringLiteral("\n<project_rules>\n%1\n</project_rules>\n").arg(rules);

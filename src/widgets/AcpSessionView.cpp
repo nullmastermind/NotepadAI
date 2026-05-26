@@ -640,6 +640,12 @@ void AcpSessionView::buildUi()
                     this, &AcpSessionView::onImproveError);
             connect(m_promptImprover, &ai::PromptImprover::stateChanged,
                     this, [this]() { updateImproveButtonState(); });
+            connect(m_promptImprover, &ai::PromptImprover::imagesBudgeted,
+                    this, [this](int sent, int total) {
+                setBanner(tr("Prompt improvement: sent %1 of %2 images (10 MB limit)")
+                          .arg(sent).arg(total), BannerKind::Info);
+                QTimer::singleShot(4000, this, &AcpSessionView::clearBanner);
+            });
         }
     }
 }
@@ -1945,6 +1951,8 @@ void AcpSessionView::onImproveClicked()
     const QString draft = m_input->toPlainText().trimmed();
     if (draft.isEmpty()) return;
 
+    const auto images = m_attachmentList->peekAll();
+
     // Find the owning dock to get the working directory.
     QString workingDir;
     for (QWidget *w = parentWidget(); w; w = w->parentWidget()) {
@@ -1993,7 +2001,7 @@ void AcpSessionView::onImproveClicked()
     m_improveBtn->setToolTip(tr("Stop improving (Esc)"));
     m_improveBtn->setEnabled(true);
 
-    m_promptImprover->trigger(draft, workingDir, commands, chatHistory);
+    m_promptImprover->trigger(draft, workingDir, commands, chatHistory, images);
 }
 
 void AcpSessionView::onImproveFinished(const QString &improvedText)

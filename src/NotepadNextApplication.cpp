@@ -47,7 +47,9 @@
 
 #include <QCommandLineParser>
 
+#include <QDir>
 #include <QDirIterator>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QPalette>
 #include <QStyle>
@@ -85,6 +87,27 @@ static QString toLocalFileName(const QString file)
 {
     QUrl fileUrl(file);
     return fileUrl.isValid() && fileUrl.isLocalFile() ? fileUrl.toLocalFile() : file;
+}
+
+// Drop entries that can never be valid workspaces (empty, relative like ".",
+// or paths whose target directory no longer exists) and resolve any survivor
+// to its absolute form. Stale relative paths can land in App/RecentWorkspacesList
+// or FolderAsWorkspace/Workspaces from older builds that didn't normalize on
+// write — without this filter they'd keep showing up in the recent menu and
+// would re-spawn empty docks on session restore.
+static QStringList sanitizeWorkspacePaths(const QStringList &raw)
+{
+    QStringList out;
+    out.reserve(raw.size());
+    for (const QString &p : raw) {
+        if (p.isEmpty()) continue;
+        const QString abs = QDir(p).absolutePath();
+        if (abs.isEmpty()) continue;
+        if (!QFileInfo(abs).isDir()) continue;
+        if (out.contains(abs)) continue;
+        out.append(abs);
+    }
+    return out;
 }
 
 // Detect --new-window from raw argv before SingleApplication runs its primary-instance
@@ -304,8 +327,9 @@ bool NotepadNextApplication::init()
         // key is no longer read or written.
         if (settings->value("FolderAsWorkspace/Workspaces").toStringList().isEmpty()) {
             const QString legacyRoot = settings->value("FolderAsWorkspace/RootPath").toString();
-            if (!legacyRoot.isEmpty()) {
-                settings->setValue("FolderAsWorkspace/Workspaces", QStringList{legacyRoot});
+            const QStringList sanitized = sanitizeWorkspacePaths(QStringList{legacyRoot});
+            if (!sanitized.isEmpty()) {
+                settings->setValue("FolderAsWorkspace/Workspaces", sanitized);
             }
         }
 
@@ -670,7 +694,8 @@ void NotepadNextApplication::openFiles(const QStringList &files)
 void NotepadNextApplication::loadSettings()
 {
     recentFilesListManager->setFileList(getSettings()->value("App/RecentFilesList").toStringList());
-    recentWorkspacesListManager->setFileList(getSettings()->value("App/RecentWorkspacesList").toStringList());
+    recentWorkspacesListManager->setFileList(
+        sanitizeWorkspacePaths(getSettings()->value("App/RecentWorkspacesList").toStringList()));
 }
 
 void NotepadNextApplication::saveSettings()

@@ -120,6 +120,16 @@ QVector<QPair<QByteArray, QString>> AcpImageAttachmentList::takeAll()
     return out;
 }
 
+QVector<QPair<QByteArray, QString>> AcpImageAttachmentList::peekAll() const
+{
+    QVector<QPair<QByteArray, QString>> out;
+    out.reserve(m_items.size());
+    for (const Item &item : m_items) {
+        out.append({item.data, item.mimeType});
+    }
+    return out;
+}
+
 void AcpImageAttachmentList::clear()
 {
     for (Item &item : m_items) {

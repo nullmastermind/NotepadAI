@@ -1214,16 +1214,6 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
                                     debugLogDock->toggleViewAction()
                                 });
 
-    FolderAsWorkspaceDock *fawDock = new FolderAsWorkspaceDock(this);
-    fawDock->hide();
-    addDockWidget(Qt::LeftDockWidgetArea, fawDock);
-    DockMiddleClickCloser::install(fawDock);
-    ui->menuView->addAction(fawDock->toggleViewAction());
-    connect(fawDock, &FolderAsWorkspaceDock::fileDoubleClicked, this, &MainWindow::openFile);
-    connect(fawDock, &FolderAsWorkspaceDock::fileClicked, this, &MainWindow::previewFile);
-    wireWorkspaceGitSignals(fawDock);
-    registerWorkspaceDock(fawDock);
-
     FileListDock *fileListDock = new FileListDock(this);
     fileListDock->hide();
     addDockWidget(Qt::LeftDockWidgetArea, fileListDock);
@@ -1836,11 +1826,17 @@ void MainWindow::openFolderAsWorkspacePath(const QString &dir, bool showGitTab)
 {
     if (dir.isEmpty()) return;
 
-    app->getRecentWorkspacesListManager()->addFile(dir);
+    // Single chokepoint for every workspace entry — CLI --workspace, recent
+    // list, session restore, dialog, gitOpenSubmoduleRequested. Resolving here
+    // means a relative input like "." can never leak into the recent list, the
+    // dock title, the persisted Workspaces list, or QFileSystemModel's root.
+    const QString resolved = QDir(dir).absolutePath();
+
+    app->getRecentWorkspacesListManager()->addFile(resolved);
 
     // If this workspace is already open in some dock, just focus it rather
     // than spawning a duplicate tab.
-    const QString cleaned = QDir::cleanPath(dir);
+    const QString cleaned = QDir::cleanPath(resolved);
     const auto existing = findChildren<FolderAsWorkspaceDock *>();
     for (FolderAsWorkspaceDock *d : existing) {
         if (QDir::cleanPath(d->rootPath()) == cleaned) {
@@ -1852,15 +1848,9 @@ void MainWindow::openFolderAsWorkspacePath(const QString &dir, bool showGitTab)
         }
     }
 
-    // Reuse the initial (always-present) workspace dock when it has no path yet
-    // so the first open doesn't sit alongside an empty ghost tab. Any subsequent
-    // open creates a new tabified dock so the user can keep multiple workspaces
-    // in one window.
-    FolderAsWorkspaceDock *vacant = nullptr;
     FolderAsWorkspaceDock *anchor = nullptr;
     for (FolderAsWorkspaceDock *d : existing) {
-        if (!anchor && !d->rootPath().isEmpty()) anchor = d;
-        if (!vacant && d->rootPath().isEmpty()) vacant = d;
+        if (!d->rootPath().isEmpty()) { anchor = d; break; }
     }
 
     // Pull memoed UI state (tab/expanded/current) for this path, if any. The
@@ -1871,25 +1861,13 @@ void MainWindow::openFolderAsWorkspacePath(const QString &dir, bool showGitTab)
     const WorkspaceStateSnapshot savedState =
         m_workspaceStateMemo.value(cleaned, WorkspaceStateSnapshot{});
 
-    if (vacant && !anchor) {
-        // applySavedTreeState must precede setRootPath so the dock's
-        // directoryLoaded handler sees pendingExpansion populated when the
-        // first model load completes.
-        vacant->applySavedTreeState(savedState);
-        vacant->setRootPath(dir);
-        vacant->setVisible(true);
-        vacant->raise();
-        setActiveWorkspace(vacant);
-        if (showGitTab) vacant->showGitTab();
-        return;
-    }
-
     // Default ctor + explicit setRootPath sequence (rather than the 2-arg ctor
     // that bakes setRootPath in) so applySavedTreeState lands between them.
     auto *dock = new FolderAsWorkspaceDock(this);
     static int extraIdx = 0;
-    // Counter-based name is stable across sessions for the steady-state spawn order
-    // (initial dock takes Workspaces[0], extras take Workspaces[1..N] in order). Known
+    // Counter-based name is stable across sessions for the steady-state spawn order:
+    // restoreOpenWorkspaces walks the saved path list in order, so docks take
+    // FolderAsWorkspaceDock_extra_1..N matching saved Workspaces[0..N-1]. Known
     // limitation: closing a non-last workspace mid-session then restarting shifts the
     // counter relative to the saved layout, which causes the remaining workspaces' tab
     // positions to drift. The active workspace is still raised correctly because
@@ -1911,7 +1889,7 @@ void MainWindow::openFolderAsWorkspacePath(const QString &dir, bool showGitTab)
     }
 
     dock->applySavedTreeState(savedState);
-    dock->setRootPath(dir);
+    dock->setRootPath(resolved);
     dock->setVisible(true);
     dock->raise();
     setActiveWorkspace(dock);
@@ -2289,9 +2267,17 @@ void MainWindow::restoreOpenWorkspaces()
 
     for (const QString &path : savedWorkspaces) {
         if (path.isEmpty()) continue;
+        // Defense in depth against stale "." or relative entries written by
+        // older builds. openFolderAsWorkspacePath would resolve them to the
+        // current cwd and silently open it as a workspace — which is exactly
+        // the bug we're avoiding. Skip anything that doesn't already point at
+        // a real directory; the absolute form is then routed through the
+        // chokepoint as usual.
+        const QString abs = QDir(path).absolutePath();
+        if (abs.isEmpty() || !QFileInfo(abs).isDir()) continue;
         // openFolderAsWorkspacePath deduplicates against existing docks (including
         // the initial one, which loaded its path from the legacy singular setting).
-        openFolderAsWorkspacePath(path);
+        openFolderAsWorkspacePath(abs);
     }
 }
 
@@ -3232,6 +3218,11 @@ void MainWindow::addEditor(ScintillaNext *editor)
     QTimer::singleShot(0, editor, [this, editor]() {
         // Skip if a language was already assigned (e.g. by session restore)
         if (!editor->languageName.isEmpty()) return;
+        // Diff views are owned by GitDiffPainter — assigning the "Text"
+        // lexer here would emit lexerChanged and re-skin every style with
+        // the chrome's defaultBack, corrupting canvasBg until the next
+        // render pass undoes it.
+        if (app->getEditorManager()->isDiffView(editor)) return;
         PROFILE_SCOPE("MainWindow::addEditor.detectLanguage");
         detectLanguage(editor);
     });
@@ -3253,7 +3244,10 @@ void MainWindow::addEditor(ScintillaNext *editor)
     // TODO: look at editor inspector as an example to ensure updates are only coming from one editor.
     // Can save the connection objects and disconnected from them and only connect to the editor as it is activated.
     connect(editor, &ScintillaNext::savePointChanged, this, [=, this]() { updateSaveStatusBasedUi(editor); });
-    connect(editor, &ScintillaNext::renamed, this, [= ,this]() { detectLanguage(editor); });
+    connect(editor, &ScintillaNext::renamed, this, [= ,this]() {
+        if (app->getEditorManager()->isDiffView(editor)) return;
+        detectLanguage(editor);
+    });
     connect(editor, &ScintillaNext::renamed, this, [=, this]() { updateFileStatusBasedUi(editor); });
     connect(editor, &ScintillaNext::updateUi, this, &MainWindow::updateDocumentBasedUi);
 

@@ -296,6 +296,10 @@ void EditorManager::setupEditor(ScintillaNext *editor)
     // applied (lexerChanged is emitted *after* SetLanguage from
     // NotepadNextApplication::setEditorLanguage) so dark mode survives.
     connect(editor, &ScintillaNext::lexerChanged, this, [this, editor]() {
+        // Diff views own their palette (GitDiffPainter); the chrome theme's
+        // defaultBack does not match canvasBg, so applying it would corrupt
+        // the diff colors until the next configureEditor call.
+        if (isDiffView(editor)) return;
         applyThemeToEditor(editor, darkTheme, /*initialSetup=*/false);
     });
 
@@ -372,17 +376,23 @@ void EditorManager::setupEditor(ScintillaNext *editor)
         JustfileRecipeHighlighter *jrh = new JustfileRecipeHighlighter(editor);
         jrh->setEnabled(true);
 
-        GitGutterDecorator *gg = new GitGutterDecorator(editor);
-        gg->setEnabled(gitGutterEnabled);
+        const bool isDiff = isDiffView(editor);
 
-        InlineBlameDecorator *blame = new InlineBlameDecorator(editor);
-        blame->setEnabled(inlineBlameEnabled);
-        connect(blame, &InlineBlameDecorator::commitClicked,
-                this, &EditorManager::blameCommitClicked);
+        GitGutterDecorator *gg = nullptr;
+        InlineBlameDecorator *blame = nullptr;
+        if (!isDiff) {
+            gg = new GitGutterDecorator(editor);
+            gg->setEnabled(gitGutterEnabled);
+
+            blame = new InlineBlameDecorator(editor);
+            blame->setEnabled(inlineBlameEnabled);
+            connect(blame, &InlineBlameDecorator::commitClicked,
+                    this, &EditorManager::blameCommitClicked);
+        }
 
         // Defer git decorator refreshes further so the deferred batch
         // itself doesn't block on QProcess spawns.
-        if (isFile) {
+        if (isFile && !isDiff) {
             QTimer::singleShot(0, editor, [gg, blame, gitGutterEnabled, inlineBlameEnabled]() {
                 if (gitGutterEnabled) gg->refresh();
                 if (inlineBlameEnabled) blame->refresh();
@@ -404,6 +414,14 @@ void EditorManager::applyTheme(bool dark)
 
     for (auto &editor : getEditors()) {
         if (!editor) continue;
+
+        // Diff views own their palette via GitDiffPainter::configureEditor and
+        // are re-skinned by GitDiffViewController::setDarkPalette on the
+        // effectiveThemeChanged signal. Running applyThemeToEditor on them
+        // would overwrite canvasBg/canvasFg with the chrome's defaultBack
+        // (visible as gray banding under the diff content) until the diff
+        // controller's slot fires next tick.
+        if (isDiffView(editor)) continue;
 
         if (transitionToLight) {
             // Coming from dark, where applyThemeToEditor lightened the lexer

@@ -20,8 +20,10 @@
 #define AI_I_LLM_HTTP_CLIENT_H
 
 #include <QObject>
+#include <QPair>
 #include <QString>
 #include <QUrl>
+#include <QVector>
 
 namespace ai {
 
@@ -40,6 +42,7 @@ public:
         QString prompt;          // already-assembled full prompt (user role)
         int     maxTokens = 0;   // 0 = omit from payload (provider default)
         int     idleTimeoutSec = 60;
+        QVector<QPair<QByteArray, QString>> images;
     };
 
     explicit ILlmHttpClient(QObject *parent = nullptr) : QObject(parent) {}

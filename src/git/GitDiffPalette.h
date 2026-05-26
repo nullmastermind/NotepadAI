@@ -44,6 +44,7 @@ struct GitDiffPalette {
     QColor fgHunkHeader;
     QColor bgHunkHeader;
     QColor fgGutter;
+    QColor bgGutter;
 
     // Canvas (editor background + default foreground for context/default lines).
     QColor canvasBg;

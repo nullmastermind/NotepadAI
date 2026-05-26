@@ -59,7 +59,28 @@ QByteArray LlmHttpClient::buildPayload(const Request &req)
 
     QJsonObject userMsg;
     userMsg.insert(QLatin1String("role"),    QLatin1String("user"));
-    userMsg.insert(QLatin1String("content"), req.prompt);
+    if (req.images.isEmpty()) {
+        userMsg.insert(QLatin1String("content"), req.prompt);
+    } else {
+        QJsonArray contentArr;
+        QJsonObject textPart;
+        textPart.insert(QLatin1String("type"), QLatin1String("text"));
+        textPart.insert(QLatin1String("text"), req.prompt);
+        contentArr.append(textPart);
+        for (const auto &img : req.images) {
+            QJsonObject urlObj;
+            urlObj.insert(QLatin1String("url"),
+                          QStringLiteral("data:%1;base64,%2")
+                              .arg(img.second,
+                                   QString::fromLatin1(img.first.toBase64())));
+            urlObj.insert(QLatin1String("detail"), QLatin1String("low"));
+            QJsonObject imgPart;
+            imgPart.insert(QLatin1String("type"), QLatin1String("image_url"));
+            imgPart.insert(QLatin1String("image_url"), urlObj);
+            contentArr.append(imgPart);
+        }
+        userMsg.insert(QLatin1String("content"), contentArr);
+    }
     messages.append(userMsg);
 
     QJsonObject body;

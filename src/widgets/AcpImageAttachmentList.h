@@ -54,6 +54,9 @@ public:
     // Remove all items and return them in submission order.
     QVector<QPair<QByteArray, QString>> takeAll();
 
+    // Return {data, mimeType} pairs without clearing the queue.
+    QVector<QPair<QByteArray, QString>> peekAll() const;
+
     void clear();
 
 signals:

@@ -2,8 +2,10 @@
 #define AI_PROMPT_IMPROVER_H
 
 #include <QObject>
+#include <QPair>
 #include <QString>
 #include <QList>
+#include <QVector>
 
 #include <cstdint>
 
@@ -35,7 +37,8 @@ public:
     void trigger(const QString &userDraft,
                  const QString &workingDirectory,
                  const QList<AcpProtocol::AcpCommandInfo> &commands,
-                 const QString &chatHistory = {});
+                 const QString &chatHistory = {},
+                 const QVector<QPair<QByteArray, QString>> &images = {});
 
     void cancel();
 
@@ -43,6 +46,7 @@ signals:
     void stateChanged(ai::PromptImprover::State state);
     void finished(const QString &improvedText);
     void errorOccurred(const QString &message);
+    void imagesBudgeted(int sent, int total);
 
 private slots:
     void onFirstByte();
@@ -53,7 +57,8 @@ private slots:
 private:
     void setState(State s);
     QString buildSystemPrompt(const QString &rules,
-                              const QList<AcpProtocol::AcpCommandInfo> &commands) const;
+                              const QList<AcpProtocol::AcpCommandInfo> &commands,
+                              int imageCount) const;
     QString loadRules(const QString &workingDirectory) const;
     QString serializeCommands(const QList<AcpProtocol::AcpCommandInfo> &commands) const;
     QString parseImprovedPrompt(const QString &response) const;

@@ -96,6 +96,39 @@ void configureLineMarkers(ScintillaNext *editor, const GitDiffPalette &pal)
     editor->send(SCI_MARKERSETLAYER, kMarkerHunkHeader, SC_LAYER_BASE);
 }
 
+// Apply the per-style fore/back palette. Called from both configureEditor and
+// render so that any external code path which mutates style backgrounds (e.g.
+// EditorManager::applyThemeToEditor running on a lexerChanged signal, or a
+// theme transition) is undone before the diff is painted. Cheap — 9 styles
+// times two SCI sets each, all single-virtual-dispatch SciFnDirect calls.
+void applyDiffStyles(ScintillaNext *editor, const GitDiffPalette &pal)
+{
+    setStyleFB(editor, GitDiffPainter::StyleDefault,    pal.canvasFg,       pal.canvasBg);
+    setStyleFB(editor, GitDiffPainter::StyleFileHeader, pal.fgHunkHeader,   pal.canvasBg);
+    setStyleFB(editor, GitDiffPainter::StyleHunkHeader, pal.canvasFg,       pal.canvasBg);
+    setStyleFB(editor, GitDiffPainter::StyleContext,    pal.canvasFg,       pal.canvasBg);
+    setStyleFB(editor, GitDiffPainter::StyleAdded,      pal.canvasFg,       pal.canvasBg);
+    setStyleFB(editor, GitDiffPainter::StyleDeleted,    pal.canvasFg,       pal.canvasBg);
+    setStyleFB(editor, GitDiffPainter::StyleNoNewline,  pal.fgHunkHeader,   pal.canvasBg);
+    setStyleFB(editor, GitDiffPainter::StyleCommitMeta, pal.commitMetaFg,   pal.canvasBg);
+    setStyleFB(editor, GitDiffPainter::StyleCommitBody, pal.commitBodyFg,   pal.canvasBg);
+
+    // Scintilla's STYLE_DEFAULT (32) — distinct from our own StyleDefault (0)
+    // — paints the editor canvas BELOW the last text row and any unstyled
+    // gap. If left at the chrome's defaultBack (0x1E1E1E in dark mode) it
+    // creates a visible gray banding against canvasBg (#0D1117). Keep them
+    // in sync so the canvas under the diff is uniform.
+    setStyleFB(editor, STYLE_DEFAULT, pal.canvasFg, pal.canvasBg);
+
+    // STYLE_LINENUMBER drives the right-aligned text margin (margin 0). Without
+    // this, the gutter inherits whatever the chrome's last applyThemeToEditor
+    // wrote — which is tuned for the regular editor canvas (light gray on light,
+    // dark gray on dark) and ends up inverted against the diff canvas (white in
+    // light mode, near-black in dark mode). Tying it to the diff palette keeps
+    // light/dark consistent across theme transitions.
+    setStyleFB(editor, STYLE_LINENUMBER, pal.fgGutter, pal.bgGutter);
+}
+
 void configureWordIndicators(ScintillaNext *editor, const GitDiffPalette &pal)
 {
     const int addId = ensureWordIndicator(editor, kPropIndicAddWord, "git_diff_word_added");
@@ -126,20 +159,15 @@ void GitDiffPainter::configureEditor(ScintillaNext *editor, const GitDiffPalette
     // No lexer — we apply styles ourselves.
     editor->send(SCI_SETREADONLY, 0, 0);
     editor->send(SCI_CLEARALL, 0, 0);
+
+    // STYLE_DEFAULT already carries the editor's font/size from
+    // EditorManager::applyThemeToEditor(initialSetup=true). Overwrite only
+    // fore/back to the diff palette, then propagate to all styles so every
+    // unstyled region (below-EOF, margins) uses canvasBg.
+    setStyleFB(editor, STYLE_DEFAULT, pal.canvasFg, pal.canvasBg);
     editor->send(SCI_STYLECLEARALL, 0, 0);
 
-    // Default style uses the editor's existing default background; ensure
-    // foreground readable.
-    const QColor defFg = pal.fgHunkHeader; // close to muted text, just placeholder
-    setStyleFB(editor, StyleDefault,    pal.canvasFg,       pal.canvasBg);
-    setStyleFB(editor, StyleFileHeader, pal.fgHunkHeader,   pal.canvasBg);
-    setStyleFB(editor, StyleHunkHeader, pal.fgHunkHeader,   pal.canvasBg);
-    setStyleFB(editor, StyleContext,    pal.canvasFg,       pal.canvasBg);
-    setStyleFB(editor, StyleAdded,      pal.canvasFg,       pal.canvasBg);
-    setStyleFB(editor, StyleDeleted,    pal.canvasFg,       pal.canvasBg);
-    setStyleFB(editor, StyleNoNewline,  pal.fgHunkHeader,   pal.canvasBg);
-    setStyleFB(editor, StyleCommitMeta, pal.commitMetaFg,   pal.canvasBg);
-    setStyleFB(editor, StyleCommitBody, pal.commitBodyFg,   pal.canvasBg);
+    applyDiffStyles(editor, pal);
 
     configureLineMarkers(editor, pal);
 
@@ -154,7 +182,6 @@ void GitDiffPainter::configureEditor(ScintillaNext *editor, const GitDiffPalette
     // Hide selection / line markers / fold markers to look like a static view.
     editor->send(SCI_SETMARGINWIDTHN, 1, 0);
     editor->send(SCI_SETMARGINWIDTHN, 2, 0);
-    (void)defFg;
 }
 
 void GitDiffPainter::render(ScintillaNext *editor,
@@ -165,8 +192,11 @@ void GitDiffPainter::render(ScintillaNext *editor,
     PROFILE_SCOPE("GitDiffPainter::render");
     if (!editor) return;
 
-    // Refresh indicator / marker colors in case the theme changed between
-    // configureEditor and render.
+    // Refresh palette in case anything (theme transition, lexerChanged from
+    // a deferred detectLanguage, etc.) mutated the editor's styles between
+    // configureEditor and render. Cheap — a handful of SCI_STYLESETFORE/BACK
+    // and SCI_INDIC*/MARKER* calls, all single virtual dispatch.
+    applyDiffStyles(editor, pal);
     configureLineMarkers(editor, pal);
     configureWordIndicators(editor, pal);
 

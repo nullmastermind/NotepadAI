@@ -123,8 +123,7 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(QWidget *parent) :
     connect(ui->treeView, &QTreeView::collapsed,
             this, &FolderAsWorkspaceDock::onTreeCollapsed);
 
-    // The initial dock starts empty; MainWindow::restoreOpenWorkspaces assigns
-    // Workspaces[0] into it via the vacant-reuse path in openFolderAsWorkspacePath.
+    // Empty default ctor — caller must invoke setRootPath() before showing the dock.
 }
 
 FolderAsWorkspaceDock::FolderAsWorkspaceDock(const QString &initialPath, QWidget *parent) :
