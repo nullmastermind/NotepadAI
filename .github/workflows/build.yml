@@ -72,7 +72,8 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
-          modules: ${{ runner.os == 'Linux' && 'qt5compat qtwayland' || 'qt5compat' }}
+          # qtwayland is included in the base Qt Linux archives; not a valid aqt add-on module
+          modules: qt5compat
           cache: true
 
       - name: Setup Visual Studio Tools
