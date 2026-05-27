@@ -6,7 +6,9 @@
  */
 
 #include "MiniAppManager.h"
+#include "AiAgentDock.h"
 #include "DockedEditor.h"
+#include "MainWindow.h"
 #include "MiniAppInstance.h"
 #include "MiniAppRegistry.h"
 #include "NotepadNextApplication.h"
@@ -143,6 +145,18 @@ void MiniAppManager::launchApp(const MiniAppDefinition &def)
             dlg.exec();
         });
         if (instance->definition().debugPort > 0) {
+            auto *mainWin = qobject_cast<MainWindow *>(parent());
+            AiAgentDock *aiDock = mainWin ? mainWin->activeAiDock() : nullptr;
+            if (aiDock && !instance->cdpHttpUrl().isEmpty()) {
+                menu.addAction(tr("Send to AI"), this, [instance, aiDock]() {
+                    const QString msg = QStringLiteral(
+                        "Connect to the browser via CDP at %1")
+                        .arg(instance->cdpHttpUrl());
+                    aiDock->insertTextToInput(msg);
+                    aiDock->setVisible(true);
+                    aiDock->raise();
+                });
+            }
             QAction *cdpAction = menu.addAction(tr("Copy CDP URL"), this, [instance]() {
                 QApplication::clipboard()->setText(instance->cdpHttpUrl());
             });
