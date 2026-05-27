@@ -229,42 +229,6 @@ bool forwardClipboardToFocusWidget(const char *slot)
     return QMetaObject::invokeMethod(w, slot);
 }
 
-class DoubleShiftFilter : public QObject
-{
-public:
-    explicit DoubleShiftFilter(QAction *action, QObject *parent)
-        : QObject(parent), m_action(action) {}
-
-protected:
-    bool eventFilter(QObject *, QEvent *event) override
-    {
-        const auto type = event->type();
-        if (Q_LIKELY(type != QEvent::KeyRelease && type != QEvent::KeyPress))
-            return false;
-        auto *ke = static_cast<QKeyEvent *>(event);
-        if (type == QEvent::KeyPress) {
-            if (ke->key() != Qt::Key_Shift)
-                m_lastShiftReleaseMs = 0;
-            return false;
-        }
-        if (ke->key() != Qt::Key_Shift || ke->modifiers() != Qt::NoModifier || ke->isAutoRepeat())
-            return false;
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        if (now - m_lastShiftReleaseMs < 400) {
-            m_lastShiftReleaseMs = 0;
-            if (m_action && m_action->isEnabled())
-                m_action->trigger();
-        } else {
-            m_lastShiftReleaseMs = now;
-        }
-        return false;
-    }
-
-private:
-    QAction *m_action;
-    qint64 m_lastShiftReleaseMs = 0;
-};
-
 } // namespace
 
 
@@ -451,7 +415,6 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
             });
             dlg->show();
         });
-        qApp->installEventFilter(new DoubleShiftFilter(m_actionQuickFileOpen, this));
         connect(this, &MainWindow::activeWorkspaceChanged, m_actionQuickFileOpen, [this]() {
             m_actionQuickFileOpen->setEnabled(!currentWorkspaceRoot().isEmpty());
         });

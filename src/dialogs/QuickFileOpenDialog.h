@@ -3,9 +3,11 @@
 #include <QDialog>
 #include <QLineEdit>
 #include <QListView>
-#include <QStringListModel>
 #include <QStringList>
 #include <QFutureWatcher>
+#include <QVector>
+
+class QStandardItemModel;
 
 class QuickFileOpenDialog : public QDialog
 {
@@ -16,6 +18,8 @@ public:
     ~QuickFileOpenDialog() override;
 
     QString selectedFilePath() const;
+
+    static constexpr int MatchPositionsRole = Qt::UserRole + 1;
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
@@ -31,11 +35,12 @@ private:
     static QStringList buildFileIndex(const QString &rootPath);
     void applyFilter(const QString &pattern);
     static int fuzzyScore(const QString &pattern, const QString &candidate);
+    static int fuzzyMatch(const QString &pattern, const QString &candidate, QVector<int> &positions);
 
     QString m_rootPath;
     QLineEdit *m_lineEdit = nullptr;
     QListView *m_listView = nullptr;
-    QStringListModel *m_model = nullptr;
+    QStandardItemModel *m_model = nullptr;
     QFutureWatcher<QStringList> *m_watcher = nullptr;
     QStringList m_allFiles;
     QStringList m_filteredFiles;

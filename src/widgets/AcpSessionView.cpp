@@ -505,8 +505,9 @@ void AcpSessionView::buildUi()
     m_commandPopup->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_commandPopup->hide();
 
-    // 6b. Floating improve-prompt button (child of m_input, bottom-right).
-    m_improveBtn = new QToolButton(m_input->viewport());
+    // 6b. Floating improve-prompt button (child of m_input frame, bottom-right).
+    // Parent is m_input (not viewport) so it stays fixed when content scrolls.
+    m_improveBtn = new QToolButton(m_input);
     m_improveBtn->setAutoRaise(true);
     m_improveBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_improveBtn->setText(QStringLiteral("✨"));
@@ -1898,9 +1899,10 @@ void AcpSessionView::positionImproveButton()
     int rightOffset = kPad;
     if (auto *sb = m_input->verticalScrollBar(); sb && sb->isVisible())
         rightOffset += sb->width();
-    const int x = m_input->viewport()->width() - btnSz.width() - rightOffset;
-    const int y = m_input->viewport()->height() - btnSz.height() - kPad;
+    const int x = m_input->width() - btnSz.width() - rightOffset;
+    const int y = m_input->height() - btnSz.height() - kPad;
     m_improveBtn->move(x, y);
+    m_improveBtn->raise();
 }
 
 void AcpSessionView::updateImproveButtonState()

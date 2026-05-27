@@ -46,6 +46,8 @@ public:
     QString cdpHttpUrl() const { return m_cdpHttpUrl; }
     QString cdpDisplayText() const { return m_cdpDisplayText; }
 
+    QString currentUrl() const { return m_urlEdit ? m_urlEdit->text() : QString(); }
+
 signals:
     void navigationCompleted(bool success, const QString &error);
     void processFailed(const QString &description);
