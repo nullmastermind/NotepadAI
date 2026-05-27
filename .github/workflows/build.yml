@@ -72,7 +72,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
-          modules: 'qt5compat'
+          modules: ${{ runner.os == 'Linux' && 'qt5compat qtwayland' || 'qt5compat' }}
           cache: true
 
       - name: Setup Visual Studio Tools
