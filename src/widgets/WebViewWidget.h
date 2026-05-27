@@ -8,7 +8,7 @@
 #pragma once
 
 #include <QHBoxLayout>
-#include <QLabel>
+#include <QLineEdit>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -52,10 +52,12 @@ signals:
     void loadingStateChanged(bool loading);
     void cdpReady(const QString &httpUrl, const QString &wsUrl);
     void titleChanged(const QString &title);
+    void urlChanged(const QString &url);
 
 public:
     void showCdpUrl(const QString &httpUrl);
     void hideCdpUrl();
+    void updateUrlBar(const QString &url);
 
 protected:
     // Subclasses add their native view below the toolbar.
@@ -75,7 +77,7 @@ private:
     QToolButton *m_backBtn = nullptr;
     QToolButton *m_forwardBtn = nullptr;
     QToolButton *m_reloadBtn = nullptr;
-    QLabel *m_urlLabel = nullptr;
+    QLineEdit *m_urlEdit = nullptr;
     QToolButton *m_stopBtn = nullptr;
     QToolButton *m_cdpBtn = nullptr;
     QString m_cdpHttpUrl;

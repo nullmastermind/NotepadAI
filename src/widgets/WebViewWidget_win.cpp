@@ -374,6 +374,11 @@ private:
         m_webView->add_NewWindowRequested(
             new NewWindowRequestedHandler(this), &newWinToken);
 
+        // Subscribe to SourceChanged to update the URL bar
+        EventRegistrationToken srcToken;
+        m_webView->add_SourceChanged(
+            new SourceChangedHandler(this), &srcToken);
+
         // Navigate to initial URL
         setLoading(true);
         m_dbgNavigateCalled = true;
@@ -531,6 +536,32 @@ private:
                 CoTaskMemFree(uri);
             }
             if (args) args->put_Handled(TRUE);
+            return S_OK;
+        }
+    };
+
+    // SourceChangedHandler: fires when the URL changes (navigation, redirect, fragment change).
+    struct SourceChangedHandler : ICoreWebView2SourceChangedEventHandler {
+        WebViewWidgetWin *owner;
+        std::shared_ptr<std::atomic<bool>> alive;
+        ULONG refCount = 1;
+        SourceChangedHandler(WebViewWidgetWin *o) : owner(o), alive(o->m_alive) {}
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv) override {
+            if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_ICoreWebView2SourceChangedEventHandler)) {
+                *ppv = this; AddRef(); return S_OK;
+            }
+            *ppv = nullptr; return E_NOINTERFACE;
+        }
+        ULONG STDMETHODCALLTYPE AddRef() override { return ++refCount; }
+        ULONG STDMETHODCALLTYPE Release() override { if (--refCount == 0) { delete this; return 0; } return refCount; }
+        HRESULT STDMETHODCALLTYPE Invoke(ICoreWebView2 *sender, ICoreWebView2SourceChangedEventArgs *) override {
+            if (!alive->load(std::memory_order_acquire)) return S_OK;
+            LPWSTR uri = nullptr;
+            if (sender && SUCCEEDED(sender->get_Source(&uri)) && uri) {
+                QString url = QString::fromWCharArray(uri);
+                CoTaskMemFree(uri);
+                owner->updateUrlBar(url);
+            }
             return S_OK;
         }
     };

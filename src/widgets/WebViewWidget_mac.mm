@@ -94,6 +94,11 @@ public:
     void onNavFinished(bool success, const QString &error)
     {
         setLoading(false);
+        if (m_webView) {
+            NSURL *currentUrl = m_webView.URL;
+            if (currentUrl)
+                updateUrlBar(QString::fromNSString(currentUrl.absoluteString));
+        }
         emit navigationCompleted(success, error);
     }
 

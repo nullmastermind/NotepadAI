@@ -9,7 +9,6 @@
 
 #include <QApplication>
 #include <QClipboard>
-#include <QFontMetrics>
 #include <QStyle>
 #include <QTimer>
 
@@ -57,16 +56,31 @@ void WebViewWidget::setupToolbar()
     connect(m_reloadBtn, &QToolButton::clicked, this, &WebViewWidget::reload);
     m_toolbarLayout->addWidget(m_reloadBtn);
 
-    m_urlLabel = new QLabel(toolbarWidget);
-    m_urlLabel->setText(m_url.toString());
-    m_urlLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    QFont labelFont = m_urlLabel->font();
-    labelFont.setPointSize(labelFont.pointSize() - 1);
-    m_urlLabel->setFont(labelFont);
-    m_urlLabel->setWordWrap(false);
-    m_urlLabel->setMinimumWidth(0);
-    m_urlLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    m_toolbarLayout->addWidget(m_urlLabel, 1);
+    m_urlEdit = new QLineEdit(toolbarWidget);
+    m_urlEdit->setText(m_url.toString());
+    QFont editFont = m_urlEdit->font();
+    editFont.setPointSize(editFont.pointSize() - 1);
+    m_urlEdit->setFont(editFont);
+    m_urlEdit->setMinimumWidth(0);
+    m_urlEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_urlEdit->setPlaceholderText(tr("Enter URL and press Enter"));
+    auto navigateFromBar = [this]() {
+        QString text = m_urlEdit->text().trimmed();
+        if (text.isEmpty()) return;
+        if (!text.contains(QStringLiteral("://")) && !text.startsWith(QStringLiteral("//")))
+            text.prepend(QStringLiteral("https://"));
+        navigate(QUrl(text));
+    };
+    connect(m_urlEdit, &QLineEdit::returnPressed, this, navigateFromBar);
+    m_toolbarLayout->addWidget(m_urlEdit, 1);
+
+    auto *goBtn = new QToolButton(toolbarWidget);
+    goBtn->setAutoRaise(true);
+    goBtn->setIcon(style()->standardIcon(QStyle::SP_CommandLink));
+    goBtn->setToolTip(tr("Go"));
+    goBtn->setIconSize(QSize(14, 14));
+    connect(goBtn, &QToolButton::clicked, this, navigateFromBar);
+    m_toolbarLayout->addWidget(goBtn);
 
     m_stopBtn = new QToolButton(toolbarWidget);
     m_stopBtn->setAutoRaise(true);
@@ -124,6 +138,13 @@ void WebViewWidget::hideCdpUrl()
     m_cdpDisplayText.clear();
     if (m_cdpBtn)
         m_cdpBtn->hide();
+}
+
+void WebViewWidget::updateUrlBar(const QString &url)
+{
+    if (m_urlEdit && !m_urlEdit->hasFocus())
+        m_urlEdit->setText(url);
+    emit urlChanged(url);
 }
 
 // Factory implementation — returns nullptr on unsupported platforms.
