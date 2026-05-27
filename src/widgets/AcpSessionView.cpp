@@ -574,8 +574,8 @@ void AcpSessionView::buildUi()
     m_sendWithGoalBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_sendWithGoalBtn->setToolTip(tr("Send with Goal — evaluate success criteria automatically"));
     m_sendWithGoalBtn->setStyleSheet(QStringLiteral(
-        "QToolButton { color: palette(placeholder-text); padding: 1px 6px; border: 1px solid transparent; border-radius: 3px; }"
-        "QToolButton:hover { color: palette(text); border: 1px solid palette(mid); }"));
+        "QToolButton { color: rgb(180, 140, 50); padding: 1px 6px; border: 1px solid rgba(180, 140, 50, 80); border-radius: 3px; }"
+        "QToolButton:hover { color: rgb(200, 160, 60); background: rgba(180, 140, 50, 32); border: 1px solid rgba(180, 140, 50, 120); }"));
     connect(m_sendWithGoalBtn, &QToolButton::clicked, this, &AcpSessionView::sendWithGoalRequested);
     btnRow->addWidget(m_sendWithGoalBtn);
 
