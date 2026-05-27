@@ -788,30 +788,6 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
             usage.maxTokens = usageObj.value(QStringLiteral("maxTokens")).toInt();
         }
         emit usageUpdated(usage);
-    } else if (kind == QLatin1String("usage_update")) {
-        // Flat shape: { sessionUpdate: "usage_update", used: N, size: N, cost: {...} }
-        // The agent treats this as the authoritative running total, so it
-        // replaces the snapshot (see AcpConnection::usageReplaced docs).
-        AcpProtocol::AcpUsage usage;
-        if (update.contains(QStringLiteral("used"))) {
-            usage.totalTokens = update.value(QStringLiteral("used")).toInt();
-        }
-        if (update.contains(QStringLiteral("size"))) {
-            usage.maxTokens = update.value(QStringLiteral("size")).toInt();
-        }
-        const QJsonValue costVal = update.value(QStringLiteral("cost"));
-        if (costVal.isObject()) {
-            const QJsonObject costObj = costVal.toObject();
-            const QJsonValue amount = costObj.value(QStringLiteral("amount"));
-            if (amount.isDouble()) {
-                usage.costAmount = amount.toDouble();
-            }
-            const QJsonValue currency = costObj.value(QStringLiteral("currency"));
-            if (currency.isString()) {
-                usage.costCurrency = currency.toString();
-            }
-        }
-        emit usageReplaced(usage);
     } else if (kind == QLatin1String("prompt_start")) {
         beginPrompt();
     } else if (kind == QLatin1String("prompt_end")) {

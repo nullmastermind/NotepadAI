@@ -40,7 +40,9 @@ public:
     ~MiniAppManager() override;
 
     void launchApp(const MiniAppDefinition &def);
-    void launchQuickBrowser(const QUrl &url, bool enableCdp = true);
+    void launchQuickBrowser(const QUrl &url, bool enableCdp = true,
+                            int proxyType = 0, const QString &proxyHost = QString(),
+                            int proxyPort = 0, const QString &proxyBypassList = QString());
     void shutdown();
 
     int runningCount() const { return m_instances.size(); }

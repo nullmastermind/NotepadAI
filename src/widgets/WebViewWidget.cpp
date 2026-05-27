@@ -130,7 +130,9 @@ void WebViewWidget::hideCdpUrl()
 // Platform-specific create() is defined in WebViewWidget_win.cpp / _mac.mm.
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
 WebViewWidget *WebViewWidget::create(const QString & /*appId*/, const QUrl & /*url*/, int /*debugPort*/,
-                                     QWidget * /*parent*/, const QString & /*userDataFolder*/)
+                                     QWidget * /*parent*/, const QString & /*userDataFolder*/,
+                                     int /*proxyType*/, const QString & /*proxyHost*/,
+                                     int /*proxyPort*/, const QString & /*proxyBypassList*/)
 {
     return nullptr; // Linux: no embedded webview, use xdg-open
 }

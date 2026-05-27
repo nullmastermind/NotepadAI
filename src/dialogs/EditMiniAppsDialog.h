@@ -85,6 +85,14 @@ private:
     QPushButton *m_randomPortBtn = nullptr;
     QLabel *m_portWarningLabel = nullptr;
 
+    // Proxy section
+    QGroupBox *m_proxyGroup = nullptr;
+    QComboBox *m_proxyTypeCombo = nullptr;
+    QLineEdit *m_proxyHostEdit = nullptr;
+    QSpinBox *m_proxyPortSpin = nullptr;
+    QLineEdit *m_proxyBypassEdit = nullptr;
+    QLabel *m_proxyWarningLabel = nullptr;
+
     QLabel *m_urlWarningLabel = nullptr;
     QDialogButtonBox *m_buttonBox = nullptr;
 };

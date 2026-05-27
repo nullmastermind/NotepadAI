@@ -94,6 +94,13 @@ CREATE_SETTING(Terminal, TerminalFont, terminalFont, QString, []() {
     return QFontDatabase::systemFont(QFontDatabase::FixedFont).toString();
 })
 
+// --- Quick Browser last-used proxy settings ------------------------------------
+
+CREATE_SETTING(QuickBrowser, LastProxyType, lastProxyType, int, 0)
+CREATE_SETTING(QuickBrowser, LastProxyHost, lastProxyHost, QString, QStringLiteral(""))
+CREATE_SETTING(QuickBrowser, LastProxyPort, lastProxyPort, int, 0)
+CREATE_SETTING(QuickBrowser, LastProxyBypassList, lastProxyBypassList, QString, QStringLiteral(""))
+
 CREATE_SETTING(Git, SyntaxHighlightDiffEnabled, syntaxHighlightDiffEnabled, bool, true)
 
 // Files-tab decoration master toggle — see file-tree-git-decorations spec.

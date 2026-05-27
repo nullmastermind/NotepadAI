@@ -292,7 +292,8 @@ void MiniAppInstance::onHealthPoll()
 
 void MiniAppInstance::createWebView()
 {
-    m_webView = WebViewWidget::create(m_def.id, QUrl(m_def.url), m_def.debugPort, nullptr);
+    m_webView = WebViewWidget::create(m_def.id, QUrl(m_def.url), m_def.debugPort, nullptr, QString(),
+                                      m_def.proxyType, m_def.proxyHost, m_def.proxyPort, m_def.proxyBypassList);
     if (!m_webView) {
         // Platform doesn't support embedded webview (Linux)
         setState(Running);

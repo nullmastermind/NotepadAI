@@ -42,6 +42,9 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QCheckBox>
+#include <QComboBox>
+#include <QSpinBox>
+#include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QPrintPreviewDialog>
 #include <QPrinter>
@@ -1438,21 +1441,74 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
     // Quick Browse action
     ui->actionQuickBrowser->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_B));
     connect(ui->actionQuickBrowser, &QAction::triggered, this, [this]() {
+        ApplicationSettings *settings = this->app->getSettings();
+
         QDialog dlg(this);
         dlg.setWindowTitle(tr("Quick Browse"));
         auto *layout = new QVBoxLayout(&dlg);
+
         layout->addWidget(new QLabel(tr("Enter URL:"), &dlg));
         auto *urlEdit = new QLineEdit(&dlg);
         urlEdit->setPlaceholderText(QStringLiteral("https://example.com"));
         layout->addWidget(urlEdit);
+
         auto *cdpCheck = new QCheckBox(tr("Enable CDP debugging"), &dlg);
         cdpCheck->setChecked(true);
         layout->addWidget(cdpCheck);
+
+        // Proxy row
+        auto *proxyLayout = new QHBoxLayout;
+        proxyLayout->addWidget(new QLabel(tr("Proxy:"), &dlg));
+        auto *proxyCombo = new QComboBox(&dlg);
+        proxyCombo->addItem(tr("None"), 0);
+        proxyCombo->addItem(QStringLiteral("HTTP"), 1);
+        proxyCombo->addItem(QStringLiteral("HTTPS"), 2);
+        proxyCombo->addItem(QStringLiteral("SOCKS4"), 3);
+        proxyCombo->addItem(QStringLiteral("SOCKS5"), 4);
+        proxyLayout->addWidget(proxyCombo);
+        proxyLayout->addWidget(new QLabel(tr("Host:"), &dlg));
+        auto *proxyHostEdit = new QLineEdit(&dlg);
+        proxyHostEdit->setPlaceholderText(QStringLiteral("proxy.example.com"));
+        proxyLayout->addWidget(proxyHostEdit, 1);
+        proxyLayout->addWidget(new QLabel(tr("Port:"), &dlg));
+        auto *proxyPortSpin = new QSpinBox(&dlg);
+        proxyPortSpin->setRange(0, 65535);
+        proxyPortSpin->setSpecialValueText(tr("Default"));
+        proxyLayout->addWidget(proxyPortSpin);
+        layout->addLayout(proxyLayout);
+
+        auto *bypassLayout = new QHBoxLayout;
+        bypassLayout->addWidget(new QLabel(tr("Bypass:"), &dlg));
+        auto *proxyBypassEdit = new QLineEdit(&dlg);
+        proxyBypassEdit->setPlaceholderText(QStringLiteral("localhost;127.0.0.1;[::1];<local>"));
+        bypassLayout->addWidget(proxyBypassEdit, 1);
+        layout->addLayout(bypassLayout);
+
+        // Enable/disable proxy fields based on combo
+        auto updateProxyFields = [=]() {
+            const bool enabled = proxyCombo->currentData().toInt() > 0;
+            proxyHostEdit->setEnabled(enabled);
+            proxyPortSpin->setEnabled(enabled);
+            proxyBypassEdit->setEnabled(enabled);
+        };
+        connect(proxyCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg, updateProxyFields);
+
+        // Load last-used proxy settings
+        {
+            int idx = proxyCombo->findData(settings->lastProxyType());
+            proxyCombo->setCurrentIndex(idx == -1 ? 0 : idx);
+        }
+        proxyHostEdit->setText(settings->lastProxyHost());
+        proxyPortSpin->setValue(settings->lastProxyPort());
+        proxyBypassEdit->setText(settings->lastProxyBypassList());
+        updateProxyFields();
+
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
         connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
         layout->addWidget(buttons);
         urlEdit->setFocus();
+
         if (dlg.exec() != QDialog::Accepted)
             return;
         QString input = urlEdit->text().trimmed();
@@ -1463,7 +1519,19 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         QUrl url(input, QUrl::TolerantMode);
         if (!url.isValid())
             return;
-        m_miniAppManager->launchQuickBrowser(url, cdpCheck->isChecked());
+
+        // Save last-used proxy
+        const int proxyType = proxyCombo->currentData().toInt();
+        const QString proxyHost = proxyHostEdit->text().trimmed();
+        const int proxyPort = proxyPortSpin->value();
+        const QString proxyBypass = proxyBypassEdit->text().trimmed();
+        settings->setLastProxyType(proxyType);
+        settings->setLastProxyHost(proxyHost);
+        settings->setLastProxyPort(proxyPort);
+        settings->setLastProxyBypassList(proxyBypass);
+
+        m_miniAppManager->launchQuickBrowser(url, cdpCheck->isChecked(),
+                                             proxyType, proxyHost, proxyPort, proxyBypass);
     });
 
     connect(ui->actionEditMiniApps, &QAction::triggered, this, [this]() {

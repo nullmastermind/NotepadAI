@@ -15,6 +15,7 @@ qt_add_executable(NotepadAI
 	GoalAgent.h
 	GoalAgentSettings.h
 	GoalPromptRenderer.h
+	BrowserProxyArgs.h
 	ByteArrayUtils.h
 	ColorPickerDelegate.h
 	ComboBoxDelegate.h
@@ -91,6 +92,7 @@ qt_add_executable(NotepadAI
 	GoalAgent.cpp
 	GoalAgentSettings.cpp
 	GoalPromptRenderer.cpp
+	BrowserProxyArgs.cpp
 	ColorPickerDelegate.cpp
 	ComboBoxDelegate.cpp
 	Converter.cpp

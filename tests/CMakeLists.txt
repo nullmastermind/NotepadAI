@@ -710,3 +710,15 @@ target_sources(test_markdown_renderer PRIVATE
     ${CMAKE_SOURCE_DIR}/src/MarkdownRenderer.h
 )
 add_test(NAME MarkdownRenderer COMMAND test_markdown_renderer)
+
+# --- BrowserProxyArgs: proxy arg builder unit tests ---
+qt_add_executable(test_browser_proxy_args test_browser_proxy_args.cpp)
+target_include_directories(test_browser_proxy_args PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_browser_proxy_args PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_browser_proxy_args PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
+    ${CMAKE_SOURCE_DIR}/src/BrowserProxyArgs.cpp
+    ${CMAKE_SOURCE_DIR}/src/BrowserProxyArgs.h
+)
+add_test(NAME BrowserProxyArgs COMMAND test_browser_proxy_args)

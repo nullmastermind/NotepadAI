@@ -26,6 +26,8 @@
 #include <aclapi.h>
 #include <WebView2.h>
 
+#include "BrowserProxyArgs.h"
+
 // Load CreateCoreWebView2EnvironmentWithOptions dynamically so we don't
 // depend on WebView2LoaderStatic.lib (MSVC-only). The function lives in
 // WebView2Loader.dll which ships with the WebView2 Runtime.
@@ -83,10 +85,15 @@ class WebViewWidgetWin : public WebViewWidget
 
 public:
     WebViewWidgetWin(const QString &appId, const QUrl &url, int debugPort, QWidget *parent,
-                     const QString &userDataFolder)
+                     const QString &userDataFolder, int proxyType, const QString &proxyHost,
+                     int proxyPort, const QString &proxyBypassList)
         : WebViewWidget(appId, url, parent)
         , m_debugPort(debugPort)
         , m_customUserDataFolder(userDataFolder)
+        , m_proxyType(proxyType)
+        , m_proxyHost(proxyHost)
+        , m_proxyPort(proxyPort)
+        , m_proxyBypassList(proxyBypassList)
     {
         m_hostWidget = new QWidget(this);
         m_hostWidget->setAttribute(Qt::WA_NativeWindow);
@@ -233,14 +240,21 @@ private:
         auto createEnv = resolveCreateEnvironment();
         if (!createEnv) return;
 
-        QByteArray prevEnv;
-        bool hadEnv = false;
-        if (m_debugPort > 0) {
-            const QByteArray envName = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
-            prevEnv = qgetenv(envName.constData());
-            hadEnv = !prevEnv.isNull();
-            qputenv(envName.constData(),
-                    QStringLiteral("--remote-debugging-port=%1").arg(m_debugPort).toUtf8());
+        const QString argsStr = buildBrowserArgs(m_debugPort, m_proxyType, m_proxyHost, m_proxyPort, m_proxyBypassList);
+
+        // Set browser arguments via environment variable. WebView2Loader.dll reads
+        // this synchronously during CreateCoreWebView2EnvironmentWithOptions before
+        // returning, so save/restore is safe on the single-threaded GUI thread.
+        const QByteArray envName = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
+        const QByteArray prevEnv = qgetenv(envName.constData());
+        const bool hadEnv = !prevEnv.isNull();
+
+        if (!argsStr.isEmpty()) {
+            QByteArray combined = prevEnv;
+            if (!combined.isEmpty())
+                combined += ' ';
+            combined += argsStr.toUtf8();
+            qputenv(envName.constData(), combined);
         }
 
         HRESULT hr = createEnv(
@@ -249,8 +263,7 @@ private:
             nullptr,
             new EnvironmentCompletedHandler(this));
 
-        if (m_debugPort > 0) {
-            const QByteArray envName = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
+        if (!argsStr.isEmpty()) {
             if (hadEnv)
                 qputenv(envName.constData(), prevEnv);
             else
@@ -592,6 +605,10 @@ private:
     // CDP debug port
     int m_debugPort = 0;
     QString m_customUserDataFolder;
+    int m_proxyType = 0;
+    QString m_proxyHost;
+    int m_proxyPort = 0;
+    QString m_proxyBypassList;
     QNetworkAccessManager *m_cdpNam = nullptr;
     QTimer *m_cdpPollTimer = nullptr;
     int m_cdpPollCount = 0;
@@ -599,7 +616,10 @@ private:
 
 // Factory: Windows implementation
 WebViewWidget *WebViewWidget::create(const QString &appId, const QUrl &url, int debugPort,
-                                     QWidget *parent, const QString &userDataFolder)
+                                     QWidget *parent, const QString &userDataFolder,
+                                     int proxyType, const QString &proxyHost,
+                                     int proxyPort, const QString &proxyBypassList)
 {
-    return new WebViewWidgetWin(appId, url, debugPort, parent, userDataFolder);
+    return new WebViewWidgetWin(appId, url, debugPort, parent, userDataFolder,
+                                proxyType, proxyHost, proxyPort, proxyBypassList);
 }

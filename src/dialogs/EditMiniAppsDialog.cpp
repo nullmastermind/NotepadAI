@@ -11,6 +11,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -160,6 +161,33 @@ EditMiniAppsDialog::EditMiniAppsDialog(MiniAppRegistry *registry,
     debugLayout->addWidget(m_portWarningLabel);
     formLayout->addWidget(m_debugGroup);
 
+    // Proxy section (collapsible)
+    m_proxyGroup = new QGroupBox(tr("Proxy"), rightWidget);
+    m_proxyGroup->setCheckable(true);
+    m_proxyGroup->setChecked(false);
+    auto *proxyLayout = new QFormLayout(m_proxyGroup);
+    m_proxyTypeCombo = new QComboBox(m_proxyGroup);
+    m_proxyTypeCombo->addItem(QStringLiteral("HTTP"), 1);
+    m_proxyTypeCombo->addItem(QStringLiteral("HTTPS"), 2);
+    m_proxyTypeCombo->addItem(QStringLiteral("SOCKS4"), 3);
+    m_proxyTypeCombo->addItem(QStringLiteral("SOCKS5"), 4);
+    proxyLayout->addRow(tr("Type:"), m_proxyTypeCombo);
+    m_proxyHostEdit = new QLineEdit(m_proxyGroup);
+    m_proxyHostEdit->setPlaceholderText(QStringLiteral("proxy.example.com"));
+    proxyLayout->addRow(tr("Host:"), m_proxyHostEdit);
+    m_proxyPortSpin = new QSpinBox(m_proxyGroup);
+    m_proxyPortSpin->setRange(0, 65535);
+    m_proxyPortSpin->setSpecialValueText(tr("Default"));
+    proxyLayout->addRow(tr("Port:"), m_proxyPortSpin);
+    m_proxyBypassEdit = new QLineEdit(m_proxyGroup);
+    m_proxyBypassEdit->setPlaceholderText(QStringLiteral("localhost;127.0.0.1;[::1];<local>"));
+    proxyLayout->addRow(tr("Bypass list:"), m_proxyBypassEdit);
+    m_proxyWarningLabel = new QLabel(m_proxyGroup);
+    m_proxyWarningLabel->setStyleSheet(QStringLiteral("color: orange; font-size: 10px;"));
+    m_proxyWarningLabel->hide();
+    proxyLayout->addRow(QString(), m_proxyWarningLabel);
+    formLayout->addWidget(m_proxyGroup);
+
     formLayout->addStretch();
 
     splitter->addWidget(leftWidget);
@@ -190,6 +218,8 @@ EditMiniAppsDialog::EditMiniAppsDialog(MiniAppRegistry *registry,
     connect(m_urlEdit, &QLineEdit::textChanged, this, [this]() { m_validateTimer->start(); });
     connect(m_envEdit, &QPlainTextEdit::textChanged, this, [this]() { m_validateTimer->start(); });
     connect(m_debugPortSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this]() { m_validateTimer->start(); });
+    connect(m_proxyGroup, &QGroupBox::toggled, this, [this]() { m_validateTimer->start(); });
+    connect(m_proxyHostEdit, &QLineEdit::textChanged, this, [this]() { m_validateTimer->start(); });
 
     connect(m_buttonBox, &QDialogButtonBox::accepted, this, [this]() {
         commitCurrentApp();
@@ -277,6 +307,10 @@ void EditMiniAppsDialog::commitCurrentApp()
     def.healthCheckUrl = m_healthUrlEdit->text().trimmed();
     def.healthTimeoutMs = m_timeoutSpin->value() * 1000;
     def.debugPort = m_debugGroup->isChecked() ? m_debugPortSpin->value() : 0;
+    def.proxyType = m_proxyGroup->isChecked() ? m_proxyTypeCombo->currentData().toInt() : 0;
+    def.proxyHost = m_proxyHostEdit->text().trimmed();
+    def.proxyPort = m_proxyPortSpin->value();
+    def.proxyBypassList = m_proxyBypassEdit->text().trimmed();
 
     // Ensure ID
     if (def.id.isEmpty())
@@ -312,6 +346,12 @@ void EditMiniAppsDialog::loadApp(int row)
         m_healthUrlEdit->clear();
         m_timeoutSpin->setValue(30);
         m_debugPortSpin->setValue(0);
+        m_proxyGroup->setChecked(false);
+        m_proxyTypeCombo->setCurrentIndex(0);
+        m_proxyHostEdit->clear();
+        m_proxyPortSpin->setValue(0);
+        m_proxyBypassEdit->clear();
+        m_proxyWarningLabel->hide();
         m_urlWarningLabel->hide();
         m_envWarningLabel->hide();
         m_portWarningLabel->hide();
@@ -328,6 +368,14 @@ void EditMiniAppsDialog::loadApp(int row)
     m_timeoutSpin->setValue(def.healthTimeoutMs / 1000);
     m_debugPortSpin->setValue(def.debugPort);
     m_debugGroup->setChecked(def.debugPort > 0);
+    m_proxyGroup->setChecked(def.proxyType > 0);
+    {
+        int idx = m_proxyTypeCombo->findData(def.proxyType > 0 ? def.proxyType : 1);
+        m_proxyTypeCombo->setCurrentIndex(idx == -1 ? 0 : idx);
+    }
+    m_proxyHostEdit->setText(def.proxyHost);
+    m_proxyPortSpin->setValue(def.proxyPort);
+    m_proxyBypassEdit->setText(def.proxyBypassList);
     m_urlWarningLabel->hide();
     m_portWarningLabel->hide();
     validateFields();
@@ -426,6 +474,14 @@ void EditMiniAppsDialog::validateFields()
             m_portWarningLabel->hide();
     } else {
         m_portWarningLabel->hide();
+    }
+
+    // Proxy validation
+    if (m_proxyGroup->isChecked() && m_proxyHostEdit->text().trimmed().isEmpty()) {
+        m_proxyWarningLabel->setText(tr("Proxy host is empty — proxy will not be applied"));
+        m_proxyWarningLabel->show();
+    } else {
+        m_proxyWarningLabel->hide();
     }
 
     // Env validation (same as EditTasksDialog)

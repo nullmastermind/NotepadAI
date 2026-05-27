@@ -135,6 +135,11 @@ public:
     DEFINE_SETTING(ShellCommand, shellCommand, QString)
     DEFINE_SETTING(TerminalFont, terminalFont, QString)
 
+    DEFINE_SETTING(LastProxyType, lastProxyType, int)
+    DEFINE_SETTING(LastProxyHost, lastProxyHost, QString)
+    DEFINE_SETTING(LastProxyPort, lastProxyPort, int)
+    DEFINE_SETTING(LastProxyBypassList, lastProxyBypassList, QString)
+
     // Per-workspace task registry. Stored as a single JSON object:
     // { "<cleanPath>": [{"name":"...","command":"..."},...], ... }
     // Never deleted — tasks survive workspace close/removal.

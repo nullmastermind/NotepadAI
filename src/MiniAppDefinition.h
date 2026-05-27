@@ -22,6 +22,10 @@ struct MiniAppDefinition
     int healthTimeoutMs = 30000; // Timeout in ms (range 5000-300000)
     int debugPort = 0;           // CDP debug port (0 = disabled, 1-65535 = enabled)
     bool autoKillOnClose = true; // Kill process on tab close
+    int proxyType = 0;            // 0=None, 1=HTTP, 2=HTTPS, 3=SOCKS4, 4=SOCKS5
+    QString proxyHost;
+    int proxyPort = 0;            // 0 = use scheme default
+    QString proxyBypassList;
 
     bool isValid() const { return !name.isEmpty() && !url.isEmpty(); }
 

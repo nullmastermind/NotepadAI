@@ -245,7 +245,9 @@ void MiniAppManager::sweepStaleQuickBrowserData()
     }
 }
 
-void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp)
+void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
+                                        int proxyType, const QString &proxyHost,
+                                        int proxyPort, const QString &proxyBypassList)
 {
 #ifdef Q_OS_LINUX
     QDesktopServices::openUrl(url);
@@ -294,7 +296,8 @@ void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp)
         }
     }
 
-    auto *webView = WebViewWidget::create(appId, url, debugPort, nullptr, userDataPath);
+    auto *webView = WebViewWidget::create(appId, url, debugPort, nullptr, userDataPath,
+                                          proxyType, proxyHost, proxyPort, proxyBypassList);
     if (!webView)
         return;
 

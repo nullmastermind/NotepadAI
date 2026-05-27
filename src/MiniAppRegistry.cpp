@@ -63,6 +63,15 @@ QList<MiniAppDefinition> MiniAppRegistry::workspaceApps(const QString &workspace
         def.healthTimeoutMs = obj.value(QStringLiteral("healthTimeoutMs")).toInt(30000);
         def.debugPort = obj.value(QStringLiteral("debugPort")).toInt(0);
         def.autoKillOnClose = obj.value(QStringLiteral("autoKillOnClose")).toBool(true);
+        const QString pt = obj.value(QStringLiteral("proxyType")).toString();
+        if (pt == QLatin1String("http")) def.proxyType = 1;
+        else if (pt == QLatin1String("https")) def.proxyType = 2;
+        else if (pt == QLatin1String("socks4")) def.proxyType = 3;
+        else if (pt == QLatin1String("socks5")) def.proxyType = 4;
+        else def.proxyType = 0;
+        def.proxyHost = obj.value(QStringLiteral("proxyHost")).toString();
+        def.proxyPort = obj.value(QStringLiteral("proxyPort")).toInt(0);
+        def.proxyBypassList = obj.value(QStringLiteral("proxyBypassList")).toString();
         if (!def.name.isEmpty())
             result.append(def);
     }
@@ -103,6 +112,13 @@ void MiniAppRegistry::setWorkspaceApps(const QString &workspacePath, const QList
         if (def.healthTimeoutMs != 30000) obj.insert(QStringLiteral("healthTimeoutMs"), def.healthTimeoutMs);
         if (def.debugPort > 0) obj.insert(QStringLiteral("debugPort"), def.debugPort);
         if (!def.autoKillOnClose) obj.insert(QStringLiteral("autoKillOnClose"), false);
+        if (def.proxyType > 0 && !def.proxyHost.isEmpty()) {
+            static const char *typeStrings[] = {"none", "http", "https", "socks4", "socks5"};
+            obj.insert(QStringLiteral("proxyType"), QLatin1String(typeStrings[qBound(0, def.proxyType, 4)]));
+            obj.insert(QStringLiteral("proxyHost"), def.proxyHost);
+            if (def.proxyPort > 0) obj.insert(QStringLiteral("proxyPort"), def.proxyPort);
+            if (!def.proxyBypassList.isEmpty()) obj.insert(QStringLiteral("proxyBypassList"), def.proxyBypassList);
+        }
         arr.append(obj);
     }
 
@@ -161,6 +177,15 @@ QList<MiniAppDefinition> MiniAppRegistry::parseJson(const QString &json)
         def.healthTimeoutMs = obj.value(QStringLiteral("healthTimeoutMs")).toInt(30000);
         def.debugPort = obj.value(QStringLiteral("debugPort")).toInt(0);
         def.autoKillOnClose = obj.value(QStringLiteral("autoKillOnClose")).toBool(true);
+        const QString pt2 = obj.value(QStringLiteral("proxyType")).toString();
+        if (pt2 == QLatin1String("http")) def.proxyType = 1;
+        else if (pt2 == QLatin1String("https")) def.proxyType = 2;
+        else if (pt2 == QLatin1String("socks4")) def.proxyType = 3;
+        else if (pt2 == QLatin1String("socks5")) def.proxyType = 4;
+        else def.proxyType = 0;
+        def.proxyHost = obj.value(QStringLiteral("proxyHost")).toString();
+        def.proxyPort = obj.value(QStringLiteral("proxyPort")).toInt(0);
+        def.proxyBypassList = obj.value(QStringLiteral("proxyBypassList")).toString();
         if (!def.name.isEmpty())
             result.append(def);
     }
@@ -184,6 +209,13 @@ QString MiniAppRegistry::toJson(const QList<MiniAppDefinition> &apps)
         if (def.healthTimeoutMs != 30000) obj.insert(QStringLiteral("healthTimeoutMs"), def.healthTimeoutMs);
         if (def.debugPort > 0) obj.insert(QStringLiteral("debugPort"), def.debugPort);
         if (!def.autoKillOnClose) obj.insert(QStringLiteral("autoKillOnClose"), false);
+        if (def.proxyType > 0 && !def.proxyHost.isEmpty()) {
+            static const char *typeStrings[] = {"none", "http", "https", "socks4", "socks5"};
+            obj.insert(QStringLiteral("proxyType"), QLatin1String(typeStrings[qBound(0, def.proxyType, 4)]));
+            obj.insert(QStringLiteral("proxyHost"), def.proxyHost);
+            if (def.proxyPort > 0) obj.insert(QStringLiteral("proxyPort"), def.proxyPort);
+            if (!def.proxyBypassList.isEmpty()) obj.insert(QStringLiteral("proxyBypassList"), def.proxyBypassList);
+        }
         arr.append(obj);
     }
     return QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));

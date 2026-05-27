@@ -38,7 +38,9 @@ public:
     // Returns nullptr on Linux (caller should use xdg-open fallback).
     // If userDataFolder is non-empty, it overrides the default MiniApps/<appId> path.
     static WebViewWidget *create(const QString &appId, const QUrl &url, int debugPort = 0,
-                                 QWidget *parent = nullptr, const QString &userDataFolder = QString());
+                                 QWidget *parent = nullptr, const QString &userDataFolder = QString(),
+                                 int proxyType = 0, const QString &proxyHost = QString(),
+                                 int proxyPort = 0, const QString &proxyBypassList = QString());
 
     // CDP URL accessors
     QString cdpHttpUrl() const { return m_cdpHttpUrl; }
