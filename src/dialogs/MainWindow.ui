@@ -382,7 +382,7 @@
    </widget>
    <widget class="QMenu" name="menuMiniApps">
     <property name="title">
-     <string>Miniapps</string>
+     <string>Browser</string>
     </property>
     <addaction name="actionEditMiniApps"/>
    </widget>
