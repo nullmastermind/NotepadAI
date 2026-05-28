@@ -48,6 +48,7 @@ public:
 
     virtual void executeScript(const QString &js, std::function<void(const QString &)> callback = nullptr) = 0;
     virtual QString nativePostMessage() const = 0;
+    virtual void ensureCspBypassed() {}
 
     // Factory: creates the platform-appropriate subclass.
     // Returns nullptr on Linux (caller should use xdg-open fallback).

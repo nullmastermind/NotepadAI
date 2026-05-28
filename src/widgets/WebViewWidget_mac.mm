@@ -61,6 +61,22 @@ public:
                 forMainFrameOnly:YES];
             [config.userContentController addUserScript:fetchScript];
 
+            // Inject Trusted Types default policy at document start — before CSP
+            // headers are enforced. Allows page-agent innerHTML usage on strict sites.
+            NSString *ttPolicyJs = @"(function(){"
+                "if(!window.trustedTypes||!window.trustedTypes.createPolicy)return;"
+                "try{window.__nai_tt_policy=window.trustedTypes.createPolicy('default',{"
+                "createHTML:function(s){return s;},"
+                "createScript:function(s){return s;},"
+                "createScriptURL:function(s){return s;}"
+                "});}catch(e){}"
+                "})();";
+            WKUserScript *ttScript = [[WKUserScript alloc]
+                initWithSource:ttPolicyJs
+                injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                forMainFrameOnly:YES];
+            [config.userContentController addUserScript:ttScript];
+
             // Register message handler for copilot results
             m_msgHandler = [[CopilotMessageHandler alloc] init];
             m_msgHandler.owner = this;

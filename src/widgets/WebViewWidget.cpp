@@ -401,6 +401,8 @@ void WebViewWidget::executeCopilotCommand(const QString &command, const QString 
     m_copilotExecuting = true;
     if (m_aiStopBtn) m_aiStopBtn->show();
 
+    ensureCspBypassed();
+
     // Stop blink while executing
     if (m_aiBlinkTimer) m_aiBlinkTimer->stop();
     if (m_aiBtn) m_aiBtn->setStyleSheet(QStringLiteral("QToolButton { color: palette(highlight); font-weight: bold; }"));
@@ -464,6 +466,34 @@ void WebViewWidget::executeCopilotCommand(const QString &command, const QString 
                          "  };\n"
                          "  try {\n"
                          "    if (!window.__pa_injected) {\n"
+                         "      (function() {\n"
+                         "        if (!window.trustedTypes) return;\n"
+                         "        if (!window.__nai_tt_policy) {\n"
+                         "          var policy;\n"
+                         "          try { policy = window.trustedTypes.createPolicy('default', {\n"
+                         "            createHTML: function(s){return s;}, createScript: function(s){return s;}, createScriptURL: function(s){return s;}\n"
+                         "          }); } catch(e) {}\n"
+                         "          if (!policy) try { policy = window.trustedTypes.createPolicy('nai-page-agent', {\n"
+                         "            createHTML: function(s){return s;}, createScript: function(s){return s;}, createScriptURL: function(s){return s;}\n"
+                         "          }); } catch(e) {}\n"
+                         "          if (policy) window.__nai_tt_policy = policy;\n"
+                         "        }\n"
+                         "        if (!window.__nai_tt_policy) return;\n"
+                         "        function patchSetter(proto, prop) {\n"
+                         "          var desc = Object.getOwnPropertyDescriptor(proto, prop);\n"
+                         "          if (!desc || !desc.set) return;\n"
+                         "          var origSet = desc.set;\n"
+                         "          Object.defineProperty(proto, prop, {\n"
+                         "            set: function(v) {\n"
+                         "              origSet.call(this, window.__nai_tt_policy.createHTML(String(v)));\n"
+                         "            },\n"
+                         "            get: desc.get, configurable: true, enumerable: true\n"
+                         "          });\n"
+                         "        }\n"
+                         "        patchSetter(Element.prototype, 'innerHTML');\n"
+                         "        if (Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'innerHTML'))\n"
+                         "          patchSetter(HTMLElement.prototype, 'innerHTML');\n"
+                         "      })();\n"
                          "      // Fake currentScript to disable autoInit in the bundle\n"
                          "      var _fakeScript = {src:'blob:nai?autoInit=false'};\n"
                          "      Object.defineProperty(document, 'currentScript', {value:_fakeScript, configurable:true});\n");

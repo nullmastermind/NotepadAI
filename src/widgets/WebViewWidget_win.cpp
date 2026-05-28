@@ -203,6 +203,14 @@ public:
         return QStringLiteral("window.chrome.webview.postMessage");
     }
 
+    void ensureCspBypassed() override
+    {
+        if (m_cspBypassed || !m_webView) return;
+        m_cspBypassed = true;
+        m_webView->CallDevToolsProtocolMethod(L"Page.setBypassCSP",
+            L"{\"enabled\":true}", nullptr);
+    }
+
     void destroy() override
     {
         m_alive->store(false, std::memory_order_release);
@@ -433,20 +441,50 @@ private:
             L"writable:false,configurable:false,enumerable:false});";
         m_webView->AddScriptToExecuteOnDocumentCreated(pristineFetchJs.c_str(), nullptr);
 
-        // Bypass ALL CSP enforcement via DevTools Protocol. This is intentionally
-        // broad: page-agent injects scripts and manipulates DOM on arbitrary sites,
-        // so CSP (including Trusted Types) would block core functionality. Security
-        // tradeoff is acceptable — these WebViews are automation browsers, not
-        // sandboxed content viewers. Must be called before Navigate().
-        // Gated by the same cross-origin setting since users who disable cross-origin
-        // access likely also want CSP enforcement back.
-        if (m_allowCrossOrigin) {
-            HRESULT cspHr = m_webView->CallDevToolsProtocolMethod(L"Page.setBypassCSP",
-                L"{\"enabled\":true}", nullptr);
-            if (FAILED(cspHr))
-                qWarning("WebViewWidgetWin: Page.setBypassCSP failed (0x%08X) — Trusted Types may block page-agent",
-                         static_cast<unsigned>(cspHr));
-        }
+        // Inject Trusted Types default policy at document creation — before CSP
+        // headers are enforced. This ensures page-agent can use innerHTML even on
+        // pages with strict trusted-types directives (e.g. Teams).
+        const std::wstring ttPolicyJs =
+            L"(function(){"
+            L"if(!window.trustedTypes||!window.trustedTypes.createPolicy)return;"
+            L"try{window.__nai_tt_policy=window.trustedTypes.createPolicy('default',{"
+            L"createHTML:function(s){return s;},"
+            L"createScript:function(s){return s;},"
+            L"createScriptURL:function(s){return s;}"
+            L"});}catch(e){}"
+            L"})();";
+        m_webView->AddScriptToExecuteOnDocumentCreated(ttPolicyJs.c_str(), nullptr);
+
+        // Bypass ALL CSP enforcement via DevTools Protocol. Uses a completion
+        // callback to guarantee the bypass is active before Navigate() fires.
+        // Ungated — page-agent needs this regardless of allowCrossOrigin.
+        struct CspBypassHandler : ICoreWebView2CallDevToolsProtocolMethodCompletedHandler {
+            WebViewWidgetWin *owner;
+            std::shared_ptr<std::atomic<bool>> alive;
+            ULONG refCount = 1;
+            CspBypassHandler(WebViewWidgetWin *o) : owner(o), alive(o->m_alive) {}
+            HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv) override {
+                if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_ICoreWebView2CallDevToolsProtocolMethodCompletedHandler)) {
+                    *ppv = this; AddRef(); return S_OK;
+                }
+                *ppv = nullptr; return E_NOINTERFACE;
+            }
+            ULONG STDMETHODCALLTYPE AddRef() override { return ++refCount; }
+            ULONG STDMETHODCALLTYPE Release() override { if (--refCount == 0) { delete this; return 0; } return refCount; }
+            HRESULT STDMETHODCALLTYPE Invoke(HRESULT hr, LPCWSTR) override {
+                if (!alive->load(std::memory_order_acquire)) return S_OK;
+                if (SUCCEEDED(hr))
+                    owner->m_cspBypassed = true;
+                else
+                    qWarning("WebViewWidgetWin: Page.setBypassCSP failed (0x%08X)", static_cast<unsigned>(hr));
+                owner->setLoading(true);
+                owner->m_dbgNavigateCalled = true;
+                owner->m_webView->Navigate(owner->initialUrl().toString().toStdWString().c_str());
+                return S_OK;
+            }
+        };
+        m_webView->CallDevToolsProtocolMethod(L"Page.setBypassCSP",
+            L"{\"enabled\":true}", new CspBypassHandler(this));
 
         // Subscribe to WebMessage for copilot result callback
         EventRegistrationToken msgToken;
@@ -460,10 +498,7 @@ private:
         EventRegistrationToken gotFocusToken;
         m_controller->add_GotFocus(new GotFocusHandler(this), &gotFocusToken);
 
-        // Navigate to initial URL
-        setLoading(true);
-        m_dbgNavigateCalled = true;
-        m_webView->Navigate(initialUrl().toString().toStdWString().c_str());
+        // Navigate is triggered from CspBypassHandler::Invoke after CDP completes.
     }
 
     // --- Lightweight COM callback implementations (prevent DLL ref-counting) ---
@@ -565,6 +600,7 @@ private:
                 desc = QStringLiteral("Process failed"); break;
             }
             emit owner->processFailed(desc);
+            owner->m_cspBypassed = false;
             return S_OK;
         }
     };
@@ -770,6 +806,7 @@ private:
     int m_proxyPort = 0;
     QString m_proxyBypassList;
     bool m_allowCrossOrigin = false;
+    bool m_cspBypassed = false;
     QNetworkAccessManager *m_cdpNam = nullptr;
     QTimer *m_cdpPollTimer = nullptr;
     int m_cdpPollCount = 0;
