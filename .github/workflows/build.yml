@@ -10,9 +10,6 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-env:
-  QT_VERSION: "6.10"
-
 jobs:
   version:
     name: Determine Version
@@ -50,12 +47,18 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, windows-2022, macos-latest]
+        qt_version: ["6.5", "6.8", "6.10"]
 
     runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
+
+      - name: Compute Qt suffix
+        id: qt
+        shell: bash
+        run: echo "suffix=qt$(echo '${{ matrix.qt_version }}' | tr -d '.')" >> "$GITHUB_OUTPUT"
 
       - name: Set VERSION in CMakeLists.txt
         shell: bash
@@ -71,7 +74,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: ${{ env.QT_VERSION }}
+          version: ${{ matrix.qt_version }}
           # qtwayland is included in the base Qt Linux archives; not a valid aqt add-on module
           modules: qt5compat
           cache: true
@@ -126,28 +129,28 @@ jobs:
         uses: actions/upload-artifact@v6
         if: runner.os == 'Windows'
         with:
-          name: NotepadAI-Windows-Zip
+          name: NotepadAI-Windows-Zip-${{ steps.qt.outputs.suffix }}
           path: ${{ github.workspace }}/build/package/
 
       - name: Upload Windows Installer
         uses: actions/upload-artifact@v6
         if: runner.os == 'Windows'
         with:
-          name: NotepadAI-Windows-Installer
+          name: NotepadAI-Windows-Installer-${{ steps.qt.outputs.suffix }}
           path: ${{ github.workspace }}/installer/NotepadAI*.exe
 
       - name: Upload MacOS dmg
         uses: actions/upload-artifact@v6
         if: runner.os == 'macOS'
         with:
-          name: NotepadAI-macOS
+          name: NotepadAI-macOS-${{ steps.qt.outputs.suffix }}
           path: ${{ github.workspace }}/build/NotepadAI*.dmg
 
       - name: Upload Linux AppImage
         uses: actions/upload-artifact@v6
         if: runner.os == 'Linux'
         with:
-          name: NotepadAI-Linux-AppImage
+          name: NotepadAI-Linux-AppImage-${{ steps.qt.outputs.suffix }}
           path: ${{ github.workspace }}/build/NotepadAI*.AppImage
 
   release:
@@ -181,24 +184,28 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v7
 
-      - name: Upload Windows Installer
+      - name: Upload release assets
         run: |
-          mv NotepadAI-Windows-Installer/NotepadAI*.exe "NotepadAI-${{ needs.version.outputs.tag }}-Installer.exe"
-          gh release upload ${{ needs.version.outputs.tag }} "NotepadAI-${{ needs.version.outputs.tag }}-Installer.exe"
+          TAG="${{ needs.version.outputs.tag }}"
+          for suffix in qt65 qt68 qt610; do
+            # Windows Installer
+            mv "NotepadAI-Windows-Installer-${suffix}"/NotepadAI*.exe \
+               "NotepadAI-${TAG}-${suffix}-Installer.exe"
+            gh release upload "$TAG" "NotepadAI-${TAG}-${suffix}-Installer.exe"
 
-      - name: Upload Windows Zip
-        run: |
-          cd NotepadAI-Windows-Zip/
-          zip -r "../NotepadAI-${{ needs.version.outputs.tag }}-win64.zip" .
-          cd ..
-          gh release upload ${{ needs.version.outputs.tag }} "NotepadAI-${{ needs.version.outputs.tag }}-win64.zip"
+            # Windows Zip
+            cd "NotepadAI-Windows-Zip-${suffix}/"
+            zip -r "../NotepadAI-${TAG}-${suffix}-win64.zip" .
+            cd ..
+            gh release upload "$TAG" "NotepadAI-${TAG}-${suffix}-win64.zip"
 
-      - name: Upload Linux AppImage
-        run: |
-          mv NotepadAI-Linux-AppImage/NotepadAI*.AppImage "NotepadAI-${{ needs.version.outputs.tag }}-x86_64.AppImage"
-          gh release upload ${{ needs.version.outputs.tag }} "NotepadAI-${{ needs.version.outputs.tag }}-x86_64.AppImage"
+            # Linux AppImage
+            mv "NotepadAI-Linux-AppImage-${suffix}"/NotepadAI*.AppImage \
+               "NotepadAI-${TAG}-${suffix}-x86_64.AppImage"
+            gh release upload "$TAG" "NotepadAI-${TAG}-${suffix}-x86_64.AppImage"
 
-      - name: Upload macOS dmg
-        run: |
-          mv NotepadAI-macOS/NotepadAI*.dmg "NotepadAI-${{ needs.version.outputs.tag }}.dmg"
-          gh release upload ${{ needs.version.outputs.tag }} "NotepadAI-${{ needs.version.outputs.tag }}.dmg"
+            # macOS dmg
+            mv "NotepadAI-macOS-${suffix}"/NotepadAI*.dmg \
+               "NotepadAI-${TAG}-${suffix}.dmg"
+            gh release upload "$TAG" "NotepadAI-${TAG}-${suffix}.dmg"
+          done
