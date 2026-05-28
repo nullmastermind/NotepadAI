@@ -417,6 +417,17 @@ private:
             L"writable:false,configurable:false,enumerable:false});";
         m_webView->AddScriptToExecuteOnDocumentCreated(pristineFetchJs.c_str(), nullptr);
 
+        // Bypass ALL CSP enforcement via DevTools Protocol. This is intentionally
+        // broad: page-agent injects scripts and manipulates DOM on arbitrary sites,
+        // so CSP (including Trusted Types) would block core functionality. Security
+        // tradeoff is acceptable — these WebViews are automation browsers, not
+        // sandboxed content viewers. Must be called before Navigate().
+        HRESULT cspHr = m_webView->CallDevToolsProtocolMethod(L"Page.setBypassCSP",
+            L"{\"enabled\":true}", nullptr);
+        if (FAILED(cspHr))
+            qWarning("WebViewWidgetWin: Page.setBypassCSP failed (0x%08X) — Trusted Types may block page-agent",
+                     static_cast<unsigned>(cspHr));
+
         // Subscribe to WebMessage for copilot result callback
         EventRegistrationToken msgToken;
         m_webView->add_WebMessageReceived(

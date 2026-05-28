@@ -416,9 +416,14 @@ void EditMiniAppsDialog::onMoveUpClicked()
     if (row <= 0) return;
     commitCurrentApp();
     m_apps.swapItemsAt(row, row - 1);
+    m_currentRow = row - 1;
+    QSignalBlocker blocker(m_listWidget);
     auto *item = m_listWidget->takeItem(row);
     m_listWidget->insertItem(row - 1, item);
     m_listWidget->setCurrentRow(row - 1);
+    blocker.unblock();
+    loadApp(m_currentRow);
+    updateButtonStates();
 }
 
 void EditMiniAppsDialog::onMoveDownClicked()
@@ -427,9 +432,14 @@ void EditMiniAppsDialog::onMoveDownClicked()
     if (row < 0 || row >= m_apps.size() - 1) return;
     commitCurrentApp();
     m_apps.swapItemsAt(row, row + 1);
+    m_currentRow = row + 1;
+    QSignalBlocker blocker(m_listWidget);
     auto *item = m_listWidget->takeItem(row);
     m_listWidget->insertItem(row + 1, item);
     m_listWidget->setCurrentRow(row + 1);
+    blocker.unblock();
+    loadApp(m_currentRow);
+    updateButtonStates();
 }
 
 void EditMiniAppsDialog::onBrowseCwdClicked()
