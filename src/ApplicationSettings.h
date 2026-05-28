@@ -140,6 +140,11 @@ public:
     DEFINE_SETTING(LastProxyPort, lastProxyPort, int)
     DEFINE_SETTING(LastProxyBypassList, lastProxyBypassList, QString)
 
+    // When true, WebView2 launches with --disable-web-security and
+    // --disable-site-isolation-trials so page-agent scripts can access
+    // cross-origin iframe content. Also gates Page.setBypassCSP.
+    DEFINE_SETTING(MiniAppsCrossOriginAccess, miniAppsCrossOriginAccess, bool)
+
     // Per-workspace task registry. Stored as a single JSON object:
     // { "<cleanPath>": [{"name":"...","command":"..."},...], ... }
     // Never deleted — tasks survive workspace close/removal.

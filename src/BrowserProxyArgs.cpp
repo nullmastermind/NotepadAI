@@ -11,7 +11,8 @@
 #include <QLatin1String>
 
 QString buildBrowserArgs(int debugPort, int proxyType, const QString &proxyHost,
-                         int proxyPort, const QString &proxyBypassList)
+                         int proxyPort, const QString &proxyBypassList,
+                         bool allowCrossOrigin)
 {
     QStringList args;
 
@@ -35,6 +36,11 @@ QString buildBrowserArgs(int debugPort, int proxyType, const QString &proxyHost,
             if (!bypass.isEmpty())
                 args << QStringLiteral("--proxy-bypass-list=%1").arg(bypass);
         }
+    }
+
+    if (allowCrossOrigin) {
+        args << QStringLiteral("--disable-web-security");
+        args << QStringLiteral("--disable-site-isolation-trials");
     }
 
     return args.join(QLatin1Char(' '));

@@ -86,7 +86,7 @@ class WebViewWidgetWin : public WebViewWidget
 public:
     WebViewWidgetWin(const QString &appId, const QUrl &url, int debugPort, QWidget *parent,
                      const QString &userDataFolder, int proxyType, const QString &proxyHost,
-                     int proxyPort, const QString &proxyBypassList)
+                     int proxyPort, const QString &proxyBypassList, bool allowCrossOrigin)
         : WebViewWidget(appId, url, parent)
         , m_debugPort(debugPort)
         , m_customUserDataFolder(userDataFolder)
@@ -94,6 +94,7 @@ public:
         , m_proxyHost(proxyHost)
         , m_proxyPort(proxyPort)
         , m_proxyBypassList(proxyBypassList)
+        , m_allowCrossOrigin(allowCrossOrigin)
     {
         m_hostWidget = new QWidget(this);
         m_hostWidget->setAttribute(Qt::WA_NativeWindow);
@@ -272,7 +273,7 @@ private:
         auto createEnv = resolveCreateEnvironment();
         if (!createEnv) return;
 
-        const QString argsStr = buildBrowserArgs(m_debugPort, m_proxyType, m_proxyHost, m_proxyPort, m_proxyBypassList);
+        const QString argsStr = buildBrowserArgs(m_debugPort, m_proxyType, m_proxyHost, m_proxyPort, m_proxyBypassList, m_allowCrossOrigin);
 
         // Set browser arguments via environment variable. WebView2Loader.dll reads
         // this synchronously during CreateCoreWebView2EnvironmentWithOptions before
@@ -422,11 +423,15 @@ private:
         // so CSP (including Trusted Types) would block core functionality. Security
         // tradeoff is acceptable — these WebViews are automation browsers, not
         // sandboxed content viewers. Must be called before Navigate().
-        HRESULT cspHr = m_webView->CallDevToolsProtocolMethod(L"Page.setBypassCSP",
-            L"{\"enabled\":true}", nullptr);
-        if (FAILED(cspHr))
-            qWarning("WebViewWidgetWin: Page.setBypassCSP failed (0x%08X) — Trusted Types may block page-agent",
-                     static_cast<unsigned>(cspHr));
+        // Gated by the same cross-origin setting since users who disable cross-origin
+        // access likely also want CSP enforcement back.
+        if (m_allowCrossOrigin) {
+            HRESULT cspHr = m_webView->CallDevToolsProtocolMethod(L"Page.setBypassCSP",
+                L"{\"enabled\":true}", nullptr);
+            if (FAILED(cspHr))
+                qWarning("WebViewWidgetWin: Page.setBypassCSP failed (0x%08X) — Trusted Types may block page-agent",
+                         static_cast<unsigned>(cspHr));
+        }
 
         // Subscribe to WebMessage for copilot result callback
         EventRegistrationToken msgToken;
@@ -719,6 +724,7 @@ private:
     QString m_proxyHost;
     int m_proxyPort = 0;
     QString m_proxyBypassList;
+    bool m_allowCrossOrigin = false;
     QNetworkAccessManager *m_cdpNam = nullptr;
     QTimer *m_cdpPollTimer = nullptr;
     int m_cdpPollCount = 0;
@@ -728,8 +734,10 @@ private:
 WebViewWidget *WebViewWidget::create(const QString &appId, const QUrl &url, int debugPort,
                                      QWidget *parent, const QString &userDataFolder,
                                      int proxyType, const QString &proxyHost,
-                                     int proxyPort, const QString &proxyBypassList)
+                                     int proxyPort, const QString &proxyBypassList,
+                                     bool allowCrossOrigin)
 {
     return new WebViewWidgetWin(appId, url, debugPort, parent, userDataFolder,
-                                proxyType, proxyHost, proxyPort, proxyBypassList);
+                                proxyType, proxyHost, proxyPort, proxyBypassList,
+                                allowCrossOrigin);
 }

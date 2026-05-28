@@ -225,6 +225,7 @@ void MiniAppManager::launchApp(const MiniAppDefinition &def)
     m_instances.append(instance);
     emit instanceCountChanged(m_instances.size());
 
+    instance->setAllowCrossOrigin(m_app->getSettings()->miniAppsCrossOriginAccess());
     instance->start();
 }
 
@@ -323,7 +324,8 @@ void MiniAppManager::sweepStaleQuickBrowserData()
 
 void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
                                         int proxyType, const QString &proxyHost,
-                                        int proxyPort, const QString &proxyBypassList)
+                                        int proxyPort, const QString &proxyBypassList,
+                                        bool allowCrossOrigin)
 {
 #ifdef Q_OS_LINUX
     QDesktopServices::openUrl(url);
@@ -373,7 +375,8 @@ void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
     }
 
     auto *webView = WebViewWidget::create(appId, url, debugPort, nullptr, userDataPath,
-                                          proxyType, proxyHost, proxyPort, proxyBypassList);
+                                          proxyType, proxyHost, proxyPort, proxyBypassList,
+                                          allowCrossOrigin);
     if (!webView)
         return;
 

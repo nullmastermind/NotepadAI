@@ -107,6 +107,10 @@ CREATE_SETTING(QuickBrowser, LastProxyHost, lastProxyHost, QString, QStringLiter
 CREATE_SETTING(QuickBrowser, LastProxyPort, lastProxyPort, int, 0)
 CREATE_SETTING(QuickBrowser, LastProxyBypassList, lastProxyBypassList, QString, QStringLiteral(""))
 
+// Cross-origin iframe access for page-agent. Default ON — target users are
+// automation users who need page-agent to read cross-origin iframe content.
+CREATE_SETTING(MiniApps, MiniAppsCrossOriginAccess, miniAppsCrossOriginAccess, bool, true)
+
 CREATE_SETTING(Git, SyntaxHighlightDiffEnabled, syntaxHighlightDiffEnabled, bool, true)
 
 // Files-tab decoration master toggle — see file-tree-git-decorations spec.

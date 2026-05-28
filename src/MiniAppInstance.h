@@ -61,6 +61,8 @@ public:
     void destroy();
     void retry();
 
+    void setAllowCrossOrigin(bool allow) { m_allowCrossOrigin = allow; }
+
 signals:
     void stateChanged(MiniAppInstance::State newState);
     void titleChanged(const QString &title);
@@ -93,5 +95,6 @@ private:
     QString m_lastError;
     QString m_cdpHttpUrl;
     QString m_cdpWsUrl;
+    bool m_allowCrossOrigin = false;
 };
 

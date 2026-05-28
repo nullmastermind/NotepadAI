@@ -1489,6 +1489,13 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         cdpCheck->setChecked(true);
         layout->addWidget(cdpCheck);
 
+        auto *crossOriginCheck = new QCheckBox(tr("Allow cross-origin iframe access (better automation, less security)"), &dlg);
+        crossOriginCheck->setChecked(false);
+        crossOriginCheck->setToolTip(
+            tr("Enables page-agent to read content inside cross-origin iframes.\n"
+               "Improves automation coverage but disables browser sandbox isolation."));
+        layout->addWidget(crossOriginCheck);
+
         // Proxy row
         auto *proxyLayout = new QHBoxLayout;
         proxyLayout->addWidget(new QLabel(tr("Proxy:"), &dlg));
@@ -1564,7 +1571,8 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         settings->setLastProxyBypassList(proxyBypass);
 
         m_miniAppManager->launchQuickBrowser(url, cdpCheck->isChecked(),
-                                             proxyType, proxyHost, proxyPort, proxyBypass);
+                                             proxyType, proxyHost, proxyPort, proxyBypass,
+                                             crossOriginCheck->isChecked());
     });
 
     connect(ui->actionEditMiniApps, &QAction::triggered, this, [this]() {

@@ -42,7 +42,8 @@ public:
     void launchApp(const MiniAppDefinition &def);
     void launchQuickBrowser(const QUrl &url, bool enableCdp = true,
                             int proxyType = 0, const QString &proxyHost = QString(),
-                            int proxyPort = 0, const QString &proxyBypassList = QString());
+                            int proxyPort = 0, const QString &proxyBypassList = QString(),
+                            bool allowCrossOrigin = true);
     void shutdown();
 
     int runningCount() const { return m_instances.size(); }

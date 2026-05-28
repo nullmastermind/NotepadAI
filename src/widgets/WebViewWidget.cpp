@@ -540,7 +540,8 @@ void WebViewWidget::handleNativeFetch(const QString &json)
 WebViewWidget *WebViewWidget::create(const QString & /*appId*/, const QUrl & /*url*/, int /*debugPort*/,
                                      QWidget * /*parent*/, const QString & /*userDataFolder*/,
                                      int /*proxyType*/, const QString & /*proxyHost*/,
-                                     int /*proxyPort*/, const QString & /*proxyBypassList*/)
+                                     int /*proxyPort*/, const QString & /*proxyBypassList*/,
+                                     bool /*allowCrossOrigin*/)
 {
     return nullptr; // Linux: no embedded webview, use xdg-open
 }
