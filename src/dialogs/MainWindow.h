@@ -32,6 +32,9 @@
 #include "ScintillaNext.h"
 #include "NppImporter.h"
 #include "SearchResultsCollector.h"
+#include "FileIndexCache.h"
+
+#include <memory>
 
 class FileWatcher;
 
@@ -55,6 +58,8 @@ class ConflictMergeViewerDock;
 class GitOperationManager;
 class MiniAppManager;
 class MiniAppRegistry;
+class WorkspaceFileEnumerator;
+class QuickFileOpenDialog;
 struct ConflictEntry;
 struct GitStatusEntry;
 struct WorkspaceStateSnapshot;
@@ -267,6 +272,19 @@ private:
 
     QAction *m_actionMarkdownPreview = nullptr;
     QAction *m_actionQuickFileOpen = nullptr;
+
+    // --- Quick File Open (Ctrl+P) per-workspace index cache (RCU-lite) ---
+    // Keyed by QDir::cleanPath(workspaceRoot). Written/read ONLY on the UI
+    // thread; the enumerator publishes snapshots via a queued signal so the
+    // slot (onFileIndexReady) is the sole writer — no lock needed. Snapshots
+    // are immutable (shared_ptr<const>) so the open dialog reads lock-free.
+    QHash<QString, std::shared_ptr<const FileIndexCache>> m_fileIndexCache;
+    WorkspaceFileEnumerator *m_fileIndexEnumerator = nullptr;
+    QPointer<QuickFileOpenDialog> m_quickFileOpenDialog;
+    QString m_quickFileOpenRootKey;
+    void onFileIndexReady(const QString &rootKey,
+                          std::shared_ptr<const FileIndexCache> snapshot);
+    QStringList workspaceMruFiles(const QString &workspaceRoot) const;
 
     QPointer<FolderAsWorkspaceDock> m_activeWorkspace;
     QPointer<AiAgentDock> m_activeAiDock;

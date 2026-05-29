@@ -68,7 +68,9 @@ public:
     // Spawn a new agent session against workingDirectory. Returns the freshly
     // created dock (still parentless — caller is responsible for
     // addDockWidget()). Returns nullptr if the agent cannot be resolved at all.
-    AiAgentDock *openAgent(const QString &agentId, const QString &workingDirectory);
+    // When recordAsLastUsed is true, the resolved agent id is persisted as the
+    // "last used" AI agent (the single chokepoint for that record).
+    AiAgentDock *openAgent(const QString &agentId, const QString &workingDirectory, bool recordAsLastUsed = false);
 
     // Cancel + tear down the session keyed by sessionId. Safe to call with an
     // unknown id (no-op).

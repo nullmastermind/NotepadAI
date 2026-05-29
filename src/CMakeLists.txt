@@ -32,6 +32,7 @@ qt_add_executable(NotepadAI
 	EditorManager.h
 	EditorPrintPreviewRenderer.h
 	FileDialogHelpers.h
+	FileIndexCache.h
 	FileWatcher.h
 	Finder.h
 	FocusWatcher.h
@@ -76,6 +77,7 @@ qt_add_executable(NotepadAI
 	SpinBoxDelegate.h
 	TranslationManager.h
 	UndoAction.h
+	WorkspaceFileEnumerator.h
 	ZoomEventWatcher.h
 	ThemeResolver.h
 	StylesheetResource.h
@@ -150,6 +152,7 @@ qt_add_executable(NotepadAI
 	SpinBoxDelegate.cpp
 	TranslationManager.cpp
 	UndoAction.cpp
+	WorkspaceFileEnumerator.cpp
 	ZoomEventWatcher.cpp
 	ProfileScope.cpp
 	ShutdownDiagnostics.cpp

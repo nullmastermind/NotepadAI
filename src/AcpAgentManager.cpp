@@ -73,7 +73,7 @@ AcpAgentManager::~AcpAgentManager()
     shutdown();
 }
 
-AiAgentDock *AcpAgentManager::openAgent(const QString &agentId, const QString &workingDirectory)
+AiAgentDock *AcpAgentManager::openAgent(const QString &agentId, const QString &workingDirectory, bool recordAsLastUsed)
 {
     AcpAgentDefinition agent = m_registry->agent(agentId);
     if (agent.id.isEmpty()) {
@@ -86,6 +86,12 @@ AiAgentDock *AcpAgentManager::openAgent(const QString &agentId, const QString &w
         qCWarning(lcAcpManager) << "openAgent: no agent matched id" << agentId
                                 << "and default id was not resolvable";
         return nullptr;
+    }
+
+    // Single chokepoint for recording the "last used" AI agent. Uses the
+    // RESOLVED agent.id (post-fallback), never the requested agentId.
+    if (recordAsLastUsed && m_settings) {
+        m_settings->setLastUsedAiAgentId(agent.id);
     }
 
     const QString sessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);

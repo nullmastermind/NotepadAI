@@ -54,6 +54,7 @@ private:
     void refreshHeader();
     void rerenderBody();
     void refitBodyHeight();
+    void scheduleRefit();
     void maybeAutoExpandForDiff();
     bool hasDiffContent() const;
     QString statusGlyph() const;
@@ -69,6 +70,7 @@ private:
     bool m_collapsed = false;
     bool m_userToggled = false;          // user has explicitly clicked the chevron
     bool m_autoExpandedForDiff = false;  // we've already auto-expanded once for diff content
+    bool m_refitScheduled = false;       // a deferred refit is already queued
 
     QLabel *m_statusIcon = nullptr;
     QLabel *m_titleLabel = nullptr;

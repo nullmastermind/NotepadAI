@@ -175,6 +175,7 @@ CREATE_SETTING(Ai, SyncWorkspaceOnAiSwitch, syncWorkspaceOnAiSwitch, bool, true)
 // and other consumers in addition to the standard `<name>Changed` form.
 
 static const char kAiDefaultAgentIdKey[]      = "Ai/DefaultAgentId";
+static const char kAiLastUsedAgentIdKey[]     = "Ai/LastUsedAgentId";
 static const char kAiAutoApprovePolicyKey[]   = "Ai/AutoApprovePermissions";
 static const char kAiAgentsJsonKey[]          = "Ai/Agents";
 static const char kAiAgentPreferencesJsonKey[] = "Ai/AgentPreferences";
@@ -190,6 +191,20 @@ void ApplicationSettings::setDefaultAiAgentId(const QString &id)
 {
     setValue(QLatin1String(kAiDefaultAgentIdKey), id);
     emit defaultAiAgentIdChanged(id);
+}
+
+QString ApplicationSettings::lastUsedAiAgentId() const
+{
+    return value(QLatin1String(kAiLastUsedAgentIdKey), QString()).toString();
+}
+
+void ApplicationSettings::setLastUsedAiAgentId(const QString &id)
+{
+    if (lastUsedAiAgentId() == id) {
+        return;
+    }
+    setValue(QLatin1String(kAiLastUsedAgentIdKey), id);
+    emit lastUsedAiAgentIdChanged(id);
 }
 
 QString ApplicationSettings::aiAutoApprovePolicy() const

@@ -203,6 +203,7 @@ signals:
     // AI / ACP agent settings. Stored under the "Ai/" group.
 public:
     QString defaultAiAgentId() const;
+    QString lastUsedAiAgentId() const;
     QString aiAutoApprovePolicy() const;
     QString aiAgentsJson() const;
     QString aiAgentPreferencesJson() const;
@@ -210,6 +211,7 @@ public:
 
 public slots:
     void setDefaultAiAgentId(const QString &id);
+    void setLastUsedAiAgentId(const QString &id);
     void setAiAutoApprovePolicy(const QString &policy);
     void setAiAgentsJson(const QString &json);
     void setAiAgentPreferencesJson(const QString &json);
@@ -217,6 +219,7 @@ public slots:
 
 signals:
     void defaultAiAgentIdChanged(const QString &id);
+    void lastUsedAiAgentIdChanged(const QString &id);
     void aiAutoApprovePolicyChanged(const QString &policy);
     void autoApprovePolicyChanged(const QString &policy);
     void aiAgentsJsonChanged(const QString &json);

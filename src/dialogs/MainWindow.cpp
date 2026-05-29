@@ -118,6 +118,7 @@
 
 #include "QuickFindWidget.h"
 #include "QuickFileOpenDialog.h"
+#include "WorkspaceFileEnumerator.h"
 
 #include "EditorPrintPreviewRenderer.h"
 #include "MacroEditorDialog.h"
@@ -401,13 +402,36 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         });
         m_actionQuickFileOpen->setEnabled(false);
         addAction(m_actionQuickFileOpen);
+
+        // Lazily-built background enumerator. Created once; its queued signal is
+        // connected exactly once so onFileIndexReady stays the sole UI-thread
+        // writer of m_fileIndexCache (RCU-lite, no lock).
+        qRegisterMetaType<std::shared_ptr<const FileIndexCache>>();
+        m_fileIndexEnumerator = new WorkspaceFileEnumerator(this);
+        connect(m_fileIndexEnumerator, &WorkspaceFileEnumerator::indexReady,
+                this, &MainWindow::onFileIndexReady, Qt::QueuedConnection);
+
         connect(m_actionQuickFileOpen, &QAction::triggered, this, [this]() {
-            const QString root = currentWorkspaceRoot();
-            if (root.isEmpty()) return;
+            const QString rootKey = QDir::cleanPath(currentWorkspaceRoot());
+            if (rootKey.isEmpty()) return;
             m_actionQuickFileOpen->setEnabled(false);
-            auto *dlg = new QuickFileOpenDialog(root, this);
+            auto *dlg = new QuickFileOpenDialog(rootKey, this);
             dlg->setAttribute(Qt::WA_DeleteOnClose);
             dlg->move(mapToGlobal(QPoint((width() - dlg->minimumWidth()) / 2, height() / 5)));
+
+            // Track the live dialog so onFileIndexReady can hand it a refreshed
+            // snapshot if revalidation finishes while it is open.
+            m_quickFileOpenDialog = dlg;
+            m_quickFileOpenRootKey = rootKey;
+
+            // Serve the cached snapshot immediately if warm; otherwise the
+            // dialog shows its own "Indexing…" placeholder until indexReady.
+            if (auto it = m_fileIndexCache.constFind(rootKey); it != m_fileIndexCache.cend())
+                dlg->adoptSnapshot(*it);
+
+            // MRU files (workspace-relative) drive the empty-query ordering.
+            dlg->setMruFiles(workspaceMruFiles(rootKey));
+
             connect(dlg, &QDialog::finished, this, [this, dlg](int result) {
                 if (result == QDialog::Accepted) {
                     const QString path = dlg->selectedFilePath();
@@ -417,6 +441,10 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
                 m_actionQuickFileOpen->setEnabled(!currentWorkspaceRoot().isEmpty());
             });
             dlg->show();
+
+            // Always revalidate in the background so the cache reflects on-disk
+            // changes since the last open (enumeration never blocks the UI).
+            m_fileIndexEnumerator->enumerate(rootKey);
         });
         connect(this, &MainWindow::activeWorkspaceChanged, m_actionQuickFileOpen, [this]() {
             m_actionQuickFileOpen->setEnabled(!currentWorkspaceRoot().isEmpty());
@@ -1694,7 +1722,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
 
                     AcpAgentManager *m = this->app->getAiAgentManager();
                     if (!m) return;
-                    AiAgentDock *dock = m->openAgent(agentId, cwd);
+                    AiAgentDock *dock = m->openAgent(agentId, cwd, /*recordAsLastUsed=*/true);
                     if (dock) {
                         attachAiAgentDock(dock);
                     }
@@ -1704,6 +1732,49 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
 
         rebuildSubmenu(ui->menuOpenAiAgentInWorkspace, workspaceOk, /*isWorkspaceVariant=*/true);
         rebuildSubmenu(ui->menuOpenAiAgentInFolder, folderOk, /*isWorkspaceVariant=*/false);
+    });
+
+    // New AI Tab (Ctrl+Shift+I) — opens a tab with the agent the user last used
+    // (falling back to the default agent if that id is unset/unknown). cwd
+    // follows the standard active-workspace policy: workspace first, then the
+    // active file's folder. The action stays always-enabled so the global
+    // shortcut keeps firing; the handler bails silently when nothing resolves.
+    ui->actionNewAiTab->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
+    connect(ui->actionNewAiTab, &QAction::triggered, this, [this]() {
+        AcpAgentManager *manager = this->app->getAiAgentManager();
+        if (!manager) return;
+        AcpAgentRegistry *registry = manager->registry();
+        if (!registry) return;
+
+        // Prefer the last-used agent; fall back to the configured default when
+        // it's empty or no longer registered (e.g. the user removed it).
+        QString agentId = this->app->getSettings()->lastUsedAiAgentId();
+        if (agentId.isEmpty() || !registry->contains(agentId)) {
+            agentId = registry->defaultAgentId();
+        }
+
+        const QString workspaceRoot = currentWorkspaceRoot();
+        QString activeFilePath;
+        bool activeIsFile = false;
+        if (ScintillaNext *editor = currentEditor()) {
+            if (editor->isFile()) {
+                activeFilePath = editor->getFilePath();
+                activeIsFile = true;
+            }
+        }
+        QString cwd = TerminalCwdResolver::resolveWorkspace(workspaceRoot);
+        if (cwd.isEmpty()) {
+            cwd = TerminalCwdResolver::resolveFolder(activeFilePath, activeIsFile, workspaceRoot);
+        }
+        if (cwd.isEmpty()) {
+            statusBar()->showMessage(tr("Open a workspace or a saved file to start an AI tab"), 4000);
+            return;
+        }
+
+        AiAgentDock *dock = manager->openAgent(agentId, cwd, /*recordAsLastUsed=*/true);
+        if (dock) {
+            attachAiAgentDock(dock);
+        }
     });
 
     } // MainWindow::ctor.terminalManager
@@ -2171,6 +2242,9 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         const WorkspaceStateSnapshot snap = self->captureState();
         m_workspaceStateMemo.insert(QDir::cleanPath(path), snap);
         persistOneWorkspaceState(snap);
+        // Evict this workspace's file index — it is stale once the dock is gone
+        // and would otherwise leak across the app's lifetime.
+        m_fileIndexCache.remove(QDir::cleanPath(path));
         // The dirty bit no longer needs flushing for THIS dock — its state
         // just went to disk. Leave the bit for other docks that may still
         // have unflushed changes.
@@ -2649,6 +2723,50 @@ QString MainWindow::currentWorkspaceRoot() const
 {
     FolderAsWorkspaceDock *dock = activeWorkspaceDock();
     return dock ? dock->rootPath() : QString();
+}
+
+void MainWindow::onFileIndexReady(const QString &rootKey,
+                                  std::shared_ptr<const FileIndexCache> snapshot)
+{
+    // Sole UI-thread writer of the cache (signal is queued). RCU-lite: store the
+    // immutable snapshot; readers (the open dialog) hold their own shared_ptr.
+    m_fileIndexCache.insert(rootKey, snapshot);
+
+    // If a dialog is open for exactly this workspace, hand it the fresh snapshot
+    // so its current filter re-runs against up-to-date data.
+    if (m_quickFileOpenDialog && m_quickFileOpenRootKey == rootKey)
+        m_quickFileOpenDialog->adoptSnapshot(std::move(snapshot));
+}
+
+QStringList MainWindow::workspaceMruFiles(const QString &workspaceRoot) const
+{
+    QStringList result;
+    if (workspaceRoot.isEmpty())
+        return result;
+
+    RecentFilesListManager *rf = app->getRecentFilesListManager();
+    if (!rf)
+        return result;
+
+    const QString cleanRoot = QDir::cleanPath(workspaceRoot);
+    const QDir rootDir(cleanRoot);
+
+    // Keep only recent files that live under the workspace, converted to
+    // '/'-separated workspace-relative paths matching the snapshot's
+    // displayPaths. Preserve MRU order. relativeFilePath escapes the root with
+    // a leading ".." (or is absolute on a different drive) for outside paths.
+    const QStringList recents = rf->fileList();
+    result.reserve(recents.size());
+    for (const QString &abs : recents) {
+        if (abs.isEmpty())
+            continue;
+        const QString rel = rootDir.relativeFilePath(QDir::cleanPath(abs));
+        if (rel.isEmpty() || rel == QStringLiteral(".") || rel.startsWith(QStringLiteral("../"))
+            || rel == QStringLiteral("..") || QDir::isAbsolutePath(rel))
+            continue;
+        result.append(rel);
+    }
+    return result;
 }
 
 namespace {

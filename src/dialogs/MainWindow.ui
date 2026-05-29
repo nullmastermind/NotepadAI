@@ -377,6 +377,7 @@
     </widget>
     <addaction name="menuOpenAiAgentInWorkspace"/>
     <addaction name="menuOpenAiAgentInFolder"/>
+    <addaction name="actionNewAiTab"/>
     <addaction name="separator"/>
     <addaction name="actionScheduleTasks"/>
     <addaction name="actionAiAgents"/>
@@ -1082,6 +1083,11 @@
   <action name="actionAiAgents">
    <property name="text">
     <string>AI Agents…</string>
+   </property>
+  </action>
+  <action name="actionNewAiTab">
+   <property name="text">
+    <string>New AI Tab</string>
    </property>
   </action>
   <action name="actionScheduleTasks">

@@ -745,3 +745,60 @@ target_sources(test_scheduled_task_registry PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ScheduledTaskRegistry.h
 )
 add_test(NAME ScheduledTaskRegistry COMMAND test_scheduled_task_registry)
+
+# --- QuickFileOpenDialog scoring core: consecutive / word-boundary / camelCase
+#     bonuses, pattern-longer-than-candidate, smart-case, and the basename-bonus
+#     threshold guarantee (any basename match outranks any path-scattered match).
+#     Pure static methods — no live dialog/git. QuickFileOpenDialog.cpp pulls in
+#     widgets, hence Qt6::Gui/Widgets. ---
+qt_add_executable(test_quick_file_open_scoring test_quick_file_open_scoring.cpp)
+target_include_directories(test_quick_file_open_scoring PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_quick_file_open_scoring PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_quick_file_open_scoring PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/dialogs/QuickFileOpenDialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/dialogs/QuickFileOpenDialog.h
+    ${CMAKE_SOURCE_DIR}/src/FileIndexCache.h
+)
+add_test(NAME QuickFileOpenScoring COMMAND test_quick_file_open_scoring)
+
+# --- QuickFileOpenDialog top-K search: bounded min-heap keeps exactly the
+#     limit, tie-break stable & deterministic across runs, positions backtraced
+#     only for survivors (exactly pattern-length each). ---
+qt_add_executable(test_quick_file_open_topk test_quick_file_open_topk.cpp)
+target_include_directories(test_quick_file_open_topk PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_quick_file_open_topk PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_quick_file_open_topk PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/dialogs/QuickFileOpenDialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/dialogs/QuickFileOpenDialog.h
+    ${CMAKE_SOURCE_DIR}/src/FileIndexCache.h
+)
+add_test(NAME QuickFileOpenTopK COMMAND test_quick_file_open_topk)
+
+# --- QuickFileOpenDialog empty-query ordering: MRU-first (present in snapshot)
+#     then enumeration order, MRU misses skipped, truncated to limit. ---
+qt_add_executable(test_quick_file_open_empty test_quick_file_open_empty.cpp)
+target_include_directories(test_quick_file_open_empty PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_quick_file_open_empty PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_quick_file_open_empty PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/dialogs/QuickFileOpenDialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/dialogs/QuickFileOpenDialog.h
+    ${CMAKE_SOURCE_DIR}/src/FileIndexCache.h
+)
+add_test(NAME QuickFileOpenEmpty COMMAND test_quick_file_open_empty)
+
+# --- WorkspaceFileEnumerator merge + FileIndexCache arena: three-stream merge
+#     dedupes and drops the untracked-submodule directory placeholder; arena
+#     offsets bound each path; ASCII fold lowercases; non-ASCII folded on the
+#     fly (not dropped). Enumerator uses QtConcurrent + GitProcessRunner, so
+#     those sources/libs are linked even though the tested methods are pure. ---
+qt_add_executable(test_workspace_enumerator_merge test_workspace_enumerator_merge.cpp)
+target_include_directories(test_workspace_enumerator_merge PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_workspace_enumerator_merge PRIVATE Qt6::Core Qt6::Test Qt6::Concurrent)
+target_sources(test_workspace_enumerator_merge PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/WorkspaceFileEnumerator.cpp
+    ${CMAKE_SOURCE_DIR}/src/WorkspaceFileEnumerator.h
+    ${CMAKE_SOURCE_DIR}/src/FileIndexCache.h
+    ${CMAKE_SOURCE_DIR}/src/git/GitProcessRunner.cpp
+    ${CMAKE_SOURCE_DIR}/src/git/GitProcessRunner.h
+)
+add_test(NAME WorkspaceEnumeratorMerge COMMAND test_workspace_enumerator_merge)

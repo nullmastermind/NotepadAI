@@ -18,16 +18,20 @@
 
 #include "AcpToolCallCard.h"
 
+#include <QAbstractTextDocumentLayout>
 #include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QResizeEvent>
 #include <QStringList>
+#include <QTextBlock>
 #include <QTextBrowser>
 #include <QTextDocument>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -246,6 +250,31 @@ bool isEmptyContentJson(const QString &text)
             return true;
     }
     return false;
+}
+
+// QTextDocument lays out lazily: after setHtml()/setPlainText() the document
+// reports a stale (often single-line) size until something forces the layout
+// engine to run for the current text width. Measuring height before that pass
+// clips multi-line diff bodies to ~one line. Touching the layout's
+// documentSize() after pinning the text width forces the full pass, so the
+// subsequent doc->size() read is authoritative.
+qreal layoutDocumentHeight(QTextDocument *doc, int textWidth)
+{
+    if (!doc) return 0.0;
+    doc->setTextWidth(textWidth);
+    QAbstractTextDocumentLayout *layout = doc->documentLayout();
+    if (!layout) return doc->size().height();
+    // documentSize() drives the layout to completion for the pinned width.
+    qreal h = layout->documentSize().height();
+    // Fall back to the block-walked extent if the layout still under-reports
+    // (can happen on the very first paint before the widget has a real width).
+    const QTextBlock last = doc->lastBlock();
+    if (last.isValid()) {
+        const QRectF r = layout->blockBoundingRect(last);
+        if (r.isValid())
+            h = std::max(h, r.bottom());
+    }
+    return std::max(h, doc->size().height());
 }
 
 } // namespace
@@ -576,6 +605,7 @@ void AcpToolCallCard::rerenderBody()
         }
         m_body->setHtml(html);
         refitBodyHeight();
+        scheduleRefit();
         return;
     }
 
@@ -619,6 +649,7 @@ void AcpToolCallCard::rerenderBody()
     }
     m_body->document()->setPlainText(text);
     refitBodyHeight();
+    scheduleRefit();
 }
 
 void AcpToolCallCard::refitBodyHeight()
@@ -633,8 +664,11 @@ void AcpToolCallCard::refitBodyHeight()
     const int w = width() - marginL - marginR;
     if (w <= 0) return;
     QTextDocument *doc = m_body->document();
-    doc->setTextWidth(w);
-    const int bodyH = qMax(0, static_cast<int>(std::ceil(doc->size().height())));
+    // Force a full layout pass for the current width before measuring —
+    // QTextDocument under-reports height for freshly-set multi-line HTML
+    // (the diff body) until the layout engine has run, which clips an
+    // expanded card down to roughly its first line.
+    const int bodyH = qMax(0, static_cast<int>(std::ceil(layoutDocumentHeight(doc, w))));
     m_body->setFixedHeight(bodyH);
 
     // Pin the card's own height. setFixedHeight on the inner browser only
@@ -651,6 +685,23 @@ void AcpToolCallCard::refitBodyHeight()
         cardH += (m_outer ? m_outer->spacing() : 0) + bodyH;
     }
     setFixedHeight(cardH);
+}
+
+// Coalesced one-shot refit. When content lands during construction/hydration
+// or a streamed update, the card's final width isn't settled yet, so the
+// synchronous refit measures against a stale width. Re-run once the event loop
+// has applied the pending layout. Guarded so a burst of updates queues at most
+// one deferred pass.
+void AcpToolCallCard::scheduleRefit()
+{
+    if (m_refitScheduled) return;
+    m_refitScheduled = true;
+    QPointer<AcpToolCallCard> guard(this);
+    QTimer::singleShot(0, this, [guard]() {
+        if (!guard) return;
+        guard->m_refitScheduled = false;
+        guard->refitBodyHeight();
+    });
 }
 
 void AcpToolCallCard::resizeEvent(QResizeEvent *event)
@@ -671,6 +722,9 @@ void AcpToolCallCard::setCollapsed(bool collapsed)
         m_expandBtn->blockSignals(false);
     }
     // Re-pin the card so it shrinks to header-only when collapsed (and
-    // grows back when re-expanded).
+    // grows back when re-expanded). The body may have been laid out at a
+    // stale width while hidden, so follow up with a deferred refit once the
+    // expanded geometry settles — otherwise the diff clips on first expand.
     refitBodyHeight();
+    if (!collapsed) scheduleRefit();
 }
