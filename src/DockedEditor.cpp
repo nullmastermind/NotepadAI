@@ -18,6 +18,7 @@
 
 
 #include "DockedEditor.h"
+#include "DockAreaSanitizer.h"
 #include "DockAreaTabBar.h"
 #include "DockAreaWidget.h"
 #include "DockWidgetTab.h"
@@ -92,6 +93,17 @@ DockedEditor::DockedEditor(QWidget *parent) : QObject(parent)
         emit editorActivated(editor);
     });
 
+    // Fire lastTabClosed() once the area is fully empty. dockWidgetRemoved is
+    // emitted by CDockManager ONLY from CDockWidget::deleteDockWidget() (the
+    // delete-on-close path) — never during drag/split/float — and AFTER the
+    // widget and any now-empty dock area are removed, so totalTabCount() reads
+    // the settled state here. Both tab kinds use DockWidgetDeleteOnClose, so
+    // neither lingers as a hidden phantom in the layout count.
+    connect(dockManager, &ads::CDockManager::dockWidgetRemoved, this, [this](ads::CDockWidget *) {
+        if (totalTabCount() == 0)
+            emit lastTabClosed();
+    });
+
     connect(dockManager, &ads::CDockManager::dockAreaCreated, this, [=](ads::CDockAreaWidget* DockArea) {
         DockedEditorTitleBar *titleBar = qobject_cast<DockedEditorTitleBar *>(DockArea->titleBar());
         connect(titleBar, &DockedEditorTitleBar::doubleClicked, this, &DockedEditor::titleBarDoubleClicked);
@@ -133,6 +145,60 @@ int DockedEditor::count() const
     return total;
 }
 
+int DockedEditor::totalTabCount() const
+{
+    // Counts every tab of every kind — editors AND nn_previewTab tabs (preview,
+    // browser, mini-apps, future kinds) — so it answers "is the editor area
+    // empty?" with no per-type branching: a new tab kind is counted for free.
+    //
+    // We iterate dockContainers() (the main dock manager container PLUS every
+    // floating container), NOT just the main container's dockAreaCount(). Today
+    // all tab types clear DockWidgetFloatable so none can be torn out into a
+    // floating window — but counting only the main container would silently
+    // undercount the instant any future tab type is made floatable, reopening
+    // the spurious-"New 1" bug in a way that's painful to trace. Iterating all
+    // containers makes the count correct regardless of the floatable flag.
+    //
+    // dockWidgetsCount() (the raw layout count) is correct here rather than
+    // openDockWidgetsCount() (which filters !isClosed()): both our tab kinds set
+    // DockWidgetDeleteOnClose, so a closed tab is REMOVED from the layout, never
+    // left hidden-but-present. There is therefore no closed-but-undeleted
+    // phantom to overcount, and this avoids a per-widget isClosed() scan. Each
+    // dockWidgetsCount() is O(1) (a layout count), so this stays a cheap walk.
+    int total = 0;
+
+    for (const ads::CDockContainerWidget *container : dockManager->dockContainers()) {
+        for (int i = 0; i < container->dockAreaCount(); ++i)
+            total += container->dockArea(i)->dockWidgetsCount();
+    }
+
+    return total;
+}
+
+ScintillaNext *DockedEditor::initialEditor() const
+{
+    // Only a reusable scratch tab if it is the sole editor. count() is
+    // editors-only (skips nn_previewTab), matching the historic semantics:
+    // a lone "New X" alongside e.g. a browser tab is still replaceable.
+    if (count() != 1)
+        return nullptr;
+
+    ScintillaNext *editor = getCurrentEditor();
+
+    // getCurrentEditor() can be null mid-close: the cached pointer is auto-
+    // nulled by QPointer when its editor is destroyed. Treat as "none".
+    if (editor == nullptr)
+        return nullptr;
+
+    // Reject anything the user might care about: a temporary buffer, a real or
+    // missing file, or a buffer with undo/redo history (i.e. it was edited).
+    // Only a truly pristine "New X" survives and may be transparently closed.
+    if (editor->isTemporary() || editor->isFile() || editor->canUndo() || editor->canRedo())
+        return nullptr;
+
+    return editor;
+}
+
 QVector<ScintillaNext *> DockedEditor::editors() const
 {
     QVector<ScintillaNext *> editors;
@@ -172,7 +238,13 @@ void DockedEditor::dockWidgetCloseRequested()
 
 ads::CDockAreaWidget *DockedEditor::currentDockArea() const
 {
-    return dockManager->focusedDockWidget() ? dockManager->focusedDockWidget()->dockAreaWidget() : latestDockArea.data();
+    ads::CDockWidget *focused = dockManager->focusedDockWidget();
+    ads::CDockAreaWidget *area = focused ? focused->dockAreaWidget() : latestDockArea.data();
+
+    // Collapse a detached-but-not-yet-destroyed area to nullptr (see
+    // sanitizeDockArea / DockAreaSanitizer.h for why this prevents the
+    // null-container crash in CDockManager::addDockWidget).
+    return sanitizeDockArea(area);
 }
 
 void DockedEditor::addEditor(ScintillaNext *editor)

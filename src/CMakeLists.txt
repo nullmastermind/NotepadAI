@@ -26,6 +26,7 @@ qt_add_executable(NotepadAI
 	DataPaths.h
 	DebugManager.h
 	DefaultDirectoryManager.h
+	DockAreaSanitizer.h
 	DockedEditor.h
 	DockedEditorTitleBar.h
 
@@ -108,6 +109,7 @@ qt_add_executable(NotepadAI
 	DataPaths.cpp
 	DebugManager.cpp
 	DefaultDirectoryManager.cpp
+	DockAreaSanitizer.cpp
 	DockedEditor.cpp
 
 	EditorManager.cpp

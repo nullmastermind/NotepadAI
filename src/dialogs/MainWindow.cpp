@@ -286,7 +286,14 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
             m_actionMarkdownPreview->setChecked(true);
     });
     connect(dockedEditor, &DockedEditor::contextMenuRequestedForEditor, this, &MainWindow::tabBarRightClicked);
-    connect(dockedEditor, &DockedEditor::titleBarDoubleClicked, this, &MainWindow::newFile);
+    connect(dockedEditor, &DockedEditor::titleBarDoubleClicked, this, [this]() { newFile(true); });
+    // Single source of truth for "the editor area is now empty" — fires for the
+    // last tab of ANY kind (editor, preview, browser, mini-app, future types),
+    // so closing the last browser tab respawns "New X" just like the last
+    // editor would. Queued so the handler runs AFTER the synchronous ADS close
+    // cascade fully unwinds — calling addDockWidget mid-tear-down crashes in
+    // topLevelDockArea. See handleEditorAreaEmptied().
+    connect(dockedEditor, &DockedEditor::lastTabClosed, this, &MainWindow::handleEditorAreaEmptied, Qt::QueuedConnection);
 
     fileWatcher = new FileWatcher(this);
     connect(fileWatcher, &FileWatcher::fileModifiedExternally, this, [this](ScintillaNext *editor) {
@@ -309,7 +316,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
     // Set up the menus
     {
     PROFILE_SCOPE("MainWindow::ctor.actionWiring");
-    connect(ui->actionNew, &QAction::triggered, this, &MainWindow::newFile);
+    connect(ui->actionNew, &QAction::triggered, this, [this]() { newFile(true); });
     connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::openFileDialog);
     connect(ui->actionReload, &QAction::triggered, this, &MainWindow::reloadFile);
     connect(ui->actionClose, &QAction::triggered, this, &MainWindow::closeCurrentFile);
@@ -1248,7 +1255,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
 
     tabsQuickActionsBar = new TabsQuickActionsBar(ui->menuBar);
     ui->menuBar->setCornerWidget(tabsQuickActionsBar, Qt::TopRightCorner);
-    connect(tabsQuickActionsBar, &TabsQuickActionsBar::createNewTabClicked, this, &MainWindow::newFile);
+    connect(tabsQuickActionsBar, &TabsQuickActionsBar::createNewTabClicked, this, [this]() { newFile(true); });
     connect(tabsQuickActionsBar, &TabsQuickActionsBar::closeCurrentTabClicked, this, &MainWindow::closeCurrentFile);
     connect(tabsQuickActionsBar, &TabsQuickActionsBar::tabsMenuAboutToShow, this, [this](QMenu *editorsMenu) {
         const auto editorsList = editors();
@@ -1952,11 +1959,18 @@ QVector<ScintillaNext *> MainWindow::editors() const
     return dockedEditor->editors();
 }
 
-void MainWindow::newFile()
+void MainWindow::newFile(bool replaceInitialEditor)
 {
     qInfo(Q_FUNC_INFO);
 
     static int count = 1;
+
+    // Snapshot the reusable pristine "New X" editor BEFORE creating the new one:
+    // once the new editor exists editorCount() is 2 and getInitialEditor() would
+    // return null. Same close-after-open mechanism as openFileList(). We close it
+    // at the end so totalTabCount() never hits 0 mid-flight (a new tab is always
+    // present), and lastTabClosed never fires.
+    ScintillaNext *initialEditor = replaceInitialEditor ? getInitialEditor() : Q_NULLPTR;
 
     // NOTE: in theory need to check all editors in the editorManager to future proof this.
     // If there is another window it would need to check those too to see if New X exists. The editor
@@ -1979,35 +1993,21 @@ void MainWindow::newFile()
             break;
         }
     }
+
+    // Drop the now-redundant empty scratch buffer. Guarded so we never close the
+    // editor we just created (getInitialEditor() was evaluated before creation,
+    // so initialEditor can't alias it).
+    if (initialEditor) {
+        initialEditor->close();
+    }
 }
 
-// One unedited, new blank document
+// One unedited, new blank document. Delegates to DockedEditor::initialEditor()
+// so the "pristine scratch tab" definition lives in exactly one place and is
+// shared with MainWindow-less tab-spawners (e.g. MiniAppManager web tabs).
 ScintillaNext *MainWindow::getInitialEditor()
 {
-    if (editorCount() == 1) {
-        ScintillaNext *editor = currentEditor();
-
-        // currentEditor() can be null mid-close: the cached pointer in
-        // DockedEditor was just auto-nulled by QPointer because its target
-        // editor was destroyed. Treat as "no reusable initial editor".
-        if (editor == Q_NULLPTR) {
-            return Q_NULLPTR;
-        }
-
-        // If the editor:
-        //   is a temporary file
-        //   is a 'real' file (or a 'missing' file)
-        //   can undo any actions
-        //   can redo any actions
-        // Then do not treat it as an 'initial editor' that can be transparently closed for the user
-        if (editor->isTemporary() || editor->isFile() || editor->canUndo() || editor->canRedo()) {
-            return Q_NULLPTR;
-        }
-
-        return editor;
-    }
-
-    return Q_NULLPTR;
+    return dockedEditor->initialEditor();
 }
 
 void MainWindow::openFileList(const QStringList &fileNames)
@@ -2124,10 +2124,18 @@ void MainWindow::previewFile(const QString &filePath)
     QFileInfo fileInfo(filePath);
     if (!fileInfo.isFile()) return;
 
+    // Snapshot the reusable pristine "New X" editor BEFORE creating the preview
+    // editor: createEditorFromFile() adds the new editor to the layout
+    // synchronously (editorCreated → addEditor), so by the time it returns
+    // editorCount() is already 2 and getInitialEditor() — which requires
+    // editorCount() == 1 — would return null, leaving the scratch tab behind.
+    // Same ordering rule as newFile(). Closed at the end so totalTabCount()
+    // never hits 0 mid-flight and lastTabClosed never fires.
+    ScintillaNext *initialEditor = getInitialEditor();
+
     editor = app->getEditorManager()->createEditorFromFile(filePath);
     if (!editor) return;
 
-    ScintillaNext *initialEditor = getInitialEditor();
     dockedEditor->addPreviewEditor(editor);
     dockedEditor->switchToEditor(editor);
 
@@ -2855,8 +2863,18 @@ void MainWindow::closeCurrentFile()
 
 void MainWindow::closeFile(ScintillaNext *editor)
 {
-    // Early out. If we aren't exiting on last tab closed, and it exists, there's no point in continuing
-    if (!app->getSettings()->exitOnLastTabClosed() && getInitialEditor() != Q_NULLPTR) {
+    // Early out. If we aren't exiting-on-last-tab-closed and the thing being
+    // closed is a single pristine "initial" editor, closing it would just force
+    // an immediate respawn — so keep it. But ONLY when it is genuinely the last
+    // tab of ANY kind (totalTabCount() == 1): getInitialEditor() looks at
+    // editorCount() alone, which ignores preview/browser/mini-app tabs, so
+    // without the totalTabCount() guard this would wrongly refuse to close a
+    // pristine "New X" while a preview/browser tab is still open. If another tab
+    // survives, closing this editor leaves it behind without spawning anything —
+    // exactly what the user wants — so don't block it.
+    if (!app->getSettings()->exitOnLastTabClosed()
+        && getInitialEditor() != Q_NULLPTR
+        && dockedEditor->totalTabCount() == 1) {
         return;
     }
 
@@ -2866,17 +2884,34 @@ void MainWindow::closeFile(ScintillaNext *editor)
 
     editor->close();
 
-    // If the last document was closed, figure out what to do next
-    if (editorCount() == 0) {
-        if (app->getSettings()->exitOnLastTabClosed()) {
-            close();
-        }
-        else {
-            // Defer newFile() so the ADS close cascade fully unwinds before we
-            // call addDockWidget — otherwise we crash in topLevelDockArea on a
-            // container that's still mid-tear-down.
-            QMetaObject::invokeMethod(this, &MainWindow::newFile, Qt::QueuedConnection);
-        }
+    // No respawn/exit decision here. editor->close() removes the dock widget; if
+    // it was the last tab of any kind, DockedEditor::lastTabClosed fires and
+    // handleEditorAreaEmptied() does the exit-or-newFile decision centrally.
+}
+
+void MainWindow::handleEditorAreaEmptied()
+{
+    // Reached via a queued DockedEditor::lastTabClosed, so the ADS close cascade
+    // has fully unwound and addDockWidget is safe again.
+
+    // During application shutdown the window tears its own tabs down; never
+    // resurrect a buffer then.
+    if (m_isClosing) {
+        return;
+    }
+
+    // Defensive re-check: between the signal and this queued slot the user could
+    // have opened something (CLI drop, session, a new tab). Only act if the area
+    // is genuinely still empty — covers every tab kind, not just editors.
+    if (dockedEditor->totalTabCount() != 0) {
+        return;
+    }
+
+    if (app->getSettings()->exitOnLastTabClosed()) {
+        close();
+    }
+    else {
+        newFile();
     }
 }
 
@@ -2891,7 +2926,9 @@ void MainWindow::closeAllFiles()
         editor->close();
     }
 
-    QMetaObject::invokeMethod(this, &MainWindow::newFile, Qt::QueuedConnection);
+    // No respawn here either — if a browser/preview tab survives, the area is
+    // not empty and must stay as-is; if nothing remains, lastTabClosed fires and
+    // handleEditorAreaEmptied() spawns the fresh buffer. See that handler.
 }
 
 void MainWindow::closeAllExceptActive()
@@ -3945,6 +3982,12 @@ void MainWindow::closeEvent(QCloseEvent *event)
             return;
         }
     }
+
+    // Past the point of no return: the window is closing. Latch this so the
+    // queued handleEditorAreaEmptied() slot won't respawn a "New X" buffer as
+    // the editor tabs get torn down below. Set only after the cancel guard above
+    // so an ignored close leaves the window fully usable.
+    m_isClosing = true;
 
     if (terminalManager) {
         PROFILE_SCOPE("MainWindow::closeEvent.terminalShutdown");

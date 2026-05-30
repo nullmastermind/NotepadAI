@@ -802,3 +802,18 @@ target_sources(test_workspace_enumerator_merge PRIVATE
     ${CMAKE_SOURCE_DIR}/src/git/GitProcessRunner.h
 )
 add_test(NAME WorkspaceEnumeratorMerge COMMAND test_workspace_enumerator_merge)
+
+# --- sanitizeDockArea: detached-dock-area guard for DockedEditor::currentDockArea().
+#     Pure predicate, but it queries CDockAreaWidget::dockContainer(), so the ADS
+#     library (qtadvanceddocking-qt6) is linked and the test constructs real
+#     CDockAreaWidget/CDockManager widgets — hence QApplication via QTEST_MAIN and
+#     the Qt6::Gui/Qt6::Widgets deps, matching the other widget-constructing tests. ---
+qt_add_executable(test_docked_editor_current_area test_docked_editor_current_area.cpp)
+target_include_directories(test_docked_editor_current_area PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_docked_editor_current_area PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test qtadvanceddocking-qt6)
+target_sources(test_docked_editor_current_area PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/DockAreaSanitizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/DockAreaSanitizer.h
+)
+add_test(NAME DockedEditorCurrentArea COMMAND test_docked_editor_current_area)

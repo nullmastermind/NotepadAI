@@ -81,7 +81,12 @@ public:
     DockedEditor *getDockedEditor() const { return dockedEditor; }
 
 public slots:
-    void newFile();
+    // replaceInitialEditor: when true, an unedited pristine "New X" buffer that
+    // is currently the sole editor is closed right after the new tab opens, so
+    // the user doesn't accumulate empty scratch tabs. Pass true only from the
+    // explicit "open a new tab" surfaces (New action, + button, title-bar
+    // double-click); leave false for split/respawn/startup/drop paths.
+    void newFile(bool replaceInitialEditor = false);
 
     void openFileDialog();
     void openFile(const QString &filePath);
@@ -179,10 +184,21 @@ private slots:
     void checkForUpdatesFinished(const QString &url);
     void activateEditor(ScintillaNext *editor);
 
+    // Centralized "the editor area just became empty" handler. Wired to
+    // DockedEditor::lastTabClosed, which fires after the LAST tab of ANY kind
+    // (editor, preview, browser, mini-app, …) is removed. Decides between
+    // exiting and spawning a fresh "New X" buffer. No-ops while m_isClosing.
+    void handleEditorAreaEmptied();
+
 private:
     Ui::MainWindow *ui = Q_NULLPTR;
     NotepadNextApplication *app = Q_NULLPTR;
     DockedEditor *dockedEditor = Q_NULLPTR;
+
+    // Set once in closeEvent() so the centralized empty-area handler
+    // (handleEditorAreaEmptied) never resurrects a "New X" buffer while the
+    // window is tearing down its tabs during application exit.
+    bool m_isClosing = false;
 
     QScopedPointer<SearchResultsCollector> searchResults;
 

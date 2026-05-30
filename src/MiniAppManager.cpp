@@ -173,11 +173,19 @@ void MiniAppManager::launchApp(const MiniAppDefinition &def)
             instance->dockWidget()->setWindowTitle(title);
     });
 
+    // Snapshot the reusable pristine "New X" scratch tab BEFORE adding the web
+    // tab; close it AFTER so the area never empties mid-flight (which would fire
+    // lastTabClosed and respawn). Same swap-out behaviour as opening a file.
+    ScintillaNext *initialEditor = m_dockedEditor->initialEditor();
+
     // Create tab immediately (shows "Starting..." title)
     QWidget *placeholder = new QWidget();
     ads::CDockWidget *dw = m_dockedEditor->addPreviewTab(
         placeholder, def.name + QStringLiteral(" \xe2\x80\x94 Starting..."), tintedGlobeIcon());
     instance->setDockWidget(dw);
+
+    if (initialEditor)
+        initialEditor->close();
 
     // Wire tab close → destroy instance
     connect(dw, &ads::CDockWidget::closed, this, [this, instance]() {
@@ -395,8 +403,15 @@ void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
     if (!webView)
         return;
 
+    // Snapshot the reusable pristine "New X" scratch tab BEFORE adding the web
+    // tab; close it AFTER so the area never empties mid-flight. See launchApp().
+    ScintillaNext *initialEditor = m_dockedEditor->initialEditor();
+
     ads::CDockWidget *dw = m_dockedEditor->addPreviewTab(
         webView, url.host().isEmpty() ? url.toString() : url.host(), tintedGlobeIcon());
+
+    if (initialEditor)
+        initialEditor->close();
 
     QuickBrowserTab tab;
     tab.webView = webView;

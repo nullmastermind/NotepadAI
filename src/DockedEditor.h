@@ -52,7 +52,33 @@ public:
 
     void switchToEditor(const ScintillaNext *editor);
 
+    // Number of real editors only (excludes preview/browser/mini-app tabs).
     int count() const;
+
+    // Number of tabs of EVERY kind currently in the center dock area —
+    // editors plus all `nn_previewTab` tabs (preview, browser, mini-apps, and
+    // any future tab type routed through the same dock manager). Use this, not
+    // count(), to decide whether the editor area is truly empty (e.g. whether
+    // to spawn a fresh "New X" buffer). New tab kinds are counted automatically
+    // as long as they are added through addEditor()/addPreviewTab().
+    int totalTabCount() const;
+
+    // The single reusable "initial" editor — an unedited, pristine "New X"
+    // scratch buffer that is currently the sole editor — or nullptr if there
+    // isn't one. "Pristine" means: a New-type buffer (not a file, not missing,
+    // not temporary) with nothing to undo/redo, i.e. the user never touched it.
+    //
+    // This is THE shared definition of "is there a throwaway scratch tab I can
+    // transparently replace?". Every surface that opens a new piece of content
+    // (newFile, file open, file preview, web/browser tabs, future tab kinds)
+    // must snapshot this BEFORE adding its own tab, then close the result AFTER,
+    // so the scratch "New X" is swapped out without ever emptying the area mid-
+    // flight (which would otherwise fire lastTabClosed and respawn). Centralised
+    // here — on DockedEditor, which every tab-spawning subsystem already holds —
+    // so MainWindow-less callers (e.g. MiniAppManager's web tabs) share it
+    // instead of reinventing the pristine test. MainWindow::getInitialEditor()
+    // delegates here.
+    ScintillaNext *initialEditor() const;
 
     ScintillaNext *previewEditor() const;
     void pinPreviewEditor();
@@ -86,6 +112,12 @@ signals:
     void editorOrderChanged();
     void previewTabActivated(QWidget *widget);
     void previewEditorSet();
+
+    // Emitted after the LAST tab of ANY kind (editor or nn_previewTab) is
+    // removed from the dock manager, i.e. totalTabCount() just hit 0. The one
+    // type-agnostic signal callers use to react to "the editor area is now
+    // empty" — a new tab kind needs no new signal.
+    void lastTabClosed();
 
     void contextMenuRequestedForEditor(ScintillaNext *editor);
     void titleBarDoubleClicked();
