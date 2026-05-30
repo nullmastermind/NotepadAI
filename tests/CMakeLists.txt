@@ -817,3 +817,42 @@ target_sources(test_docked_editor_current_area PRIVATE
     ${CMAKE_SOURCE_DIR}/src/DockAreaSanitizer.h
 )
 add_test(NAME DockedEditorCurrentArea COMMAND test_docked_editor_current_area)
+
+# --- FolderAsWorkspaceProxyModel: synthetic-root proxy over the workspace
+#     QFileSystemModel. Pure proxy unit test against a QTemporaryDir tree — no
+#     live git. Covers QAbstractItemModelTester conformance, map round-trips
+#     (invisible top / synthetic root / passthrough), structure (single top row,
+#     parent(PR)==QModelIndex(), parent(child)==PR, columnCount==1), rowsInserted
+#     /rowsRemoved forwarding (create + delete a file), and re-root / empty-root.
+#     QFileSystemModel lives in Qt6::Gui; QAbstractItemModelTester in Qt6::Test.
+#     The FsModel's data() override pulls in the git decoration palette + index,
+#     so GitDiffPalette + PathStatusIndex sources are linked (not stubbed). ---
+qt_add_executable(test_folder_workspace_proxy test_folder_workspace_proxy.cpp)
+target_include_directories(test_folder_workspace_proxy PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/git
+)
+target_link_libraries(test_folder_workspace_proxy PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+target_sources(test_folder_workspace_proxy PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/docks/FolderAsWorkspaceProxyModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/docks/FolderAsWorkspaceProxyModel.h
+    ${CMAKE_SOURCE_DIR}/src/docks/FolderAsWorkspaceFsModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/docks/FolderAsWorkspaceFsModel.h
+    ${CMAKE_SOURCE_DIR}/src/git/GitDiffPalette.cpp
+    ${CMAKE_SOURCE_DIR}/src/git/GitDiffPalette.h
+    ${CMAKE_SOURCE_DIR}/src/git/PathStatusIndex.cpp
+    ${CMAKE_SOURCE_DIR}/src/git/PathStatusIndex.h
+    ${CMAKE_SOURCE_DIR}/src/git/GitStatusEntry.h
+)
+add_test(NAME FolderWorkspaceProxy COMMAND test_folder_workspace_proxy)
+
+# --- RecursiveTreeWatcherLogic: pure decision logic for the selective-watch
+#     working-tree watcher. isUnderIgnored() (per-event ignore filter incl.
+#     exact-file ignore + separator guard) and deriveWatchedTopLevelDirs()
+#     (which top-level dirs get a recursive watch, .git always excluded).
+#     Header-only and Win32-free, so it compiles/runs on every platform — the
+#     IOCP/handle lifecycle itself is not unit-testable in-tree. ---
+qt_add_executable(test_recursive_tree_watcher_logic test_recursive_tree_watcher_logic.cpp)
+target_include_directories(test_recursive_tree_watcher_logic PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_recursive_tree_watcher_logic PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME RecursiveTreeWatcherLogic COMMAND test_recursive_tree_watcher_logic)

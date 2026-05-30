@@ -20,6 +20,7 @@
 #include "FolderAsWorkspaceDock.h"
 #include "ApplicationSettings.h"
 #include "FolderAsWorkspaceFsModel.h"
+#include "FolderAsWorkspaceProxyModel.h"
 #include "GitCommitView.h"
 #include "GitController.h"
 #include "GitDiffViewController.h"
@@ -53,6 +54,7 @@
 // NotepadNextApplication::init() as a one-shot migration source when the new
 // list is empty, and is no longer written to from anywhere. The value left on
 // disk from older versions is kept untouched for theoretical downgrade safety.
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization) — default is an empty QString (no allocation, cannot throw); matches the file-scope ApplicationSetting idiom used elsewhere (e.g. FileListDock).
 ApplicationSetting<QString> rootPathSetting{"FolderAsWorkspace/RootPath"};
 
 namespace {
@@ -65,11 +67,13 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(QWidget *parent) :
     QDockWidget(parent),
     ui(new Ui::FolderAsWorkspaceDock),
     model(new FolderAsWorkspaceFsModel(this)),
+    proxy(new FolderAsWorkspaceProxyModel(this)),
     tooltipTimer(new QTimer(this))
 {
     ui->setupUi(this);
 
-    ui->treeView->setModel(model);
+    proxy->setSourceModel(model);
+    ui->treeView->setModel(proxy);
     ui->treeView->header()->hideSection(1);
     ui->treeView->header()->hideSection(2);
     ui->treeView->header()->hideSection(3);
@@ -77,14 +81,14 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(QWidget *parent) :
     wireFileTreeGitDecorations();
 
     connect(ui->treeView, &QTreeView::doubleClicked, this, [=](const QModelIndex &index) {
-        if (!model->isDir(index)) {
-            emit fileDoubleClicked(model->filePath(index));
+        if (!proxy->isDir(index)) {
+            emit fileDoubleClicked(proxy->filePath(index));
         }
     });
 
     connect(ui->treeView, &QTreeView::clicked, this, [=](const QModelIndex &index) {
-        if (!model->isDir(index)) {
-            emit fileClicked(model->filePath(index));
+        if (!proxy->isDir(index)) {
+            emit fileClicked(proxy->filePath(index));
         }
     });
 
@@ -100,7 +104,9 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(QWidget *parent) :
         if (!index.isValid() || QPersistentModelIndex(index) != pendingTooltipIndex) {
             return;
         }
-        const QString text = model->data(index, Qt::ToolTipRole).toString();
+        // Route through the view's model (the proxy) so QAbstractProxyModel
+        // auto-maps to the FsModel's ToolTipRole.
+        const QString text = proxy->data(index, Qt::ToolTipRole).toString();
         if (text.isEmpty()) {
             return;
         }
@@ -116,6 +122,8 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(QWidget *parent) :
 
     // Tree state restoration plumbing. directoryLoaded must be connected BEFORE
     // setRootPath fires so the very first model-load (root level) is captured.
+    // It stays on the SOURCE model — it is a QFileSystemModel-specific,
+    // path-carrying signal that the proxy does not relay.
     connect(model, &QFileSystemModel::directoryLoaded,
             this, &FolderAsWorkspaceDock::onDirectoryLoaded);
     connect(ui->treeView, &QTreeView::expanded,
@@ -130,11 +138,13 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(const QString &initialPath, QWidget
     QDockWidget(parent),
     ui(new Ui::FolderAsWorkspaceDock),
     model(new FolderAsWorkspaceFsModel(this)),
+    proxy(new FolderAsWorkspaceProxyModel(this)),
     tooltipTimer(new QTimer(this))
 {
     ui->setupUi(this);
 
-    ui->treeView->setModel(model);
+    proxy->setSourceModel(model);
+    ui->treeView->setModel(proxy);
     ui->treeView->header()->hideSection(1);
     ui->treeView->header()->hideSection(2);
     ui->treeView->header()->hideSection(3);
@@ -142,14 +152,14 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(const QString &initialPath, QWidget
     wireFileTreeGitDecorations();
 
     connect(ui->treeView, &QTreeView::doubleClicked, this, [=](const QModelIndex &index) {
-        if (!model->isDir(index)) {
-            emit fileDoubleClicked(model->filePath(index));
+        if (!proxy->isDir(index)) {
+            emit fileDoubleClicked(proxy->filePath(index));
         }
     });
 
     connect(ui->treeView, &QTreeView::clicked, this, [=](const QModelIndex &index) {
-        if (!model->isDir(index)) {
-            emit fileClicked(model->filePath(index));
+        if (!proxy->isDir(index)) {
+            emit fileClicked(proxy->filePath(index));
         }
     });
 
@@ -165,7 +175,9 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(const QString &initialPath, QWidget
         if (!index.isValid() || QPersistentModelIndex(index) != pendingTooltipIndex) {
             return;
         }
-        const QString text = model->data(index, Qt::ToolTipRole).toString();
+        // Route through the view's model (the proxy) so QAbstractProxyModel
+        // auto-maps to the FsModel's ToolTipRole.
+        const QString text = proxy->data(index, Qt::ToolTipRole).toString();
         if (text.isEmpty()) {
             return;
         }
@@ -232,8 +244,9 @@ void FolderAsWorkspaceDock::wireTreeContextMenu()
         const QModelIndex index = ui->treeView->indexAt(pos);
         if (!index.isValid()) return;
 
-        const QString absPath = model->filePath(index);
-        const bool isDir = model->isDir(index);
+        // indexAt returns a proxy index — map through the proxy helpers.
+        const QString absPath = proxy->filePath(index);
+        const bool isDir = proxy->isDir(index);
 
         auto *menu = new QMenu(this);
         menu->setAttribute(Qt::WA_DeleteOnClose);
@@ -271,10 +284,13 @@ void FolderAsWorkspaceDock::maybeScheduleGitTabForDecoration()
     }, Qt::QueuedConnection);
 }
 
-void FolderAsWorkspaceDock::setRootPath(const QString dir)
+void FolderAsWorkspaceDock::setRootPath(const QString &dir)
 {
     model->setRootPath(dir);
-    ui->treeView->setRootIndex(model->index(dir));
+    // Point the proxy at the new root. The view's root index stays
+    // QModelIndex() so the workspace dir shows as the single top node — we do
+    // NOT call setRootIndex(model->index(dir)) (that would hide the root).
+    proxy->setRootSourcePath(dir);
 
     if (gitTab) {
         gitTab->setWorkspaceRoot(dir);
@@ -328,8 +344,9 @@ bool FolderAsWorkspaceDock::eventFilter(QObject *watched, QEvent *event)
 
             if (!QToolTip::isVisible() && !tooltipTimer->isActive()) {
                 // No tooltip in flight — Qt has already waited the standard delay,
-                // so show the first one immediately.
-                const QString text = model->data(index, Qt::ToolTipRole).toString();
+                // so show the first one immediately. Route through the proxy (the
+                // view's model) so it auto-maps to the FsModel's ToolTipRole.
+                const QString text = proxy->data(index, Qt::ToolTipRole).toString();
                 if (!text.isEmpty()) {
                     QToolTip::showText(helpEvent->globalPos(), text, ui->treeView->viewport(),
                                        ui->treeView->visualRect(index));
@@ -714,11 +731,15 @@ void FolderAsWorkspaceDock::revealAndSelectPath(const QString &absolutePath)
     int deepestExpandedIdx = -1;
     for (int i = 0; i < ancestorsDesc.size(); ++i) {
         const QString &dir = ancestorsDesc[i];
-        if (dir.compare(root, cs) == 0) continue; // root is the view's rootIndex, not a row
-        const QModelIndex idx = model->index(dir);
-        if (!idx.isValid() || !model->isDir(idx)) break;
+        // The root is now a real top node (PR), not the view's rootIndex, so it
+        // is expanded like any ancestor. model->index(dir) is a SOURCE index;
+        // map it to the proxy before the view call.
+        const QModelIndex srcIdx = model->index(dir);
+        if (!srcIdx.isValid() || !model->isDir(srcIdx)) break;
+        const QModelIndex proxyIdx = proxy->mapFromSource(srcIdx);
+        if (!proxyIdx.isValid()) break;
         m_programmaticToggle = true;
-        ui->treeView->setExpanded(idx, true);
+        ui->treeView->setExpanded(proxyIdx, true);
         m_programmaticToggle = false;
         deepestExpandedIdx = i;
     }
@@ -727,8 +748,9 @@ void FolderAsWorkspaceDock::revealAndSelectPath(const QString &absolutePath)
     // immediately and return WITHOUT seeding anything. This is the steady-state
     // path for repeated reveals of an already-navigated subtree, so
     // m_pendingExpansion stays empty across consecutive reveals (no accumulation).
-    const QModelIndex leafIdx = model->index(cleaned);
-    if (leafIdx.isValid()) {
+    const QModelIndex leafSrc = model->index(cleaned);
+    if (leafSrc.isValid()) {
+        const QModelIndex leafIdx = proxy->mapFromSource(leafSrc);
         // Cancel any still-pending select from an earlier reveal/restore whose
         // parent hasn't loaded yet — this newer explicit reveal must win, and a
         // stale pendingCurrentItem would otherwise steal the selection back when
@@ -791,6 +813,27 @@ void FolderAsWorkspaceDock::applySavedTreeState(const WorkspaceStateSnapshot &sn
         m_pendingExpansion.insert(QDir::cleanPath(parent), cleaned);
     }
 
+    // Root-node (PR) restore decision (see design.md D8). The root is one more
+    // absolute path in expandedFolders — no schema change. A default-constructed
+    // snapshot (empty rootPath) is the first-run / no-saved-state case ⇒ expand
+    // by default. A real saved snapshot that OMITS the root path means the user
+    // collapsed it last session ⇒ restore collapsed. The root cascade can't run
+    // through m_pendingExpansion (its parent dir is outside the tree), so this is
+    // applied directly in onDirectoryLoaded(root).
+    m_rootExpandApplied = false;
+    if (snapshot.rootPath.isEmpty()) {
+        m_rootShouldExpand = true;
+    } else {
+        const QString cleanedRoot = QDir::cleanPath(snapshot.rootPath);
+        m_rootShouldExpand = false;
+        for (const QString &p : snapshot.expandedFolders) {
+            if (QDir::cleanPath(p) == cleanedRoot) {
+                m_rootShouldExpand = true;
+                break;
+            }
+        }
+    }
+
     // Defer Git tab construction to the next event-loop tick so the GitController
     // subprocess spawn doesn't extend window->show() latency. From the user's
     // perspective the tab header is already at index=Git when the window paints;
@@ -832,30 +875,36 @@ WorkspaceStateSnapshot FolderAsWorkspaceDock::captureState() const
     if (auto *sel = ui->treeView->selectionModel(); sel) {
         const QModelIndex curr = sel->currentIndex();
         if (curr.isValid()) {
-            s.currentItemPath = QDir::cleanPath(model->filePath(curr));
+            // currentIndex() is a proxy index — read the path through the proxy.
+            s.currentItemPath = QDir::cleanPath(proxy->filePath(curr));
         }
     }
 
     // Walk the tree depth-first collecting expanded directory paths. Cost is
     // O(visible expanded rows); cheap because only loaded rows can be expanded.
-    const QString root = s.rootPath;
-    const QModelIndex rootIdx = model->index(root);
-    if (rootIdx.isValid()) {
+    // The walk runs in PROXY coordinates now that the view binds to the proxy.
+    const QModelIndex pr = proxy->index(0, 0, QModelIndex());
+    if (pr.isValid()) {
+        // The root is a real node now (PR), so it is itself expandable/capturable.
+        // Persist it as one more absolute path in expandedFolders (no schema
+        // change) iff the user has it expanded.
+        if (ui->treeView->isExpanded(pr)) {
+            s.expandedFolders << QDir::cleanPath(rootPath());
+        }
         QList<QModelIndex> stack;
         stack.reserve(64);
-        // Seed with direct children of root (root itself is the view's rootIndex,
-        // not part of the tree, so it's neither "expanded" nor capturable).
-        for (int r = 0, n = model->rowCount(rootIdx); r < n; ++r) {
-            stack.append(model->index(r, 0, rootIdx));
+        // Seed with PR's direct children (PR itself handled just above).
+        for (int r = 0, n = proxy->rowCount(pr); r < n; ++r) {
+            stack.append(proxy->index(r, 0, pr));
         }
         while (!stack.isEmpty()) {
             const QModelIndex idx = stack.takeLast();
-            if (!idx.isValid() || !model->isDir(idx)) continue;
+            if (!idx.isValid() || !proxy->isDir(idx)) continue;
             if (!ui->treeView->isExpanded(idx)) continue;
-            s.expandedFolders << QDir::cleanPath(model->filePath(idx));
-            const int n = model->rowCount(idx);
+            s.expandedFolders << QDir::cleanPath(proxy->filePath(idx));
+            const int n = proxy->rowCount(idx);
             for (int r = 0; r < n; ++r) {
-                stack.append(model->index(r, 0, idx));
+                stack.append(proxy->index(r, 0, idx));
             }
         }
     }
@@ -877,6 +926,30 @@ bool FolderAsWorkspaceDock::ancestorVetoed(const QString &cleanedChild) const
 
 void FolderAsWorkspaceDock::onDirectoryLoaded(const QString &loadedPath)
 {
+    // Root-node (PR) default-expand / restore — one-shot, fires on the root's
+    // own directoryLoaded. The root's parent dir is outside the tree, so the
+    // m_pendingExpansion cascade can't reach it; drive it directly here. The
+    // cheap !m_rootExpandApplied bool keeps steady-state navigation O(1) once
+    // the root has been handled.
+    if (!m_rootExpandApplied) {
+        const QString cleanRoot = QDir::cleanPath(rootPath());
+        if (!cleanRoot.isEmpty() && QDir::cleanPath(loadedPath) == cleanRoot) {
+            m_rootExpandApplied = true;
+            if (m_rootShouldExpand) {
+                const QModelIndex pr = proxy->index(0, 0, QModelIndex());
+                if (pr.isValid()) {
+                    // m_programmaticToggle so the resulting expanded() emission
+                    // doesn't dirty state. Live-session collapses of the root are
+                    // handled by the normal onTreeCollapsed/m_userVetoed path now
+                    // that PR is a real node.
+                    m_programmaticToggle = true;
+                    ui->treeView->setExpanded(pr, true);
+                    m_programmaticToggle = false;
+                }
+            }
+        }
+    }
+
     if (m_pendingExpansion.isEmpty() && !property("pendingCurrentItem").isValid()) {
         return;  // O(1) short-circuit covers steady-state navigation
     }
@@ -893,8 +966,10 @@ void FolderAsWorkspaceDock::onDirectoryLoaded(const QString &loadedPath)
             // Ancestor veto: any user-collapsed ancestor wipes the entire subtree.
             if (ancestorVetoed(child)) continue;
 
-            const QModelIndex idx = model->index(child);
-            if (!idx.isValid() || !model->isDir(idx)) continue;  // stale path / now-file
+            const QModelIndex srcIdx = model->index(child);
+            if (!srcIdx.isValid() || !model->isDir(srcIdx)) continue;  // stale path / now-file
+            const QModelIndex idx = proxy->mapFromSource(srcIdx);
+            if (!idx.isValid()) continue;
 
             m_programmaticToggle = true;
             ui->treeView->setExpanded(idx, true);
@@ -910,8 +985,9 @@ void FolderAsWorkspaceDock::onDirectoryLoaded(const QString &loadedPath)
     if (pendingItemVar.isValid()) {
         const QString pendingItem = pendingItemVar.toString();
         if (QFileInfo(pendingItem).absolutePath() == key) {
-            const QModelIndex itemIdx = model->index(pendingItem);
-            if (itemIdx.isValid()) {
+            const QModelIndex itemSrc = model->index(pendingItem);
+            if (itemSrc.isValid()) {
+                const QModelIndex itemIdx = proxy->mapFromSource(itemSrc);
                 m_programmaticToggle = true;
                 ui->treeView->setCurrentIndex(itemIdx);
                 ui->treeView->scrollTo(itemIdx, QAbstractItemView::PositionAtCenter);
@@ -927,7 +1003,8 @@ void FolderAsWorkspaceDock::onTreeExpanded(const QModelIndex &index)
     if (m_programmaticToggle) return;
     // User manually expanded — drop any prior veto on this path so future
     // restore passes don't fight the user, then notify host to flush state.
-    const QString p = QDir::cleanPath(model->filePath(index));
+    // `index` is a proxy index — read the path through the proxy helper.
+    const QString p = QDir::cleanPath(proxy->filePath(index));
     m_userVetoed.remove(p);
     emit stateDirty();
 }
@@ -935,7 +1012,7 @@ void FolderAsWorkspaceDock::onTreeExpanded(const QModelIndex &index)
 void FolderAsWorkspaceDock::onTreeCollapsed(const QModelIndex &index)
 {
     if (m_programmaticToggle) return;
-    const QString p = QDir::cleanPath(model->filePath(index));
+    const QString p = QDir::cleanPath(proxy->filePath(index));
     m_userVetoed.insert(p);
     // Drop any still-pending expansion entries under this path so they don't
     // re-expand a moment later when their parent finishes loading.

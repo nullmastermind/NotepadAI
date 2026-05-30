@@ -35,6 +35,7 @@ class FolderAsWorkspaceDock;
 }
 
 class FolderAsWorkspaceFsModel;
+class FolderAsWorkspaceProxyModel;
 class QMenu;
 class QTimer;
 class GitTabWidget;
@@ -62,9 +63,9 @@ class FolderAsWorkspaceDock : public QDockWidget
 public:
     explicit FolderAsWorkspaceDock(QWidget *parent = nullptr);
     FolderAsWorkspaceDock(const QString &initialPath, QWidget *parent);
-    ~FolderAsWorkspaceDock();
+    ~FolderAsWorkspaceDock() override;
 
-    void setRootPath(const QString dir);
+    void setRootPath(const QString &dir);
     QString rootPath() const;
 
     void setGitOperationManager(GitOperationManager *mgr);
@@ -165,6 +166,10 @@ private:
     Ui::FolderAsWorkspaceDock *ui;
 
     FolderAsWorkspaceFsModel *model;
+    // Synthetic-root proxy that presents the workspace dir as the single top
+    // node. The view binds to this; `model` is its source. Per-dock, parented
+    // to the dock. See FolderAsWorkspaceProxyModel.h for the invariants.
+    FolderAsWorkspaceProxyModel *proxy;
     GitTabWidget *gitTab = nullptr;
     GitDiffViewController *gitDiffViewController = nullptr;
     GitCommitView         *gitCommitView = nullptr;
@@ -203,6 +208,17 @@ private:
     // synchronously via direct-connect; the slots check this flag to skip
     // marking dirty / vetoing for our own programmatic toggles.
     bool m_programmaticToggle = false;
+
+    // Root-node (PR) default-expand / restore state. The root is now a real top
+    // node, but its parent dir is outside the tree so the m_pendingExpansion
+    // cascade can't drive it — it is expanded directly on the root's first
+    // directoryLoaded. m_rootShouldExpand defaults true (first-run / no saved
+    // state, incl. the 2-arg ctor path that never calls applySavedTreeState);
+    // applySavedTreeState lowers it to false when a saved snapshot omitted the
+    // root path (the user had collapsed it last session). m_rootExpandApplied
+    // makes the directoryLoaded handling a one-shot.
+    bool m_rootShouldExpand = true;
+    bool m_rootExpandApplied = false;
 
     // True between showGitDiffPreview() and the matching gitDiffPreviewRendered/
     // Failed signal — the git diff process is async, so a double-click that

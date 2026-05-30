@@ -88,15 +88,28 @@ void AiAgentDock::wireConnectionSignals()
         connect(m_view, &AcpSessionView::sendWithGoalRequested,
                 this, &AiAgentDock::sendWithGoal,
                 Qt::UniqueConnection);
+        // NOTE: both of these MUST target a member-function slot, not a lambda.
+        // Qt::UniqueConnection silently refuses functor/lambda slots
+        // (QObject::connectImpl returns an empty Connection for them), so a
+        // lambda here would never actually be wired up and the goal would keep
+        // running. Route the goal-row Stop button and the composer Cancel
+        // button into the same member slot.
         connect(m_view, &AcpSessionView::goalStopRequested,
-                this, [this]() {
-            if (m_goalAgent && m_goalAgent->status() == GoalAgent::Active) {
-                m_goalAgent->stop();
-            }
-        }, Qt::UniqueConnection);
+                this, &AiAgentDock::stopGoalAgentIfActive,
+                Qt::UniqueConnection);
+        connect(m_view, &AcpSessionView::cancelRequested,
+                this, &AiAgentDock::stopGoalAgentIfActive,
+                Qt::UniqueConnection);
         connect(m_view, &AcpSessionView::inputFocused,
                 this, &AiAgentDock::inputFocused,
                 Qt::UniqueConnection);
+    }
+}
+
+void AiAgentDock::stopGoalAgentIfActive()
+{
+    if (m_goalAgent && m_goalAgent->status() == GoalAgent::Active) {
+        m_goalAgent->stop();
     }
 }
 

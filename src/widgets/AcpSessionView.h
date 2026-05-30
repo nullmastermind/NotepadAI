@@ -98,6 +98,11 @@ signals:
     void restartSessionRequested();
     void sendWithGoalRequested();
     void goalStopRequested();
+    // Emitted when the user clicks Cancel on the composer. The view already
+    // cancels the in-flight ACP prompt itself (onCancelClicked); this lets the
+    // owning dock also stop any concurrently-running GoalAgent so the two are
+    // torn down together.
+    void cancelRequested();
     void inputFocused();
 
 private slots:

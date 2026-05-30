@@ -44,6 +44,12 @@ public:
     void setRepo(const QString &toplevel);
     void clear();
 
+    // Forward the set of gitignored top-level paths to the recursive tree
+    // watcher so working-tree churn confined to ignored dirs (build output,
+    // node_modules, …) is dropped before it can trigger a status refresh.
+    // No-op on non-Windows, where the working tree isn't watched recursively.
+    void setIgnoredPrefixes(const QStringList &prefixes);
+
 signals:
     void headChanged();
     void indexChanged();

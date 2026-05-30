@@ -153,6 +153,25 @@ void GitController::enqueueFullRefresh()
     if (m_currentRepo.isEmpty()) return;
     setState(State::Refreshing);
 
+    // Enqueue the ignored-dirs probe FIRST so the recursive tree watcher learns
+    // which top-level dirs to exclude (build/, node_modules/, …) as early as
+    // possible. Until this lands, the watcher arms recursive watches on every
+    // top-level dir — including ignored ones — so a refresh that coincides with
+    // active ignored-dir churn (npm install) would otherwise watch it for the
+    // whole startup window. `--directory` collapses a fully-ignored dir to a
+    // single entry and does NOT descend, so this stays bounded/cheap even with
+    // a huge build tree. Best-effort: a failure leaves the prior filter in
+    // place (or unfiltered).
+    Op ign;
+    ign.kind = OpKind::IgnoredDirs;
+    ign.argv = { QStringLiteral("-c"), QStringLiteral("core.quotepath=false"),
+                 QStringLiteral("-C"), m_currentRepo,
+                 QStringLiteral("ls-files"), QStringLiteral("--others"),
+                 QStringLiteral("--ignored"), QStringLiteral("--exclude-standard"),
+                 QStringLiteral("--directory"), QStringLiteral("-z") };
+    ign.timeoutMs = kTimeoutShort * 2;
+    enqueue(ign);
+
     Op hsym;
     hsym.kind = OpKind::HeadSym;
     hsym.argv = { QStringLiteral("-C"), m_currentRepo,
@@ -560,6 +579,7 @@ void GitController::runNext()
         && m_current.kind != OpKind::Refs
         && m_current.kind != OpKind::Remotes
         && m_current.kind != OpKind::Status
+        && m_current.kind != OpKind::IgnoredDirs
         && m_current.kind != OpKind::Toplevel
         && m_current.kind != OpKind::SubmodulesList)
     {
@@ -681,6 +701,26 @@ void GitController::handleStatusDone(const QByteArray &out)
     emit statusUpdated();
     if (changed) emit aheadBehindChanged(m_ahead, m_behind, m_hasUpstream);
     enqueueNumstatRefresh();
+}
+
+void GitController::handleIgnoredDirsDone(const QByteArray &out)
+{
+    // `git ls-files --others --ignored --directory -z` → NUL-separated,
+    // repo-relative, '/'-separated paths; directories carry a trailing slash.
+    // We forward them verbatim; RecursiveTreeWatcher normalises for matching.
+    // Cap the count so a pathological repo (thousands of distinct ignored
+    // top-level entries) can't turn the hot-path prefix scan into an O(n)
+    // cost on every change batch — the common case is a handful of dirs.
+    constexpr int kMaxPrefixes = 512;
+    QStringList prefixes;
+    const QList<QByteArray> parts = out.split('\0');
+    prefixes.reserve(qMin(parts.size(), kMaxPrefixes));
+    for (const QByteArray &p : parts) {
+        if (p.isEmpty()) continue;
+        prefixes.append(QString::fromUtf8(p));
+        if (prefixes.size() >= kMaxPrefixes) break;
+    }
+    m_watcher->setIgnoredPrefixes(prefixes);
 }
 
 void GitController::enqueueNumstatRefresh()
@@ -888,7 +928,8 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
         // Numstat ops are best-effort — a failure (e.g. unborn HEAD edge cases,
         // missing object) shouldn't tip the controller into Error or block UI.
         if (kind == OpKind::NumstatStaged || kind == OpKind::NumstatUnstaged
-            || kind == OpKind::SubmoduleNumstat || kind == OpKind::ConfigTracking) {
+            || kind == OpKind::SubmoduleNumstat || kind == OpKind::ConfigTracking
+            || kind == OpKind::IgnoredDirs) {
             popAndAdvance();
             return;
         }
@@ -928,6 +969,7 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
         case OpKind::Refs:            handleRefsDone(out); break;
         case OpKind::Remotes:         handleRemotesDone(out); break;
         case OpKind::Status:          handleStatusDone(out); break;
+        case OpKind::IgnoredDirs:     handleIgnoredDirsDone(out); break;
         case OpKind::NumstatStaged:   handleNumstatDone(out, true); break;
         case OpKind::NumstatUnstaged: handleNumstatDone(out, false); break;
         case OpKind::SubmoduleNumstat:

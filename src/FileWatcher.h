@@ -29,6 +29,13 @@ signals:
 private slots:
     void onFileChanged(const QString &path);
     void onDebounceTimeout();
+    // Re-arm the QFileSystemWatcher after the editor saves / is renamed. These
+    // MUST be member-function slots, not lambdas: they are connected with
+    // Qt::UniqueConnection, and QObject::connect silently refuses to create a
+    // unique connection whose slot is a lambda/functor (it requires a pointer
+    // to member function). The originating editor is recovered via sender().
+    void onEditorSaved();
+    void onEditorRenamed();
 
 private:
     static constexpr int kDebounceMs = 150;

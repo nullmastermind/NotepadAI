@@ -57,6 +57,10 @@ void GitWatcher::clear()
     if (!m_fs->directories().isEmpty()) m_fs->removePaths(m_fs->directories());
 #ifdef Q_OS_WIN
     m_treeWatcher->stop();
+    // Drop the prior repo's gitignore prefixes — they are repo-relative and
+    // would be misapplied against a different root until the next refresh
+    // repopulates them. Unfiltered for that brief window is the safe default.
+    m_treeWatcher->setIgnoredPrefixes(QStringList());
 #endif
     m_repoRoot.clear();
     m_gitDir.clear();
@@ -91,6 +95,15 @@ void GitWatcher::setRepo(const QString &toplevel)
     if (m_gitDir.isEmpty()) m_gitDir = dotGitEntry; // best-effort
 
     rewatch();
+}
+
+void GitWatcher::setIgnoredPrefixes(const QStringList &prefixes)
+{
+#ifdef Q_OS_WIN
+    if (m_treeWatcher) m_treeWatcher->setIgnoredPrefixes(prefixes);
+#else
+    Q_UNUSED(prefixes);
+#endif
 }
 
 QStringList GitWatcher::currentWatchedFiles() const

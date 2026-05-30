@@ -254,6 +254,8 @@ qt_add_executable(NotepadAI
 	docks/FolderAsWorkspaceDock.ui
 	docks/FolderAsWorkspaceFsModel.cpp
 	docks/FolderAsWorkspaceFsModel.h
+	docks/FolderAsWorkspaceProxyModel.cpp
+	docks/FolderAsWorkspaceProxyModel.h
 
 	git/BranchPickerPopup.cpp
 	git/BranchPickerPopup.h
@@ -343,6 +345,7 @@ qt_add_executable(NotepadAI
 	git/GitWatcher.h
 	git/RecursiveTreeWatcher.cpp
 	git/RecursiveTreeWatcher.h
+	git/RecursiveTreeWatcherLogic.h
 	git/ConflictEntry.h
 	git/GitOperationManager.cpp
 	git/GitOperationManager.h

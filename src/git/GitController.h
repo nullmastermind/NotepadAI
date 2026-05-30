@@ -147,6 +147,7 @@ private:
     enum class OpKind : std::uint8_t {
         Discover, Toplevel, SubmodulesList,
         HeadSym, HeadSha, Refs, Remotes, Status,
+        IgnoredDirs,
         NumstatStaged, NumstatUnstaged,
         SubmoduleNumstat,
         DiffPath,
@@ -220,6 +221,7 @@ private:
     void handleRefsDone(const QByteArray &out);
     void handleRemotesDone(const QByteArray &out);
     void handleStatusDone(const QByteArray &out);
+    void handleIgnoredDirsDone(const QByteArray &out);
     void handleNumstatDone(const QByteArray &out, bool stagedSide);
     void enqueueNumstatRefresh();
     // Submodule aggregate stats — one `git -C <subAbs> diff --numstat -z

@@ -1393,6 +1393,10 @@ void AcpSessionView::onSendClicked()
 void AcpSessionView::onCancelClicked()
 {
     if (m_connection) m_connection->cancelPrompt();
+    // Let the owning dock stop any GoalAgent running on this session. Cancel
+    // means "stop everything", not just the current ACP turn — otherwise the
+    // goal supervisor would simply re-prompt the target after the cancel.
+    emit cancelRequested();
 }
 
 void AcpSessionView::onAttachClicked()

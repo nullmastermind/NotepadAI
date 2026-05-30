@@ -29,30 +29,40 @@ void FileWatcher::watchEditor(ScintillaNext *editor)
     m_pathToEditor.insert(path, editor);
     m_watcher->addPath(path);
 
-    connect(editor, &ScintillaNext::saved, this, [this, editor]() {
-        if (!editor->isFile()) return;
-        const QString p = editor->getFileInfo().canonicalFilePath();
-        if (p.isEmpty()) return;
-        if (!m_watcher->files().contains(p))
-            m_watcher->addPath(p);
-    }, Qt::UniqueConnection);
+    connect(editor, &ScintillaNext::saved,
+            this, &FileWatcher::onEditorSaved, Qt::UniqueConnection);
+    connect(editor, &ScintillaNext::renamed,
+            this, &FileWatcher::onEditorRenamed, Qt::UniqueConnection);
+}
 
-    connect(editor, &ScintillaNext::renamed, this, [this, editor]() {
-        const auto keys = m_pathToEditor.keys(editor);
-        for (const QString &oldPath : keys) {
-            m_pathToEditor.remove(oldPath);
-            m_pendingPaths.remove(oldPath);
-            if (m_watcher->files().contains(oldPath))
-                m_watcher->removePath(oldPath);
+void FileWatcher::onEditorSaved()
+{
+    auto *editor = qobject_cast<ScintillaNext *>(sender());
+    if (!editor || !editor->isFile()) return;
+    const QString p = editor->getFileInfo().canonicalFilePath();
+    if (p.isEmpty()) return;
+    if (!m_watcher->files().contains(p))
+        m_watcher->addPath(p);
+}
+
+void FileWatcher::onEditorRenamed()
+{
+    auto *editor = qobject_cast<ScintillaNext *>(sender());
+    if (!editor) return;
+    const auto keys = m_pathToEditor.keys(editor);
+    for (const QString &oldPath : keys) {
+        m_pathToEditor.remove(oldPath);
+        m_pendingPaths.remove(oldPath);
+        if (m_watcher->files().contains(oldPath))
+            m_watcher->removePath(oldPath);
+    }
+    if (editor->isFile()) {
+        const QString newPath = editor->getFileInfo().canonicalFilePath();
+        if (!newPath.isEmpty()) {
+            m_pathToEditor.insert(newPath, editor);
+            m_watcher->addPath(newPath);
         }
-        if (editor->isFile()) {
-            const QString newPath = editor->getFileInfo().canonicalFilePath();
-            if (!newPath.isEmpty()) {
-                m_pathToEditor.insert(newPath, editor);
-                m_watcher->addPath(newPath);
-            }
-        }
-    }, Qt::UniqueConnection);
+    }
 }
 
 void FileWatcher::unwatchEditor(ScintillaNext *editor)
