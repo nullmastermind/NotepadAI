@@ -34,6 +34,9 @@ public:
     void closePreview(ScintillaNext *sourceEditor);
     PreviewContentWidget *previewForEditor(ScintillaNext *sourceEditor) const;
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 signals:
     void previewOpened(PreviewContentWidget *preview);
     void previewClosed(PreviewContentWidget *preview);
@@ -51,11 +54,13 @@ private:
     void performRender(ScintillaNext *sourceEditor);
     void syncScroll(ScintillaNext *sourceEditor);
     int debounceMs(int docLength) const;
+    void pinTransientPreviewTab();
 
     NotepadNextApplication *m_app;
     DockedEditor *m_dockedEditor;
     QHash<QString, TypeRegistration> m_registry;
     QHash<ScintillaNext *, PreviewEntry> m_previews;
+    QHash<QString, QPointer<ads::CDockWidget>> m_previewsByPath;
     QPointer<ads::CDockWidget> m_transientPreviewTab;
 };
 

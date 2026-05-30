@@ -14,6 +14,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFutureWatcher>
+#include <QEvent>
 #include <QPainter>
 #include <QtConcurrent>
 
@@ -249,6 +250,25 @@ void PreviewTabManager::openPreviewFromFile(const QString &filePath)
     QFileInfo fi(filePath);
     if (fi.size() > 10 * 1024 * 1024) return;
 
+    // Normalized key for the path→dock registry. Use absoluteFilePath (not
+    // canonicalFilePath) so the key is well-defined even before the file is
+    // resolved through symlinks, matching what the source path carries.
+    const QString pathKey = fi.absoluteFilePath();
+
+    // Already previewing this exact file (transient or pinned): focus it
+    // instead of creating a duplicate tab. Mirrors openOrFocusPreview().
+    auto existing = m_previewsByPath.find(pathKey);
+    if (existing != m_previewsByPath.end()) {
+        if (existing.value()) {
+            existing.value()->raise();
+            existing.value()->setAsCurrentTab();
+            existing.value()->widget()->setFocus();
+            return;
+        }
+        // Dock died without our destroyed-handler firing yet; drop the stale key.
+        m_previewsByPath.erase(existing);
+    }
+
     QFile f(filePath);
     if (!f.open(QIODevice::ReadOnly)) return;
     QByteArray raw = f.readAll();
@@ -293,11 +313,49 @@ void PreviewTabManager::openPreviewFromFile(const QString &filePath)
     dockWidget->tabWidget()->setFont(tabFont);
 
     m_transientPreviewTab = dockWidget;
+    m_previewsByPath.insert(pathKey, dockWidget);
 
-    connect(preview, &QObject::destroyed, this, [this, dockWidget]() {
+    // Double-click the tab to promote it from transient to a permanent tab,
+    // mirroring DockedEditor's preview-editor pin behavior.
+    dockWidget->tabWidget()->installEventFilter(this);
+
+    // Clean up registry/transient-slot when this specific dock is destroyed
+    // (user closes the tab, or it's replaced by the next transient preview).
+    // The connection is scoped to dockWidget as context object, so it is torn
+    // down with the dock — preventing dead lambdas from piling up across opens.
+    connect(dockWidget, &QObject::destroyed, dockWidget, [this, pathKey, dockWidget]() {
         if (m_transientPreviewTab == dockWidget)
             m_transientPreviewTab = nullptr;
+        auto it = m_previewsByPath.find(pathKey);
+        if (it != m_previewsByPath.end() && it.value() == dockWidget)
+            m_previewsByPath.erase(it);
     });
 
     emit previewOpened(preview);
+}
+
+void PreviewTabManager::pinTransientPreviewTab()
+{
+    if (!m_transientPreviewTab) return;
+
+    auto *tab = m_transientPreviewTab->tabWidget();
+    QFont f = tab->font();
+    f.setItalic(false);
+    tab->setFont(f);
+    tab->removeEventFilter(this);
+
+    // No longer transient: it survives the next preview instead of being replaced.
+    m_transientPreviewTab = nullptr;
+}
+
+bool PreviewTabManager::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::MouseButtonDblClick && m_transientPreviewTab) {
+        auto *tab = qobject_cast<ads::CDockWidgetTab *>(watched);
+        if (tab && tab->dockWidget() == m_transientPreviewTab) {
+            pinTransientPreviewTab();
+            return true;
+        }
+    }
+    return QObject::eventFilter(watched, event);
 }
