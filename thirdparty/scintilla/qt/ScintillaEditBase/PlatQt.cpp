@@ -48,6 +48,22 @@ namespace Scintilla::Internal {
 
 //----------------------------------------------------------------------
 
+// Local deviation from upstream Scintilla: a process-wide toggle for glyph
+// hinting. Default true (sharp). Plain bool, written once from the UI thread
+// (PreferencesDialog -> EditorManager) and read on the UI thread when fonts are
+// realised, so no atomics are needed. Re-check when merging upstream Scintilla.
+namespace { bool g_fontHintingEnabled = true; }
+
+void SetEditorFontHintingEnabled(bool enabled) noexcept
+{
+	g_fontHintingEnabled = enabled;
+}
+
+bool EditorFontHintingEnabled() noexcept
+{
+	return g_fontHintingEnabled;
+}
+
 // Convert from a Scintilla characterSet value to a Qt codec name.
 const char *CharacterSetID(CharacterSet characterSet)
 {
@@ -147,6 +163,18 @@ public:
 	explicit FontAndCharacterSet(const FontParameters &fp) : characterSet(fp.characterSet) {
 		pfont = std::make_unique<QFont>();
 		pfont->setStyleStrategy(ChooseStrategy(fp.extraFontFlag));
+		// Local deviation from upstream Scintilla: snap glyph stems to the pixel
+		// grid. Without hinting, thin/light fonts (e.g. Lilex) render blurry under
+		// Qt's grayscale antialiasing because vertical stems land between pixels.
+		// PreferFullHinting trades a little shape fidelity for sharpness, which is
+		// the right priority for an on-screen code editor; PreferNoHinting keeps
+		// the typeface's exact outline for users who prefer it. Honored by the
+		// FreeType engine (Linux) and the GDI/DirectWrite engines on Windows; a
+		// no-op on the macOS Core Text engine. Toggle lives in g_fontHintingEnabled.
+		// Re-check when merging upstream Scintilla.
+		pfont->setHintingPreference(g_fontHintingEnabled
+			? QFont::PreferFullHinting
+			: QFont::PreferNoHinting);
 		pfont->setFamily(QString::fromUtf8(fp.faceName));
 		pfont->setPointSizeF(fp.size);
 		pfont->setBold(static_cast<int>(fp.weight) > 500);

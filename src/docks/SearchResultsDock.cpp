@@ -69,11 +69,17 @@ SearchResultsDock::SearchResultsDock(QWidget *parent) :
     ApplicationSettings *settings = qobject_cast<NotepadNextApplication*>(qApp)->getSettings();
     auto updateTreeWidgetFont = [=]() {
         QFont f(settings->fontName(), settings->fontSize());
+        // Match the editor's glyph-hinting policy so thin fonts (e.g. Lilex) stay
+        // sharp in result rows. See EditorManager / PlatQt for the Scintilla side.
+        f.setHintingPreference(settings->fontHinting()
+            ? QFont::PreferFullHinting
+            : QFont::PreferNoHinting);
         ui->treeWidget->setFont(f);
         ui->treeWidget->resizeColumnToContents(0);
     };
     connect(settings, &ApplicationSettings::fontNameChanged, this, updateTreeWidgetFont);
     connect(settings, &ApplicationSettings::fontSizeChanged, this, updateTreeWidgetFont);
+    connect(settings, &ApplicationSettings::fontHintingChanged, this, updateTreeWidgetFont);
     updateTreeWidgetFont();
 }
 

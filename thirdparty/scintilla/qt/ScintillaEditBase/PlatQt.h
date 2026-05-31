@@ -36,6 +36,13 @@ namespace Scintilla::Internal {
 
 const char *CharacterSetID(Scintilla::CharacterSet characterSet);
 
+// Local deviation from upstream Scintilla: process-wide glyph-hinting toggle.
+// Read when a QFont is realised (FontAndCharacterSet ctor). Setting it does not
+// invalidate already-realised fonts — the caller must force a style refresh
+// (e.g. ScintillaEdit::setFontQuality(fontQuality())) for open editors.
+void SetEditorFontHintingEnabled(bool enabled) noexcept;
+bool EditorFontHintingEnabled() noexcept;
+
 inline QColor QColorFromColourRGBA(ColourRGBA ca)
 {
 	return QColor(ca.GetRed(), ca.GetGreen(), ca.GetBlue(), ca.GetAlpha());

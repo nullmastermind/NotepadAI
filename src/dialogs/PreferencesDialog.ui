@@ -219,6 +219,16 @@
         </widget>
        </item>
        <item>
+        <widget class="QCheckBox" name="checkBoxFontHinting">
+         <property name="toolTip">
+          <string>Snap glyphs to the pixel grid for sharper text. Disable to keep the font's exact outline. Affects all editors.</string>
+         </property>
+         <property name="text">
+          <string>Sharpen fonts (hinting)</string>
+         </property>
+        </widget>
+       </item>
+       <item>
         <widget class="QGroupBox" name="groupBox_2">
          <property name="title">
           <string>Default Directory</string>

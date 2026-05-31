@@ -49,6 +49,11 @@
 #include "TaskRunnerGutter.h"
 #include "TerminalManager.h"
 
+// Glyph-hinting toggle lives in Scintilla's Qt platform layer (vendored). Read
+// when a QFont is realised. Forward-declared rather than including PlatQt.h to
+// avoid pulling Scintilla's internal platform headers into this translation unit.
+namespace Scintilla::Internal { void SetEditorFontHintingEnabled(bool enabled) noexcept; }
+
 
 const int MARK_HIDELINESBEGIN = 23;
 const int MARK_HIDELINESEND = 22;
@@ -64,6 +69,10 @@ namespace { constexpr const char *kLexerFgCacheProp = "nade.lexerFg"; }
 EditorManager::EditorManager(ApplicationSettings *settings, QObject *parent)
     : QObject(parent), settings(settings)
 {
+    // Seed the Scintilla platform-layer hinting flag before any editor (and thus
+    // any QFont) is realised, so the very first paint already honours the setting.
+    Scintilla::Internal::SetEditorFontHintingEnabled(settings->fontHinting());
+
     connect(this, &EditorManager::editorCreated, this, [=](ScintillaNext *editor) {
         connect(editor, &ScintillaNext::closed, this, [=]() {
             emit editorClosed(editor);
@@ -126,6 +135,20 @@ EditorManager::EditorManager(ApplicationSettings *settings, QObject *parent)
             for (int i = 0; i <= STYLE_MAX; ++i) {
                 editor->styleSetSize(i, fontSize);
             }
+        }
+    });
+
+    connect(settings, &ApplicationSettings::fontHintingChanged, this, [=](bool enabled){
+        // Update the process-wide flag, then force Scintilla to re-realise every
+        // font: hinting is baked into the QFont at allocation time, so the new
+        // value only takes effect when the font cache is rebuilt. setFontQuality
+        // with the current value is a semantic no-op that triggers
+        // InvalidateStyleRedraw -> DropGraphics, which discards and recreates all
+        // realised fonts on the next paint. Cheaper than re-issuing styleSetFont
+        // across every style, and correct for all of them at once.
+        Scintilla::Internal::SetEditorFontHintingEnabled(enabled);
+        for (auto &editor : getEditors()) {
+            editor->setFontQuality(editor->fontQuality());
         }
     });
 

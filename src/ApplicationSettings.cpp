@@ -18,7 +18,6 @@
 
 #include "ApplicationSettings.h"
 
-#include <QApplication>
 #include <QFont>
 #include <QFontDatabase>
 #include <QStandardPaths>
@@ -74,8 +73,13 @@ CREATE_SETTING(Editor, ShowEndOfLine, showEndOfLine, bool, false);
 CREATE_SETTING(Editor, ShowWrapSymbol, showWrapSymbol, bool, false);
 CREATE_SETTING(Editor, ShowIndentGuide, showIndentGuide, bool, true);
 CREATE_SETTING(Editor, WordWrap, wordWrap, bool, false)
-CREATE_SETTING(Editor, FontName, fontName, QString, QStringLiteral("Courier New"))
-CREATE_SETTING(Editor, FontSize, fontSize, int, []() { return qApp->font().pointSize() + 2; })
+CREATE_SETTING(Editor, FontName, fontName, QString, QStringLiteral("Consolas"))
+CREATE_SETTING(Editor, FontSize, fontSize, int, 10)
+// Glyph hinting toggle. Default true (sharp): snaps stems to the pixel grid so
+// thin/light fonts (e.g. Lilex) aren't blurred by Qt's grayscale antialiasing.
+// Off preserves the typeface's exact outline. Plumbed into Scintilla's Qt
+// platform layer via Scintilla::Internal::SetEditorFontHintingEnabled.
+CREATE_SETTING(Editor, FontHinting, fontHinting, bool, true)
 CREATE_SETTING(Editor, AdditionalWordChars, additionalWordChars, QString, QStringLiteral(""));
 CREATE_SETTING(Editor, DefaultEOLMode, defaultEOLMode, QString, QStringLiteral(""))
 CREATE_SETTING(Editor, URLHighlighting, urlHighlighting, bool, true)
