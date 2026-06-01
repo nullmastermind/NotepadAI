@@ -32,6 +32,7 @@
 #include "docks/AiAgentDock.h"
 #include "remote/ExecutionContext.h"
 #include "remote/ExecutionContextRegistry.h"
+#include "remote/RemoteExecutionContext.h"
 #include "remote/SshProfile.h"
 
 namespace {

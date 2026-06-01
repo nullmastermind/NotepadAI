@@ -26,6 +26,7 @@
 #include "TerminalWidget.h"
 #include "remote/ExecutionContext.h"
 #include "remote/ExecutionContextRegistry.h"
+#include "remote/RemoteExecutionContext.h"
 #include "remote/SshProfile.h"
 
 #include <QApplication>

@@ -28,6 +28,7 @@
 
 #include "remote/ExecutionContext.h"
 #include "remote/ExecutionContextRegistry.h"
+#include "remote/RemoteExecutionContext.h"
 #include "remote/IFileSystemBackend.h"
 #include "remote/SshProfile.h"
 
@@ -322,7 +323,7 @@ ScintillaNext* SessionManager::loadFileDetails(QSettings &settings)
         }
 
         QPointer<ScintillaNext> guard(editor);
-        connect(editor, &ScintillaNext::loaded, editor,
+        QObject::connect(editor, &ScintillaNext::loaded, editor,
                 [guard, firstVisibleLine, currentPosition, bookMarkedLines]() {
                     if (!guard) return;
                     ScintillaNext *e = guard.data();
@@ -331,7 +332,8 @@ ScintillaNext* SessionManager::loadFileDetails(QSettings &settings)
                     if (!bookMarkedLines.isEmpty()) {
                         if (auto *decorator = e->findChild<BookMarkDecorator *>(
                                 QString(), Qt::FindDirectChildrenOnly)) {
-                            decorator->setBookMarkedLines(bookMarkedLines);
+                            QList<int> lines = bookMarkedLines;
+                            decorator->setBookMarkedLines(lines);
                         }
                     }
                 });

@@ -53,6 +53,8 @@ public:
 
     void manageEditor(ScintillaNext *editor);
 
+    QList<QPointer<ScintillaNext>> getEditors();
+
     // Updates the cached dark/light flag and re-applies editor colors to every
     // managed editor. Called by NotepadNextApplication when the effective theme
     // changes (and once during startup).
@@ -78,7 +80,6 @@ signals:
 private:
     void setupEditor(ScintillaNext *editor);
     void purgeOldEditorPointers();
-    QList<QPointer<ScintillaNext>> getEditors();
     int detectEOLMode(ScintillaNext *editor) const;
 
     // initialSetup=true does the destructive styleClearAll pass (only safe on a
