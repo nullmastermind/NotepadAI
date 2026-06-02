@@ -75,6 +75,7 @@ public:
     using StatCallback = std::function<void(bool ok, const FileStat &stat, const QString &error)>;
     using ReaddirCallback =
         std::function<void(bool ok, const QList<RemoteDirEntry> &entries, const QString &error)>;
+    using MutateCallback = std::function<void(bool ok, const QString &error)>;
 
     explicit RemoteFsBackend(SshConnection *connection, QObject *parent = nullptr);
     ~RemoteFsBackend() override;
@@ -90,6 +91,10 @@ public:
     void writeFileAsync(const QString &path, const QByteArray &data, WriteCallback cb) override;
     void statAsync(const QString &path, StatCallback cb);
     void readdirAsync(const QString &path, ReaddirCallback cb);
+    // Mutating ops — no retry; fail-no-replay.
+    void renameAsync(const QString &oldPath, const QString &newPath, MutateCallback cb);
+    void mkdirAsync(const QString &path, MutateCallback cb);
+    void unlinkAsync(const QString &path, MutateCallback cb);
 
     // D12 read-only auto-retry classifier. Returns true when `error` is a
     // TRANSIENT (connection/session-level) worker failure that an idempotent
@@ -142,6 +147,7 @@ private:
                       qint64 size, qint64 mtimeSecs, const QString &error);
     void onReaddirResult(quint64 reqId, bool ok,
                          const QList<RemoteDirEntry> &entries, const QString &error);
+    void onMutateResult(quint64 reqId, bool ok, const QString &error);
     void onConnectionLost(const QString &reason);
 
     QPointer<SshConnection> m_connection; // not owned (registry owns it)
@@ -153,6 +159,7 @@ private:
     QHash<quint64, WriteCallback> m_writeCallbacks;
     QHash<quint64, StatCallback> m_statCallbacks;
     QHash<quint64, ReaddirCallback> m_readdirCallbacks;
+    QHash<quint64, MutateCallback> m_mutateCallbacks; // rename / mkdir / unlink share one map
 };
 
 } // namespace remote

@@ -60,6 +60,12 @@ RemoteFsBackend::RemoteFsBackend(SshConnection *connection, QObject *parent)
                 this, &RemoteFsBackend::onStatResult);
         connect(m_connection, &SshConnection::sftpReaddirResult,
                 this, &RemoteFsBackend::onReaddirResult);
+        connect(m_connection, &SshConnection::sftpRenameResult,
+                this, &RemoteFsBackend::onMutateResult);
+        connect(m_connection, &SshConnection::sftpMkdirResult,
+                this, &RemoteFsBackend::onMutateResult);
+        connect(m_connection, &SshConnection::sftpUnlinkResult,
+                this, &RemoteFsBackend::onMutateResult);
         connect(m_connection, &SshConnection::connectionLost,
                 this, &RemoteFsBackend::onConnectionLost);
     }
@@ -84,6 +90,10 @@ RemoteFsBackend::~RemoteFsBackend()
         if (it.value()) it.value()(false, QList<RemoteDirEntry>(), reason);
     }
     m_readdirCallbacks.clear();
+    for (auto it = m_mutateCallbacks.begin(); it != m_mutateCallbacks.end(); ++it) {
+        if (it.value()) it.value()(false, reason);
+    }
+    m_mutateCallbacks.clear();
 }
 
 // --- async API ---------------------------------------------------------------
@@ -209,6 +219,40 @@ void RemoteFsBackend::readdirAttempt(const QString &path, ReaddirCallback cb, in
     m_connection->sftpReaddir(reqId, path);
 }
 
+void RemoteFsBackend::renameAsync(const QString &oldPath, const QString &newPath,
+                                   MutateCallback cb)
+{
+    if (!m_connection) {
+        if (cb) cb(false, tr("No SSH connection"));
+        return;
+    }
+    const quint64 reqId = ++m_nextReqId;
+    if (cb) m_mutateCallbacks.insert(reqId, std::move(cb));
+    m_connection->sftpRename(reqId, oldPath, newPath);
+}
+
+void RemoteFsBackend::mkdirAsync(const QString &path, MutateCallback cb)
+{
+    if (!m_connection) {
+        if (cb) cb(false, tr("No SSH connection"));
+        return;
+    }
+    const quint64 reqId = ++m_nextReqId;
+    if (cb) m_mutateCallbacks.insert(reqId, std::move(cb));
+    m_connection->sftpMkdir(reqId, path);
+}
+
+void RemoteFsBackend::unlinkAsync(const QString &path, MutateCallback cb)
+{
+    if (!m_connection) {
+        if (cb) cb(false, tr("No SSH connection"));
+        return;
+    }
+    const quint64 reqId = ++m_nextReqId;
+    if (cb) m_mutateCallbacks.insert(reqId, std::move(cb));
+    m_connection->sftpUnlink(reqId, path);
+}
+
 // --- result handlers (UI thread) ---------------------------------------------
 
 void RemoteFsBackend::onReadResult(quint64 reqId, bool ok, const QByteArray &data,
@@ -266,6 +310,17 @@ void RemoteFsBackend::onReaddirResult(quint64 reqId, bool ok,
     if (cb) cb(ok, entries, error);
 }
 
+void RemoteFsBackend::onMutateResult(quint64 reqId, bool ok, const QString &error)
+{
+    auto it = m_mutateCallbacks.find(reqId);
+    if (it == m_mutateCallbacks.end()) {
+        return;
+    }
+    const MutateCallback cb = std::move(it.value());
+    m_mutateCallbacks.erase(it);
+    if (cb) cb(ok, error);
+}
+
 void RemoteFsBackend::onConnectionLost(const QString &reason)
 {
     const QString msg = tr("SSH connection lost: %1").arg(reason);
@@ -288,6 +343,11 @@ void RemoteFsBackend::onConnectionLost(const QString &reason)
     m_readdirCallbacks.clear();
     for (auto &cb : dirs) {
         if (cb) cb(false, QList<RemoteDirEntry>(), msg);
+    }
+    QHash<quint64, MutateCallback> mutates = std::move(m_mutateCallbacks);
+    m_mutateCallbacks.clear();
+    for (auto &cb : mutates) {
+        if (cb) cb(false, msg);
     }
 }
 

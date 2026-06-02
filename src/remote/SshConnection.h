@@ -100,6 +100,9 @@ public:
     void sftpWrite(quint64 reqId, const QString &path, const QByteArray &data);
     void sftpStat(quint64 reqId, const QString &path);
     void sftpReaddir(quint64 reqId, const QString &path);
+    void sftpRename(quint64 reqId, const QString &oldPath, const QString &newPath);
+    void sftpMkdir(quint64 reqId, const QString &path);
+    void sftpUnlink(quint64 reqId, const QString &path);
 
     // --- exec (D6) -----------------------------------------------------------
     // Posted to the worker (queued). Called by RemoteGitProcessRunner (and the
@@ -159,6 +162,9 @@ signals:
                         qint64 size, qint64 mtimeSecs, const QString &error);
     void sftpReaddirResult(quint64 reqId, bool ok,
                            const QList<remote::RemoteDirEntry> &entries, const QString &error);
+    void sftpRenameResult(quint64 reqId, bool ok, const QString &error);
+    void sftpMkdirResult(quint64 reqId, bool ok, const QString &error);
+    void sftpUnlinkResult(quint64 reqId, bool ok, const QString &error);
 
     // --- exec results (D6) — relayed queued from the worker ------------------
     void execStdout(quint64 reqId, const QByteArray &chunk);

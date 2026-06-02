@@ -179,6 +179,9 @@ public slots:
     void requestSftpWrite(quint64 reqId, const QString &path, const QByteArray &data);
     void requestSftpStat(quint64 reqId, const QString &path);
     void requestSftpReaddir(quint64 reqId, const QString &path);
+    void requestSftpRename(quint64 reqId, const QString &oldPath, const QString &newPath);
+    void requestSftpMkdir(quint64 reqId, const QString &path);
+    void requestSftpUnlink(quint64 reqId, const QString &path);
 
     // --- exec request slots (D6/D8) ------------------------------------------
     // Posted from the UI thread (queued) by SshConnection on behalf of
@@ -231,6 +234,9 @@ signals:
                       qint64 size, qint64 mtimeSecs, const QString &error);
     void sftpReaddirDone(quint64 reqId, bool ok,
                          const QList<remote::RemoteDirEntry> &entries, const QString &error);
+    void sftpRenameDone(quint64 reqId, bool ok, const QString &error);
+    void sftpMkdirDone(quint64 reqId, bool ok, const QString &error);
+    void sftpUnlinkDone(quint64 reqId, bool ok, const QString &error);
 
     // --- exec result signals (D6/D8) -----------------------------------------
     void execStdoutChunk(quint64 reqId, const QByteArray &chunk);
@@ -341,7 +347,7 @@ private:
     // service function. Both are driven from onSocketActivity (after pump). Both
     // count toward the unified cap's 2-SFTP-reserved budget (FIX-2). A large bulk
     // read can never block tree-poll/readdir behind it.
-    enum class SftpKind { Read, Write, Stat, Readdir };
+    enum class SftpKind { Read, Write, Stat, Readdir, Rename, Mkdir, Unlink };
     enum class SftpPhase { NeedOpen, Transfer, NeedClose };
     enum class SftpLane { Bulk, Meta };
 
@@ -351,6 +357,7 @@ private:
         SftpKind   kind = SftpKind::Read;
         SftpPhase  phase = SftpPhase::NeedOpen;
         QString    path;
+        QString    path2;                    // destination path for Rename
         int        handleId = -1;        // file/dir handle once opened
         QByteArray buffer;               // read accumulator / write source
         qint64     writeOffset = 0;      // bytes of `buffer` written so far

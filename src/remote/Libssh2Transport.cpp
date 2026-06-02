@@ -711,6 +711,44 @@ Libssh2Transport::SftpStatResult Libssh2Transport::sftpStat(SftpLane lane, const
     return out;
 }
 
+ISshTransport::Step Libssh2Transport::sftpRename(SftpLane lane,
+                                                  const QString &srcPath,
+                                                  const QString &dstPath)
+{
+    _LIBSSH2_SFTP *sftp = sftpSession(lane);
+    if (!sftp) return Step::Error;
+    const QByteArray src = srcPath.toUtf8();
+    const QByteArray dst = dstPath.toUtf8();
+    const int rc = libssh2_sftp_rename_ex(
+        sftp,
+        src.constData(), static_cast<unsigned int>(src.size()),
+        dst.constData(), static_cast<unsigned int>(dst.size()),
+        LIBSSH2_SFTP_RENAME_OVERWRITE | LIBSSH2_SFTP_RENAME_ATOMIC | LIBSSH2_SFTP_RENAME_NATIVE);
+    return stepFromRc(rc);
+}
+
+ISshTransport::Step Libssh2Transport::sftpMkdir(SftpLane lane, const QString &path)
+{
+    _LIBSSH2_SFTP *sftp = sftpSession(lane);
+    if (!sftp) return Step::Error;
+    const QByteArray p = path.toUtf8();
+    const int rc = libssh2_sftp_mkdir_ex(
+        sftp, p.constData(), static_cast<unsigned int>(p.size()),
+        LIBSSH2_SFTP_S_IRWXU | LIBSSH2_SFTP_S_IRGRP | LIBSSH2_SFTP_S_IXGRP
+            | LIBSSH2_SFTP_S_IROTH | LIBSSH2_SFTP_S_IXOTH); // 0755
+    return stepFromRc(rc);
+}
+
+ISshTransport::Step Libssh2Transport::sftpUnlink(SftpLane lane, const QString &path)
+{
+    _LIBSSH2_SFTP *sftp = sftpSession(lane);
+    if (!sftp) return Step::Error;
+    const QByteArray p = path.toUtf8();
+    const int rc = libssh2_sftp_unlink_ex(
+        sftp, p.constData(), static_cast<unsigned int>(p.size()));
+    return stepFromRc(rc);
+}
+
 int Libssh2Transport::sendKeepalive()
 {
     if (!m_session) return -1;

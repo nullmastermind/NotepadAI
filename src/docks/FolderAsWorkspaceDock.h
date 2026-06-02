@@ -84,6 +84,8 @@ public:
     // (the remote git path is wired in a later batch). `backend` is owned by the
     // workspace's RemoteExecutionContext and must outlive this dock.
     void useRemoteBackend(remote::RemoteFsBackend *backend);
+    // Null for local workspaces; non-null for SSH workspaces after useRemoteBackend.
+    remote::RemoteFsBackend *remoteBackend() const { return m_remoteBackend; }
 
     // --- SSH connection-state surface (D10 / Batch H) -----------------------
     // The banner is an inline, palette-driven, keyboard-accessible row at the top
@@ -241,6 +243,10 @@ private:
     // tree/proxy are torn down. Its directoryChanged drives the remote model's
     // onDirectoryChanged re-list/diff.
     remote::RemoteDirectoryWatcher *m_remoteWatcher = nullptr;
+    // Non-owning pointer to the active remote backend (set in useRemoteBackend,
+    // null for local workspaces). Used by context menu operations to reach the
+    // remote rename/mkdir/unlink API without crossing the SSH seam directly.
+    remote::RemoteFsBackend *m_remoteBackend = nullptr;
     // The top-level window we installed the focus/minimize event filter on (for
     // the remote watcher's interval gating). QPointer so a destroyed window
     // auto-nulls; used to remove the filter on teardown / re-hook.

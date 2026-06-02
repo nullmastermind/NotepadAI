@@ -877,6 +877,9 @@ SshSessionWorker::SftpLane SshSessionWorker::laneForKind(SftpKind kind)
         return SftpLane::Bulk;
     case SftpKind::Stat:
     case SftpKind::Readdir:
+    case SftpKind::Rename:
+    case SftpKind::Mkdir:
+    case SftpKind::Unlink:
         return SftpLane::Meta;
     }
     return SftpLane::Meta; // unreachable
@@ -922,6 +925,35 @@ void SshSessionWorker::requestSftpReaddir(quint64 reqId, const QString &path)
     SftpOp op;
     op.reqId = reqId;
     op.kind = SftpKind::Readdir;
+    op.path = path;
+    enqueueSftpOp(std::move(op));
+}
+
+void SshSessionWorker::requestSftpRename(quint64 reqId, const QString &oldPath,
+                                          const QString &newPath)
+{
+    SftpOp op;
+    op.reqId = reqId;
+    op.kind = SftpKind::Rename;
+    op.path = oldPath;
+    op.path2 = newPath;
+    enqueueSftpOp(std::move(op));
+}
+
+void SshSessionWorker::requestSftpMkdir(quint64 reqId, const QString &path)
+{
+    SftpOp op;
+    op.reqId = reqId;
+    op.kind = SftpKind::Mkdir;
+    op.path = path;
+    enqueueSftpOp(std::move(op));
+}
+
+void SshSessionWorker::requestSftpUnlink(quint64 reqId, const QString &path)
+{
+    SftpOp op;
+    op.reqId = reqId;
+    op.kind = SftpKind::Unlink;
     op.path = path;
     enqueueSftpOp(std::move(op));
 }
@@ -1131,6 +1163,31 @@ bool SshSessionWorker::advanceSftpOp(SftpLane lane, SftpOp &op)
             op.entries.append(std::move(de));
         }
     }
+
+    case SftpKind::Rename: {
+        const ISshTransport::Step s = m_transport->sftpRename(tl, op.path, op.path2);
+        if (s == ISshTransport::Step::Again) return false;
+        m_sawInboundSinceKeepalive = true;
+        emit sftpRenameDone(op.reqId, s == ISshTransport::Step::Ok, QString());
+        return true;
+    }
+
+    case SftpKind::Mkdir: {
+        const ISshTransport::Step s = m_transport->sftpMkdir(tl, op.path);
+        if (s == ISshTransport::Step::Again) return false;
+        m_sawInboundSinceKeepalive = true;
+        emit sftpMkdirDone(op.reqId, s == ISshTransport::Step::Ok, QString());
+        return true;
+    }
+
+    case SftpKind::Unlink: {
+        const ISshTransport::Step s = m_transport->sftpUnlink(tl, op.path);
+        if (s == ISshTransport::Step::Again) return false;
+        m_sawInboundSinceKeepalive = true;
+        emit sftpUnlinkDone(op.reqId, s == ISshTransport::Step::Ok, QString());
+        return true;
+    }
+
     }
     return true; // unreachable
 }
@@ -1150,6 +1207,15 @@ void SshSessionWorker::failSftpOp(const SftpOp &op, const QString &reason)
         break;
     case SftpKind::Readdir:
         emit sftpReaddirDone(op.reqId, /*ok=*/false, QList<RemoteDirEntry>(), reason);
+        break;
+    case SftpKind::Rename:
+        emit sftpRenameDone(op.reqId, /*ok=*/false, reason);
+        break;
+    case SftpKind::Mkdir:
+        emit sftpMkdirDone(op.reqId, /*ok=*/false, reason);
+        break;
+    case SftpKind::Unlink:
+        emit sftpUnlinkDone(op.reqId, /*ok=*/false, reason);
         break;
     }
 }

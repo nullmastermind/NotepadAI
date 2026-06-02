@@ -345,6 +345,10 @@ void FolderAsWorkspaceDock::useRemoteBackend(remote::RemoteFsBackend *backend)
     // same seam the backend's own directoryChanged feeds, so the model is the
     // single source of truth for row state either way.
     setupRemoteWatcher(backend);
+
+    // Cache the backend pointer so context menu actions can reach the remote
+    // mutation API (rename/mkdir/unlink) without having to go through MainWindow.
+    m_remoteBackend = backend;
 }
 
 // --- SSH connection banner (D10 / Batch H) ----------------------------------
@@ -657,8 +661,11 @@ void FolderAsWorkspaceDock::wireTreeContextMenu()
         const QModelIndex index = ui->treeView->indexAt(pos);
         if (!index.isValid()) return;
 
-        // indexAt returns a proxy index — map through the proxy helpers.
-        const QString absPath = proxy->filePath(index);
+        // indexAt returns a proxy index — resolvedFilePath maps through the proxy
+        // then prepends the SSH URI prefix for remote workspaces so consumers
+        // receive a routable path (ssh://profileId/remote/path) rather than a raw
+        // POSIX path that only the worker thread can interpret.
+        const QString absPath = resolvedFilePath(index);
         const bool isDir = proxy->isDir(index);
 
         auto *menu = new QMenu(this);

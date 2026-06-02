@@ -172,6 +172,27 @@ void SshConnection::init(std::unique_ptr<ISshTransport> transport)
                     : QStringLiteral("sftp-readdir-result: req=%1 ERROR=%2").arg(reqId).arg(error));
                 emit sftpReaddirResult(reqId, ok, entries, error);
             });
+    connect(m_worker, &SshSessionWorker::sftpRenameDone, this,
+            [this](quint64 reqId, bool ok, const QString &error) {
+                appendDebugLog(ok
+                    ? QStringLiteral("sftp-rename-result: req=%1").arg(reqId)
+                    : QStringLiteral("sftp-rename-result: req=%1 ERROR=%2").arg(reqId).arg(error));
+                emit sftpRenameResult(reqId, ok, error);
+            });
+    connect(m_worker, &SshSessionWorker::sftpMkdirDone, this,
+            [this](quint64 reqId, bool ok, const QString &error) {
+                appendDebugLog(ok
+                    ? QStringLiteral("sftp-mkdir-result: req=%1").arg(reqId)
+                    : QStringLiteral("sftp-mkdir-result: req=%1 ERROR=%2").arg(reqId).arg(error));
+                emit sftpMkdirResult(reqId, ok, error);
+            });
+    connect(m_worker, &SshSessionWorker::sftpUnlinkDone, this,
+            [this](quint64 reqId, bool ok, const QString &error) {
+                appendDebugLog(ok
+                    ? QStringLiteral("sftp-unlink-result: req=%1").arg(reqId)
+                    : QStringLiteral("sftp-unlink-result: req=%1 ERROR=%2").arg(reqId).arg(error));
+                emit sftpUnlinkResult(reqId, ok, error);
+            });
 
     // Exec results (D6): relays with debug logging, worker thread → UI thread
     // (queued). RemoteGitProcessRunner resolves the reqId to its in-flight op.
@@ -352,6 +373,28 @@ void SshConnection::sftpReaddir(quint64 reqId, const QString &path)
 {
     appendDebugLog(QStringLiteral("sftp-readdir: req=%1 %2").arg(reqId).arg(path));
     QMetaObject::invokeMethod(m_worker, "requestSftpReaddir", Qt::QueuedConnection,
+                              Q_ARG(quint64, reqId), Q_ARG(QString, path));
+}
+
+void SshConnection::sftpRename(quint64 reqId, const QString &oldPath, const QString &newPath)
+{
+    appendDebugLog(QStringLiteral("sftp-rename: req=%1 %2 -> %3").arg(reqId).arg(oldPath).arg(newPath));
+    QMetaObject::invokeMethod(m_worker, "requestSftpRename", Qt::QueuedConnection,
+                              Q_ARG(quint64, reqId), Q_ARG(QString, oldPath),
+                              Q_ARG(QString, newPath));
+}
+
+void SshConnection::sftpMkdir(quint64 reqId, const QString &path)
+{
+    appendDebugLog(QStringLiteral("sftp-mkdir: req=%1 %2").arg(reqId).arg(path));
+    QMetaObject::invokeMethod(m_worker, "requestSftpMkdir", Qt::QueuedConnection,
+                              Q_ARG(quint64, reqId), Q_ARG(QString, path));
+}
+
+void SshConnection::sftpUnlink(quint64 reqId, const QString &path)
+{
+    appendDebugLog(QStringLiteral("sftp-unlink: req=%1 %2").arg(reqId).arg(path));
+    QMetaObject::invokeMethod(m_worker, "requestSftpUnlink", Qt::QueuedConnection,
                               Q_ARG(quint64, reqId), Q_ARG(QString, path));
 }
 

@@ -2545,23 +2545,16 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         if (!isDir) {
             auto *mgr = this->app->getPreviewTabManager();
             if (mgr && mgr->canPreview(absPath)) {
-                // For SSH workspaces absPath is a POSIX path — QFileInfo::size()
-                // returns 0 (no local file). Skip the 10 MB decoded-text guard and
-                // route through previewFile(uri) which has the proper remote branch
-                // (createEditorFromRemote). For local workspaces the existing size
+                // For SSH workspaces absPath is now a full ssh:// URI (after resolvedFilePath fix).
+                // Pass it directly to previewFile. For local workspaces the existing size
                 // guard and openPreviewFromFile path are unchanged.
-                const bool isSshWorkspace = remote::isSshUri(wsRoot);
-                // The 10 MB cap only applies to the decoded-text route. File-path
-                // types (CSV/TSV) mmap the file and enforce their own multi-GB cap
-                // in loadFromFile — don't suppress their Preview entry here.
-                QFileInfo fi(absPath);
+                const bool isSshWorkspace = remote::isSshUri(absPath);
+                QFileInfo fi(isSshWorkspace ? QString() : absPath);
                 if (isSshWorkspace || mgr->previewWantsFilePath(absPath) || fi.size() <= 10 * 1024 * 1024) {
                     auto *previewAction = new QAction(tr("Preview"), menu);
                     if (isSshWorkspace) {
-                        const QString uri = remote::formatSshUri(
-                            remote::parseSshUri(wsRoot).profileId, absPath);
-                        connect(previewAction, &QAction::triggered, this, [this, uri]() {
-                            previewFile(uri);
+                        connect(previewAction, &QAction::triggered, this, [this, absPath]() {
+                            previewFile(absPath);
                         });
                     } else {
                         connect(previewAction, &QAction::triggered, this, [this, absPath]() {
@@ -2583,28 +2576,39 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         const bool isSshDock = remote::isSshUri(dockRoot);
         auto *copyPath = new QAction(tr("Copy Path"), menu);
         connect(copyPath, &QAction::triggered, this, [absPath, isSshDock]() {
-            // SSH remote paths are POSIX — keep forward slashes unchanged.
-            // Local Windows paths use the native separator.
-            QApplication::clipboard()->setText(
-                isSshDock ? absPath : QDir::toNativeSeparators(absPath));
+            // SSH: copy the POSIX remote path (strip the ssh://profileId prefix).
+            // Local: convert to native separators.
+            const QString text = isSshDock
+                ? remote::parseSshUri(absPath).remotePath
+                : QDir::toNativeSeparators(absPath);
+            QApplication::clipboard()->setText(text);
         });
         menu->addAction(copyPath);
 
         auto *copyRelPath = new QAction(tr("Copy Relative Path"), menu);
         connect(copyRelPath, &QAction::triggered, this, [absPath, dockRoot, isSshDock]() {
-            QString rel = absPath;
-            // For SSH workspaces dockRoot is an ssh:// URI; strip the POSIX prefix
-            // from the POSIX absPath instead of the URI.
-            const QString prefix = isSshDock
-                ? remote::parseSshUri(dockRoot).remotePath
-                : dockRoot;
-            if (!prefix.isEmpty() && rel.startsWith(prefix)) {
-                rel = rel.mid(prefix.length());
-                if (rel.startsWith(QLatin1Char('/')) || rel.startsWith(QLatin1Char('\\')))
-                    rel = rel.mid(1);
+            // For SSH workspaces: absPath and dockRoot are both ssh:// URIs.
+            // Strip the remote workspace root path from the remote file path.
+            QString rel;
+            if (isSshDock) {
+                const QString remotePath = remote::parseSshUri(absPath).remotePath;
+                const QString remoteRoot = remote::parseSshUri(dockRoot).remotePath;
+                rel = remotePath;
+                if (!remoteRoot.isEmpty() && rel.startsWith(remoteRoot)) {
+                    rel = rel.mid(remoteRoot.length());
+                    if (rel.startsWith(QLatin1Char('/')))
+                        rel = rel.mid(1);
+                }
+            } else {
+                rel = absPath;
+                if (!dockRoot.isEmpty() && rel.startsWith(dockRoot)) {
+                    rel = rel.mid(dockRoot.length());
+                    if (rel.startsWith(QLatin1Char('/')) || rel.startsWith(QLatin1Char('\\')))
+                        rel = rel.mid(1);
+                }
+                rel = QDir::toNativeSeparators(rel);
             }
-            QApplication::clipboard()->setText(
-                isSshDock ? rel : QDir::toNativeSeparators(rel));
+            QApplication::clipboard()->setText(rel);
         });
         menu->addAction(copyRelPath);
 
@@ -2614,13 +2618,20 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         // Renaming the root would require re-rooting the whole workspace; that
         // is out of scope. Compare against the raising dock's own root so the
         // gate is correct for tabified multi-workspace setups.
-        const bool isDockRoot = dock
-            && QDir::cleanPath(absPath).compare(QDir::cleanPath(dock->rootPath()),
-                                                Qt::CaseInsensitive) == 0;
+        // For SSH workspaces both absPath and dock->rootPath() are ssh:// URIs —
+        // compare them directly (case-sensitive; POSIX remote paths are case-sensitive).
+        // For local workspaces use QDir::cleanPath + case-insensitive (Windows compat).
+        const bool isDockRoot = dock && [&]() -> bool {
+            if (isSshDock) return absPath == dock->rootPath();
+            return QDir::cleanPath(absPath).compare(QDir::cleanPath(dock->rootPath()),
+                                                    Qt::CaseInsensitive) == 0;
+        }();
         if (!isDockRoot) {
             auto *renameAction = new QAction(tr("Rename..."), menu);
-            connect(renameAction, &QAction::triggered, this, [this, absPath, isDir]() {
-                const QString oldName = QFileInfo(absPath).fileName();
+            connect(renameAction, &QAction::triggered, this, [this, dock, absPath, isSshDock, isDir]() {
+                // For SSH workspaces absPath is "ssh://profileId/remote/path".
+                const QString displayPath = isSshDock ? remote::parseSshUri(absPath).remotePath : absPath;
+                const QString oldName = QFileInfo(displayPath).fileName();
                 bool ok = false;
                 const QString newName = QInputDialog::getText(this, tr("Rename"),
                     tr("New name:"), QLineEdit::Normal, oldName, &ok);
@@ -2631,9 +2642,24 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                     QMessageBox::warning(this, tr("Rename"), tr("Invalid name."));
                     return;
                 }
-                const QString newPath =
-                    QDir(QFileInfo(absPath).absolutePath()).filePath(newName);
-                renameWorkspaceEntry(absPath, newPath, isDir);
+                if (isSshDock) {
+                    remote::RemoteFsBackend *backend = dock ? dock->remoteBackend() : nullptr;
+                    if (!backend) return;
+                    const remote::SshUri uri = remote::parseSshUri(absPath);
+                    if (!uri.valid) return;
+                    const QString parentDir = uri.remotePath.left(uri.remotePath.lastIndexOf(QLatin1Char('/')));
+                    const QString newRemotePath = parentDir + QLatin1Char('/') + newName;
+                    backend->renameAsync(uri.remotePath, newRemotePath,
+                        [guard = QPointer<MainWindow>(this), newName](bool renameOk, const QString &error) {
+                            if (guard && !renameOk)
+                                QMessageBox::warning(guard, tr("Rename"),
+                                    tr("Could not rename to \"%1\": %2").arg(newName, error));
+                        });
+                } else {
+                    const QString newPath =
+                        QDir(QFileInfo(absPath).absolutePath()).filePath(newName);
+                    renameWorkspaceEntry(absPath, newPath, isDir);
+                }
             });
             menu->addAction(renameAction);
             menu->addSeparator();
@@ -2642,7 +2668,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         // --- New File / New Folder (directory only) ---
         if (isDir) {
             auto *newFile = new QAction(tr("New File..."), menu);
-            connect(newFile, &QAction::triggered, this, [this, absPath]() {
+            connect(newFile, &QAction::triggered, this, [this, dock, absPath, isSshDock]() {
                 bool ok = false;
                 const QString name = QInputDialog::getText(this, tr("New File"),
                     tr("File name:"), QLineEdit::Normal, QString(), &ok);
@@ -2653,24 +2679,38 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                         tr("Invalid file name."));
                     return;
                 }
-                const QString filePath = QDir(absPath).filePath(name);
-                QFile f(filePath);
-                if (f.exists()) {
-                    QMessageBox::warning(this, tr("New File"),
-                        tr("A file named \"%1\" already exists.").arg(name));
-                    return;
+                if (isSshDock) {
+                    remote::RemoteFsBackend *backend = dock ? dock->remoteBackend() : nullptr;
+                    if (!backend) return;
+                    const remote::SshUri uri = remote::parseSshUri(absPath);
+                    if (!uri.valid) return;
+                    const QString remotePath = uri.remotePath + QLatin1Char('/') + name;
+                    backend->writeFileAsync(remotePath, QByteArray(),
+                        [guard = QPointer<MainWindow>(this), name](bool writeOk, const QString &error) {
+                            if (guard && !writeOk)
+                                QMessageBox::warning(guard, tr("New File"),
+                                    tr("Could not create file \"%1\": %2").arg(name, error));
+                        });
+                } else {
+                    const QString filePath = QDir(absPath).filePath(name);
+                    QFile f(filePath);
+                    if (f.exists()) {
+                        QMessageBox::warning(this, tr("New File"),
+                            tr("A file named \"%1\" already exists.").arg(name));
+                        return;
+                    }
+                    if (!f.open(QIODevice::WriteOnly)) {
+                        QMessageBox::warning(this, tr("New File"),
+                            tr("Could not create file \"%1\".").arg(name));
+                        return;
+                    }
+                    f.close();
                 }
-                if (!f.open(QIODevice::WriteOnly)) {
-                    QMessageBox::warning(this, tr("New File"),
-                        tr("Could not create file \"%1\".").arg(name));
-                    return;
-                }
-                f.close();
             });
             menu->addAction(newFile);
 
             auto *newFolder = new QAction(tr("New Folder..."), menu);
-            connect(newFolder, &QAction::triggered, this, [this, absPath]() {
+            connect(newFolder, &QAction::triggered, this, [this, dock, absPath, isSshDock]() {
                 bool ok = false;
                 const QString name = QInputDialog::getText(this, tr("New Folder"),
                     tr("Folder name:"), QLineEdit::Normal, QString(), &ok);
@@ -2681,15 +2721,29 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                         tr("Invalid folder name."));
                     return;
                 }
-                QDir dir(absPath);
-                if (dir.exists(name)) {
-                    QMessageBox::warning(this, tr("New Folder"),
-                        tr("A folder named \"%1\" already exists.").arg(name));
-                    return;
-                }
-                if (!dir.mkdir(name)) {
-                    QMessageBox::warning(this, tr("New Folder"),
-                        tr("Could not create folder \"%1\".").arg(name));
+                if (isSshDock) {
+                    remote::RemoteFsBackend *backend = dock ? dock->remoteBackend() : nullptr;
+                    if (!backend) return;
+                    const remote::SshUri uri = remote::parseSshUri(absPath);
+                    if (!uri.valid) return;
+                    const QString remotePath = uri.remotePath + QLatin1Char('/') + name;
+                    backend->mkdirAsync(remotePath,
+                        [guard = QPointer<MainWindow>(this), name](bool mkdirOk, const QString &error) {
+                            if (guard && !mkdirOk)
+                                QMessageBox::warning(guard, tr("New Folder"),
+                                    tr("Could not create folder \"%1\": %2").arg(name, error));
+                        });
+                } else {
+                    QDir dir(absPath);
+                    if (dir.exists(name)) {
+                        QMessageBox::warning(this, tr("New Folder"),
+                            tr("A folder named \"%1\" already exists.").arg(name));
+                        return;
+                    }
+                    if (!dir.mkdir(name)) {
+                        QMessageBox::warning(this, tr("New Folder"),
+                            tr("Could not create folder \"%1\".").arg(name));
+                    }
                 }
             });
             menu->addAction(newFolder);
@@ -2698,7 +2752,9 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         }
 
         // --- Show in Explorer ---
+        // Not applicable for remote SSH workspaces — the path lives on the server.
         auto *showInExplorer = new QAction(tr("Show in Explorer"), menu);
+        showInExplorer->setEnabled(!isSshDock);
         connect(showInExplorer, &QAction::triggered, this, [absPath, isDir]() {
 #ifdef Q_OS_WIN
             if (isDir) {
@@ -2739,7 +2795,11 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                     if (!uri.valid) return;
                     remote::ExecutionContextRegistry *registry = app ? app->getExecutionContextRegistry() : nullptr;
                     remote::ExecutionContext *ctx = registry ? registry->remoteContext(uri.profileId) : nullptr;
-                    const QString cwd = TerminalCwdResolver::resolveForContext(ctx, absPath);
+                    // absPath is an ssh:// URI after resolvedFilePath fix — extract the
+                    // POSIX remote path before passing to resolveForContext (which expects
+                    // a POSIX path, not an SSH URI).
+                    const QString remotePath = remote::parseSshUri(absPath).remotePath;
+                    const QString cwd = TerminalCwdResolver::resolveForContext(ctx, remotePath);
                     if (!ctx || !ctx->isRemote() || cwd.isEmpty()) {
                         return;
                     }
@@ -2753,8 +2813,8 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             menu->addAction(openTerminal);
         }
 
-        // --- Export via Pandoc (markdown files only) ---
-        if (!isDir) {
+        // --- Export via Pandoc (markdown files only, local workspaces only) ---
+        if (!isDir && !isSshDock) {
             const QString suffix = QFileInfo(absPath).suffix().toLower();
             if (suffix == QLatin1String("md") || suffix == QLatin1String("markdown")) {
                 auto *pandocMenu = new QMenu(tr("Export via Pandoc"), menu);
@@ -2820,6 +2880,8 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         // --- Delete (submenu: Move to Trash / Delete Permanently) ---
         auto *deleteMenu = new QMenu(tr("Delete"), menu);
         auto *moveToTrash = new QAction(tr("Move to Trash"), deleteMenu);
+        // Move to Trash is a local OS operation — not available for remote SSH paths.
+        moveToTrash->setEnabled(!isSshDock);
         connect(moveToTrash, &QAction::triggered, this, [this, absPath, isDir]() {
             const QString name = QFileInfo(absPath).fileName();
             const QString msg = isDir
@@ -2835,26 +2897,50 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         deleteMenu->addAction(moveToTrash);
 
         auto *deletePermanently = new QAction(tr("Delete Permanently"), deleteMenu);
-        connect(deletePermanently, &QAction::triggered, this, [this, absPath, isDir]() {
-            const QString name = QFileInfo(absPath).fileName();
-            const QString msg = isDir
-                ? tr("Are you sure you want to permanently delete folder \"%1\" and all its contents? This cannot be undone.")
-                    .arg(name)
-                : tr("Are you sure you want to permanently delete \"%1\"? This cannot be undone.")
-                    .arg(name);
-            if (QMessageBox::warning(this, tr("Delete Permanently"), msg,
-                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
-                return;
-            bool ok;
-            if (isDir) {
-                QDir dir(absPath);
-                ok = dir.removeRecursively();
+        connect(deletePermanently, &QAction::triggered, this, [this, dock, absPath, isSshDock, isDir]() {
+            const QString displayPath = isSshDock ? remote::parseSshUri(absPath).remotePath : absPath;
+            const QString name = QFileInfo(displayPath).fileName();
+            if (isSshDock) {
+                remote::RemoteFsBackend *backend = dock ? dock->remoteBackend() : nullptr;
+                if (!backend) return;
+                const remote::SshUri uri = remote::parseSshUri(absPath);
+                if (!uri.valid) return;
+                if (isDir) {
+                    QMessageBox::information(this, tr("Delete Permanently"),
+                        tr("Recursive directory deletion is not supported for remote SSH workspaces.\n"
+                           "Use the terminal to run: rm -rf \"%1\"").arg(uri.remotePath));
+                    return;
+                }
+                if (QMessageBox::warning(this, tr("Delete Permanently"),
+                        tr("Are you sure you want to permanently delete \"%1\"? This cannot be undone.").arg(name),
+                        QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+                    return;
+                backend->unlinkAsync(uri.remotePath,
+                    [guard = QPointer<MainWindow>(this), name](bool unlinkOk, const QString &error) {
+                        if (guard && !unlinkOk)
+                            QMessageBox::warning(guard, tr("Delete Permanently"),
+                                tr("Could not delete \"%1\": %2").arg(name, error));
+                    });
             } else {
-                ok = QFile::remove(absPath);
-            }
-            if (!ok) {
-                QMessageBox::warning(this, tr("Delete Permanently"),
-                    tr("Could not delete \"%1\".").arg(name));
+                const QString msg = isDir
+                    ? tr("Are you sure you want to permanently delete folder \"%1\" and all its contents? This cannot be undone.")
+                        .arg(name)
+                    : tr("Are you sure you want to permanently delete \"%1\"? This cannot be undone.")
+                        .arg(name);
+                if (QMessageBox::warning(this, tr("Delete Permanently"), msg,
+                        QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+                    return;
+                bool ok;
+                if (isDir) {
+                    QDir dir(absPath);
+                    ok = dir.removeRecursively();
+                } else {
+                    ok = QFile::remove(absPath);
+                }
+                if (!ok) {
+                    QMessageBox::warning(this, tr("Delete Permanently"),
+                        tr("Could not delete \"%1\".").arg(name));
+                }
             }
         });
         deleteMenu->addAction(deletePermanently);
@@ -2866,19 +2952,29 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         AiAgentDock *targetDock = activeAiDock();
         if (targetDock) {
             auto *sendToAi = new QAction(tr("Send to AI"), menu);
-            connect(sendToAi, &QAction::triggered, this, [this, absPath, isDir, wsRoot]() {
+            connect(sendToAi, &QAction::triggered, this, [this, absPath, isSshDock, isDir, wsRoot]() {
                 AiAgentDock *dock = activeAiDock();
                 if (!dock) return;
-                // For SSH workspaces wsRoot is an ssh:// URI; strip the POSIX
-                // prefix from the POSIX absPath to get the workspace-relative path.
-                const QString prefix = remote::isSshUri(wsRoot)
-                    ? remote::parseSshUri(wsRoot).remotePath
-                    : wsRoot;
-                QString relPath = absPath;
-                if (!prefix.isEmpty() && relPath.startsWith(prefix)) {
-                    relPath = relPath.mid(prefix.length());
-                    if (relPath.startsWith(QLatin1Char('/')) || relPath.startsWith(QLatin1Char('\\')))
-                        relPath = relPath.mid(1);
+                // For SSH workspaces both absPath and wsRoot are ssh:// URIs.
+                // Strip the remote workspace root path from the remote file path.
+                QString relPath;
+                if (isSshDock) {
+                    const QString remotePath = remote::parseSshUri(absPath).remotePath;
+                    const QString remoteRoot = remote::parseSshUri(wsRoot).remotePath;
+                    relPath = remotePath;
+                    if (!remoteRoot.isEmpty() && relPath.startsWith(remoteRoot)) {
+                        relPath = relPath.mid(remoteRoot.length());
+                        if (relPath.startsWith(QLatin1Char('/')))
+                            relPath = relPath.mid(1);
+                    }
+                } else {
+                    relPath = absPath;
+                    const QString prefix = wsRoot;
+                    if (!prefix.isEmpty() && relPath.startsWith(prefix)) {
+                        relPath = relPath.mid(prefix.length());
+                        if (relPath.startsWith(QLatin1Char('/')) || relPath.startsWith(QLatin1Char('\\')))
+                            relPath = relPath.mid(1);
+                    }
                 }
                 QString text;
                 if (isDir && !relPath.endsWith(QLatin1Char('/'))) {

@@ -454,6 +454,35 @@ public:
         def.step = Step::Error; // default: path absent / not scripted
         return sftpStatByPath.value(path, def);
     }
+
+    // --- Rename / Mkdir / Unlink scripting ------------------------------------
+    // Default step: Ok. Override per-path for error injection.
+    QHash<QString, Step> sftpRenameStepBySrc;
+    QList<QPair<QString, QString>> sftpRenameCalls;
+
+    QHash<QString, Step> sftpMkdirStepByPath;
+    QList<QString> sftpMkdirPaths;
+
+    QHash<QString, Step> sftpUnlinkStepByPath;
+    QList<QString> sftpUnlinkPaths;
+
+    Step sftpRename(SftpLane, const QString &src, const QString &dst) override
+    {
+        sftpRenameCalls.append({src, dst});
+        return sftpRenameStepBySrc.value(src, Step::Ok);
+    }
+
+    Step sftpMkdir(SftpLane, const QString &path) override
+    {
+        sftpMkdirPaths.append(path);
+        return sftpMkdirStepByPath.value(path, Step::Ok);
+    }
+
+    Step sftpUnlink(SftpLane, const QString &path) override
+    {
+        sftpUnlinkPaths.append(path);
+        return sftpUnlinkStepByPath.value(path, Step::Ok);
+    }
 };
 
 #endif // TESTS_FAKESSHTRANSPORT_H

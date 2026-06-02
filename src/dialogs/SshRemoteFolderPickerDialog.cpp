@@ -115,8 +115,10 @@ void SshRemoteFolderPickerDialog::fetchChildren(QTreeWidgetItem *item)
     placeholder->setFlags(Qt::NoItemFlags); // not selectable
 
     m_backend->readdirAsync(path,
-        [this, path](bool ok, const QList<remote::RemoteDirEntry> &entries, const QString &error) {
-            onReaddirResult(path, ok, entries, error);
+        [guard = QPointer<SshRemoteFolderPickerDialog>(this), path](
+            bool ok, const QList<remote::RemoteDirEntry> &entries, const QString &error) {
+            if (guard)
+                guard->onReaddirResult(path, ok, entries, error);
         });
 }
 

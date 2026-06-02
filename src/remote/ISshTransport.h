@@ -192,6 +192,20 @@ public:
     // Stat a path (follows symlinks — LIBSSH2_SFTP_STAT) on `lane`'s session.
     virtual SftpStatResult sftpStat(SftpLane lane, const QString &path) = 0;
 
+    // Rename `srcPath` to `dstPath` on `lane`'s session.
+    // Requests OVERWRITE | ATOMIC | NATIVE flags; SFTP server may honour a
+    // subset. Returns Ok on success, Again on EAGAIN, Error on failure.
+    virtual Step sftpRename(SftpLane lane,
+                            const QString &srcPath,
+                            const QString &dstPath) = 0;
+
+    // Create directory `path` with mode 0755 on `lane`'s session.
+    virtual Step sftpMkdir(SftpLane lane, const QString &path) = 0;
+
+    // Remove the file at `path` on `lane`'s session. Not suitable for
+    // directories — use exec "rm -rf" for recursive directory removal.
+    virtual Step sftpUnlink(SftpLane lane, const QString &path) = 0;
+
     // --- keepalive (FIX-3) -------------------------------------------------------
     // Send a keepalive probe. Returns seconds-to-next on success (>= 0), or -1 on
     // a fatal socket error (the connection is dead). EAGAIN is non-fatal and

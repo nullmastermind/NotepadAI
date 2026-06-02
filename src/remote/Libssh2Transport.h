@@ -79,6 +79,9 @@ public:
     SftpDirEntry sftpReaddir(SftpLane lane, int handleId) override;
     void sftpClosedir(SftpLane lane, int handleId) override;
     SftpStatResult sftpStat(SftpLane lane, const QString &path) override;
+    Step sftpRename(SftpLane lane, const QString &srcPath, const QString &dstPath) override;
+    Step sftpMkdir(SftpLane lane, const QString &path) override;
+    Step sftpUnlink(SftpLane lane, const QString &path) override;
 
     int sendKeepalive() override;
 
