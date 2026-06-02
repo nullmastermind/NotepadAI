@@ -511,6 +511,19 @@ qt_add_executable(NotepadAI
 	remote/SshHostKeyStore.cpp
 )
 
+# wildmatch.c is a C file. Isolate it in a tiny static lib so it doesn't pull a
+# C compiler into the main target (which would cause CMake to compile the shared
+# C++ PCH as C, breaking every C++ STL header).
+add_library(wildmatch_c STATIC remote/wildmatch.c remote/wildmatch.h)
+target_include_directories(wildmatch_c PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/remote)
+target_link_libraries(NotepadAI PRIVATE wildmatch_c)
+
+target_sources(NotepadAI PRIVATE remote/GitignoreMatcher.cpp remote/GitignoreMatcher.h)
+target_sources(NotepadAI PRIVATE widgets/TransferProgressBar.cpp widgets/TransferProgressBar.h)
+target_sources(NotepadAI PRIVATE dialogs/TransferConflictDialog.cpp dialogs/TransferConflictDialog.h)
+target_sources(NotepadAI PRIVATE dialogs/TransferLogDialog.cpp dialogs/TransferLogDialog.h)
+target_sources(NotepadAI PRIVATE remote/RemoteTransferManager.cpp remote/RemoteTransferManager.h)
+
 # Platform-conditional CredentialStore backend + native API link.
 if(WIN32)
     target_sources(NotepadAI PRIVATE ai/CredentialStore_Windows.cpp)

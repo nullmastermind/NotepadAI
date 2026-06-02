@@ -147,6 +147,9 @@ void SshConnection::init(std::unique_ptr<ISshTransport> transport)
                     : QStringLiteral("sftp-read-result: req=%1 ERROR=%2").arg(reqId).arg(error));
                 emit sftpReadResult(reqId, ok, data, error);
             });
+    // Streaming read chunks: relayed direct (no per-chunk debug log — too noisy).
+    connect(m_worker, &SshSessionWorker::sftpReadChunk, this,
+            &SshConnection::sftpReadChunkResult);
     connect(m_worker, &SshSessionWorker::sftpWriteDone, this,
             [this](quint64 reqId, bool ok, const QString &error) {
                 appendDebugLog(ok
@@ -354,6 +357,13 @@ void SshConnection::sftpRead(quint64 reqId, const QString &path)
 {
     appendDebugLog(QStringLiteral("sftp-read: req=%1 %2").arg(reqId).arg(path));
     QMetaObject::invokeMethod(m_worker, "requestSftpRead", Qt::QueuedConnection,
+                              Q_ARG(quint64, reqId), Q_ARG(QString, path));
+}
+
+void SshConnection::sftpStreamRead(quint64 reqId, const QString &path)
+{
+    appendDebugLog(QStringLiteral("sftp-stream-read: req=%1 %2").arg(reqId).arg(path));
+    QMetaObject::invokeMethod(m_worker, "requestSftpStreamRead", Qt::QueuedConnection,
                               Q_ARG(quint64, reqId), Q_ARG(QString, path));
 }
 

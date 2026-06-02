@@ -902,6 +902,7 @@ SshSessionWorker::SftpLane SshSessionWorker::laneForKind(SftpKind kind)
 {
     switch (kind) {
     case SftpKind::Read:
+    case SftpKind::StreamRead:
     case SftpKind::Write:
         return SftpLane::Bulk;
     case SftpKind::Stat:
@@ -925,6 +926,15 @@ void SshSessionWorker::requestSftpRead(quint64 reqId, const QString &path)
     SftpOp op;
     op.reqId = reqId;
     op.kind = SftpKind::Read;
+    op.path = path;
+    enqueueSftpOp(std::move(op));
+}
+
+void SshSessionWorker::requestSftpStreamRead(quint64 reqId, const QString &path)
+{
+    SftpOp op;
+    op.reqId = reqId;
+    op.kind = SftpKind::StreamRead;
     op.path = path;
     enqueueSftpOp(std::move(op));
 }
@@ -1168,6 +1178,53 @@ bool SshSessionWorker::advanceSftpOp(SftpLane lane, SftpOp &op)
         }
     }
 
+    case SftpKind::StreamRead: {
+        // Same open/transfer/close state machine as Read, but chunks are emitted
+        // via sftpReadChunk() instead of accumulated in op.buffer. On EOF, emits
+        // sftpReadDone with empty data (all data was already streamed chunk-by-chunk).
+        if (op.phase == SftpPhase::NeedOpen) {
+            const ISshTransport::SftpOpenResult r = m_transport->sftpOpen(tl, op.path, /*forWrite=*/false);
+            if (r.step == ISshTransport::Step::Again) {
+                emit debugEvent(QStringLiteral("sftp-stream-open-again: req=%1 path=%2")
+                                    .arg(op.reqId).arg(op.path));
+                return false;
+            }
+            if (r.step == ISshTransport::Step::Error) {
+                failSftpOp(op, tr("Could not open remote file for reading"));
+                return true;
+            }
+            op.handleId = r.handleId;
+            op.phase = SftpPhase::Transfer;
+            emit debugEvent(QStringLiteral("sftp-stream-opened: req=%1 handle=%2")
+                                .arg(op.reqId).arg(op.handleId));
+        }
+        for (;;) {
+            ISshTransport::ReadResult rr = m_transport->sftpRead(tl, op.handleId);
+            if (rr.error) {
+                m_transport->sftpClose(tl, op.handleId);
+                op.handleId = -1;
+                failSftpOp(op, tr("Remote read failed"));
+                return true;
+            }
+            if (!rr.data.isEmpty()) {
+                m_sawInboundSinceKeepalive = true; // FIX-3
+                emit sftpReadChunk(op.reqId, rr.data);
+            }
+            if (rr.eof) {
+                m_transport->sftpClose(tl, op.handleId);
+                op.handleId = -1;
+                // data is empty — all content was delivered via sftpReadChunk signals.
+                emit sftpReadDone(op.reqId, /*ok=*/true, QByteArray(), QString());
+                return true;
+            }
+            if (rr.again) {
+                emit debugEvent(QStringLiteral("sftp-stream-again: req=%1")
+                                    .arg(op.reqId));
+                return false;
+            }
+        }
+    }
+
     case SftpKind::Write: {
         if (op.phase == SftpPhase::NeedOpen) {
             const ISshTransport::SftpOpenResult r = m_transport->sftpOpen(tl, op.path, /*forWrite=*/true);
@@ -1284,6 +1341,7 @@ void SshSessionWorker::failSftpOp(const SftpOp &op, const QString &reason)
 {
     switch (op.kind) {
     case SftpKind::Read:
+    case SftpKind::StreamRead:
         emit sftpReadDone(op.reqId, /*ok=*/false, QByteArray(), reason);
         break;
     case SftpKind::Write:

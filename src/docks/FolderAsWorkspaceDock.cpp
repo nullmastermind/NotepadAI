@@ -30,9 +30,13 @@
 #include "ProfileScope.h"
 #include "SubmoduleStatusFetcher.h"
 #include "../remote/RemoteDirectoryWatcher.h"
+#include "../remote/RemoteExecutionContext.h"
 #include "../remote/RemoteFileSystemModel.h"
 #include "../remote/RemoteFsBackend.h"
+#include "../remote/RemoteTransferManager.h"
 #include "../remote/SshProfile.h"
+#include "../widgets/TransferProgressBar.h"
+#include "../dialogs/TransferLogDialog.h"
 #include "ui_FolderAsWorkspaceDock.h"
 
 #include <QApplication>
@@ -93,6 +97,8 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(QWidget *parent) :
     ui->treeView->header()->hideSection(1);
     ui->treeView->header()->hideSection(2);
     ui->treeView->header()->hideSection(3);
+    // Multi-select support (D7): Ctrl+click / Shift+click for batch transfers.
+    ui->treeView->setSelectionMode(QAbstractItemView::ExtendedSelection);
 
     wireFileTreeGitDecorations();
 
@@ -163,6 +169,8 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(const QString &initialPath, QWidget
     ui->treeView->header()->hideSection(1);
     ui->treeView->header()->hideSection(2);
     ui->treeView->header()->hideSection(3);
+    // Multi-select support (D7): Ctrl+click / Shift+click for batch transfers.
+    ui->treeView->setSelectionMode(QAbstractItemView::ExtendedSelection);
 
     wireFileTreeGitDecorations();
 
@@ -370,6 +378,137 @@ void FolderAsWorkspaceDock::useRemoteBackend(remote::RemoteFsBackend *backend)
     // Cache the backend pointer so context menu actions can reach the remote
     // mutation API (rename/mkdir/unlink) without having to go through MainWindow.
     m_remoteBackend = backend;
+
+    // Set up the transfer progress bar + manager for this backend.
+    setupTransferManager(backend);
+}
+
+void FolderAsWorkspaceDock::setupTransferManager(remote::RemoteFsBackend *backend)
+{
+    // Destroy old manager (if reconnecting with a new backend).
+    if (m_transferManager) {
+        delete m_transferManager;
+        m_transferManager = nullptr;
+    }
+
+    if (!backend) return;
+
+    // Create manager as a QObject child of this dock.
+    m_transferManager = new remote::RemoteTransferManager(backend, this);
+
+    // C1 fix: wire connectionLost from RemoteExecutionContext, which is backend's
+    // parent (RemoteExecutionContext::fsBackend() creates the backend with `this`
+    // as parent). This is the correct signal source — walking for SshConnection in
+    // the constructor was wrong because the parent chain is backend → context, not
+    // backend → SshConnection.
+    if (auto *ctx = qobject_cast<remote::RemoteExecutionContext *>(backend->parent())) {
+        connect(ctx, &remote::ExecutionContext::connectionLost,
+                m_transferManager, &remote::RemoteTransferManager::onConnectionLost);
+    }
+
+    // Helper: ensure the log dialog exists and is visible; returns its progress bar.
+    auto ensureDialog = [this]() -> TransferProgressBar * {
+        if (!m_transferLogDialog) {
+            m_transferLogDialog = new TransferLogDialog(this->window());
+            m_transferLogDialog->setTransferActive(true);
+            if (m_transferManager) {
+                const QString dest = m_transferManager->currentLocalDestination();
+                if (!dest.isEmpty())
+                    m_transferLogDialog->setLocalDestination(dest);
+                connect(m_transferLogDialog, &TransferLogDialog::cancelRequested,
+                        m_transferManager, &remote::RemoteTransferManager::cancel,
+                        Qt::UniqueConnection);
+            }
+            m_transferLogDialog->show();
+        } else if (!m_transferLogDialog->isVisible()) {
+            m_transferLogDialog->setTransferActive(true);
+            m_transferLogDialog->show();
+        }
+        return m_transferLogDialog->progressBar();
+    };
+
+    // Wire manager signals to the log dialog's embedded progress bar.
+    connect(m_transferManager, &remote::RemoteTransferManager::progressUpdated,
+            this, [this, ensureDialog](int current, int total, qint64 bytesXfr, qint64 totalBytes,
+                         const QString &currentFile, int queuedCount) {
+                auto *bar = ensureDialog();
+                if (!bar) return;
+                bar->triggerShow();
+                bar->updateProgress(current, total, bytesXfr, totalBytes, queuedCount);
+                if (!currentFile.isEmpty()) {
+                    if (totalBytes == 0 && bytesXfr == 0 && total == 0)
+                        bar->setStatusLabel(currentFile);
+                    else if (totalBytes == 0 && bytesXfr == 0 && current <= total &&
+                             currentFile.startsWith(QLatin1String("Scanning")))
+                        bar->setStatusLabel(currentFile);
+                    else
+                        bar->setCurrentFile(currentFile);
+                }
+            });
+    connect(m_transferManager, &remote::RemoteTransferManager::transferCompleted,
+            this, [this](int fileCount) {
+                if (m_transferLogDialog) {
+                    m_transferLogDialog->progressBar()->showCompleted(fileCount);
+                    m_transferLogDialog->setFinished();
+                }
+            });
+    connect(m_transferManager, &remote::RemoteTransferManager::transferCancelled,
+            this, [this]() {
+                if (m_transferLogDialog) {
+                    m_transferLogDialog->setTransferActive(false);
+                    m_transferLogDialog->progressBar()->hideImmediate();
+                    m_transferLogDialog->appendInfo(tr("Transfer cancelled."));
+                }
+            });
+    connect(m_transferManager, &remote::RemoteTransferManager::transferError,
+            this, [this](const QString &message) {
+                if (m_transferLogDialog) {
+                    m_transferLogDialog->progressBar()->showError(message);
+                    m_transferLogDialog->appendInfo(message);
+                }
+            });
+
+    // Wire per-file status to the transfer log dialog.
+    connect(m_transferManager, &remote::RemoteTransferManager::fileTransferStatus,
+            this, [this, ensureDialog](const QString &path, bool ok, const QString &error) {
+                ensureDialog();
+                if (m_transferLogDialog)
+                    m_transferLogDialog->appendStatus(path, ok, error);
+            });
+
+    // Wire dialog's progress bar cancel button to manager (deferred until dialog exists).
+    connect(m_transferManager, &remote::RemoteTransferManager::progressUpdated,
+            this, [this]() {
+                if (m_transferLogDialog && m_transferManager) {
+                    // Connect cancel only once.
+                    connect(m_transferLogDialog->progressBar(), &TransferProgressBar::cancelRequested,
+                            m_transferManager, &remote::RemoteTransferManager::cancel,
+                            Qt::UniqueConnection);
+                }
+            }, Qt::UniqueConnection);
+}
+
+QStringList FolderAsWorkspaceDock::selectedPaths() const{
+    QStringList paths;
+    const QModelIndexList selection = ui->treeView->selectionModel()->selectedIndexes();
+    paths.reserve(selection.size());
+    for (const QModelIndex &idx : selection) {
+        if (idx.column() != 0) continue; // multi-column model: skip non-name columns
+        paths.append(resolvedFilePath(idx));
+    }
+    return paths;
+}
+
+QList<bool> FolderAsWorkspaceDock::selectedAreDirs() const
+{
+    QList<bool> result;
+    const QModelIndexList selection = ui->treeView->selectionModel()->selectedIndexes();
+    result.reserve(selection.size());
+    for (const QModelIndex &idx : selection) {
+        if (idx.column() != 0) continue;
+        result.append(proxy->isDir(idx));
+    }
+    return result;
 }
 
 // --- SSH connection banner (D10 / Batch H) ----------------------------------
@@ -1271,6 +1410,7 @@ void FolderAsWorkspaceDock::revealAndSelectPath(const QString &absolutePath)
         // its directoryLoaded eventually fires.
         setProperty("pendingCurrentItem", QVariant());
         m_programmaticToggle = true;
+        ui->treeView->selectionModel()->clearSelection(); // D7: reset multi-select state
         ui->treeView->setCurrentIndex(leafIdx);
         ui->treeView->scrollTo(leafIdx, QAbstractItemView::PositionAtCenter);
         m_programmaticToggle = false;
@@ -1537,6 +1677,7 @@ void FolderAsWorkspaceDock::onDirectoryLoaded(const QString &loadedPath)
             if (itemSrc.isValid()) {
                 const QModelIndex itemIdx = proxy->mapFromSource(itemSrc);
                 m_programmaticToggle = true;
+                ui->treeView->selectionModel()->clearSelection(); // D7: reset multi-select state
                 ui->treeView->setCurrentIndex(itemIdx);
                 ui->treeView->scrollTo(itemIdx, QAbstractItemView::PositionAtCenter);
                 m_programmaticToggle = false;

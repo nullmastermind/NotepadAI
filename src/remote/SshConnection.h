@@ -97,6 +97,8 @@ public:
     // go to the bulk SFTP lane, stat/readdir to the metadata lane (D1a two-
     // channel split). Results arrive on the UI thread via the signals below.
     void sftpRead(quint64 reqId, const QString &path);
+    // Streaming variant: sftpReadChunkResult fires per chunk; sftpReadResult fires on EOF/error.
+    void sftpStreamRead(quint64 reqId, const QString &path);
     void sftpWrite(quint64 reqId, const QString &path, const QByteArray &data);
     void sftpStat(quint64 reqId, const QString &path);
     void sftpReaddir(quint64 reqId, const QString &path);
@@ -160,6 +162,8 @@ signals:
 
     // --- SFTP results (D1) — relayed queued from the worker ------------------
     void sftpReadResult(quint64 reqId, bool ok, const QByteArray &data, const QString &error);
+    // Streaming read: each chunk relayed here as it arrives from the worker.
+    void sftpReadChunkResult(quint64 reqId, const QByteArray &chunk);
     void sftpWriteResult(quint64 reqId, bool ok, const QString &error);
     void sftpStatResult(quint64 reqId, bool ok, bool exists, bool isDir,
                         qint64 size, qint64 mtimeSecs, const QString &error);

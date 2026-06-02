@@ -49,7 +49,8 @@ class GitCommitView;
 class GitOperationManager;
 class ScintillaNext;
 class SubmoduleStatusFetcher;
-namespace remote { class IWorkspaceFsModel; class RemoteFsBackend; class RemoteDirectoryWatcher; }
+class TransferLogDialog;
+namespace remote { class IWorkspaceFsModel; class RemoteFsBackend; class RemoteDirectoryWatcher; class RemoteTransferManager; }
 
 // Snapshot of per-workspace UI state. Carried verbatim between disk (QSettings
 // nested array under FolderAsWorkspace/WorkspaceStates) and the dock.
@@ -86,6 +87,14 @@ public:
     void useRemoteBackend(remote::RemoteFsBackend *backend);
     // Null for local workspaces; non-null for SSH workspaces after useRemoteBackend.
     remote::RemoteFsBackend *remoteBackend() const { return m_remoteBackend; }
+    // Null for local workspaces; non-null for SSH workspaces after useRemoteBackend.
+    remote::RemoteTransferManager *transferManager() const { return m_transferManager; }
+
+    // Returns the absolute paths of all currently selected items in the tree.
+    // For SSH workspaces these are ssh:// URIs (resolvedFilePath applied).
+    QStringList selectedPaths() const;
+    // Returns true for each selected item that is a directory, parallel to selectedPaths().
+    QList<bool> selectedAreDirs() const;
 
     // --- SSH connection-state surface (D10 / Batch H) -----------------------
     // The banner is an inline, palette-driven, keyboard-accessible row at the top
@@ -327,6 +336,13 @@ private:
     // activeExecutionContext resolution all key off the ssh:// URI. The model
     // itself receives only the POSIX path for SFTP operations.
     QString m_sshWorkspaceUri;
+
+    // Transfer manager — owned QObject child; created alongside the log dialog
+    // in useRemoteBackend. Null for local workspaces.
+    remote::RemoteTransferManager *m_transferManager = nullptr;
+    QPointer<TransferLogDialog> m_transferLogDialog;
+    // Lazy-create both the progress bar and transfer manager for the given backend.
+    void setupTransferManager(remote::RemoteFsBackend *backend);
 
     // Convert a POSIX path from the remote model to an ssh:// URI when this dock
     // is an SSH workspace, so open/preview consumers receive the correct identity.

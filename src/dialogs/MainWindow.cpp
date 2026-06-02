@@ -107,6 +107,8 @@
 #include "SshDebugDialog.h"
 #include "SshConnectDialog.h"
 #include "SshRemoteFolderPickerDialog.h"
+#include "remote/RemoteTransferManager.h"
+#include "TransferConflictDialog.h"
 
 #include "FindReplaceDialog.h"
 #include "MacroRunDialog.h"
@@ -2808,7 +2810,197 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         });
         menu->addAction(showInExplorer);
 
-        // --- Open Terminal Here (directory only) ---
+        // --- Download / Upload (SSH workspaces only) ---
+        if (isSshDock) {
+            menu->addSeparator();
+
+            remote::RemoteTransferManager *txMgr = dock ? dock->transferManager() : nullptr;
+            const QStringList selectedPaths = dock ? dock->selectedPaths() : QStringList();
+            const QList<bool> selectedDirs = dock ? dock->selectedAreDirs() : QList<bool>();
+
+            // Decide which selection to operate on:
+            //   - If more than one item is selected, use all selected items.
+            //   - Otherwise use absPath (the right-clicked item).
+            const bool multiSelect = selectedPaths.size() > 1;
+            const QStringList operationPaths = multiSelect ? selectedPaths : QStringList{absPath};
+            // For multi-select, treat as "has directory" if any selected item is a dir.
+            bool anyDir = isDir;
+            if (multiSelect) {
+                for (bool d : selectedDirs) { if (d) { anyDir = true; break; } }
+            }
+            const bool allFiles = !anyDir && !multiSelect;
+
+            // --- Download ---
+            if (!multiSelect && !isDir) {
+                // Single file: simple "Download File" action.
+                auto *dlAction = new QAction(tr("Download File"), menu);
+                if (!txMgr) dlAction->setEnabled(false);
+                connect(dlAction, &QAction::triggered, this,
+                        [this, dock, absPath, txMgr]() {
+                    if (!txMgr) return;
+                    const remote::SshUri uri = remote::parseSshUri(absPath);
+                    if (!uri.valid) return;
+                    const QString fileName = uri.remotePath.section(QLatin1Char('/'), -1);
+                    const QString destPath = QFileDialog::getSaveFileName(
+                        this, tr("Download File"), QDir::homePath() + QLatin1Char('/') + fileName);
+                    if (destPath.isEmpty()) return;
+                    txMgr->downloadFile(uri.remotePath, destPath);
+                });
+                menu->addAction(dlAction);
+            } else {
+                // Folder or multi-select: Download submenu.
+                auto *dlMenu = new QMenu(tr("Download"), menu);
+
+                auto *dlAllAction = new QAction(tr("Download All"), dlMenu);
+                if (!txMgr) dlAllAction->setEnabled(false);
+                connect(dlAllAction, &QAction::triggered, this,
+                        [this, dock, operationPaths, txMgr]() {
+                    if (!txMgr) return;
+                    const QString destDir = QFileDialog::getExistingDirectory(
+                        this, tr("Download To"), QDir::homePath());
+                    if (destDir.isEmpty()) return;
+                    QStringList remotePaths;
+                    remotePaths.reserve(operationPaths.size());
+                    for (const QString &p : operationPaths) {
+                        const remote::SshUri uri = remote::parseSshUri(p);
+                        if (uri.valid) remotePaths.append(uri.remotePath);
+                    }
+                    txMgr->downloadRecursive(remotePaths, destDir,
+                                             remote::RemoteTransferManager::GitignoreFilter::None);
+                });
+                dlMenu->addAction(dlAllAction);
+
+                auto *dlGitignoreAction = new QAction(tr("Download (Skip .gitignore)"), dlMenu);
+                if (!txMgr) dlGitignoreAction->setEnabled(false);
+                connect(dlGitignoreAction, &QAction::triggered, this,
+                        [this, dock, operationPaths, txMgr]() {
+                    if (!txMgr) return;
+                    const QString destDir = QFileDialog::getExistingDirectory(
+                        this, tr("Download To"), QDir::homePath());
+                    if (destDir.isEmpty()) return;
+                    QStringList remotePaths;
+                    remotePaths.reserve(operationPaths.size());
+                    for (const QString &p : operationPaths) {
+                        const remote::SshUri uri = remote::parseSshUri(p);
+                        if (uri.valid) remotePaths.append(uri.remotePath);
+                    }
+                    txMgr->downloadRecursive(remotePaths, destDir,
+                                             remote::RemoteTransferManager::GitignoreFilter::Apply);
+                });
+                dlMenu->addAction(dlGitignoreAction);
+
+                menu->addMenu(dlMenu);
+            }
+
+            // --- Upload (directory target only) ---
+            if (isDir) {
+                const remote::SshUri targetUri = remote::parseSshUri(absPath);
+
+                auto *ulFilesAction = new QAction(tr("Upload Files..."), menu);
+                if (!txMgr || !targetUri.valid) ulFilesAction->setEnabled(false);
+                connect(ulFilesAction, &QAction::triggered, this,
+                        [this, txMgr, targetUri]() {
+                    if (!txMgr || !targetUri.valid) return;
+                    const QStringList localFiles = QFileDialog::getOpenFileNames(
+                        this, tr("Upload Files"), QDir::homePath());
+                    if (localFiles.isEmpty()) return;
+
+                    // W3: Ask upfront whether to override all conflicts or detect them.
+                    QMessageBox ask(this);
+                    ask.setWindowTitle(tr("Upload Files"));
+                    ask.setText(tr("How should existing remote files be handled?"));
+                    QPushButton *detectBtn   = ask.addButton(tr("Detect Conflicts"), QMessageBox::AcceptRole);
+                    QPushButton *overrideBtn = ask.addButton(tr("Overwrite All"),    QMessageBox::DestructiveRole);
+                    ask.addButton(QMessageBox::Cancel);
+                    ask.setDefaultButton(detectBtn);
+                    ask.exec();
+                    if (ask.clickedButton() == nullptr ||
+                        ask.button(QMessageBox::Cancel) == ask.clickedButton())
+                        return;
+                    const bool overrideAll = (ask.clickedButton() == overrideBtn);
+
+                    if (overrideAll) {
+                        txMgr->uploadFiles(localFiles, targetUri.remotePath, {}, true);
+                        return;
+                    }
+
+                    // Run conflict detection; if conflicts found, show TransferConflictDialog.
+                    QPointer<MainWindow> guard(this);
+                    QPointer<remote::RemoteTransferManager> mgr(txMgr);
+                    connect(txMgr, &remote::RemoteTransferManager::uploadConflictsDetected,
+                            this, [guard, mgr, localFiles](const QStringList &conflicts,
+                                  const QString & /*remoteDir*/, const QStringList & /*lPaths*/) {
+                        if (guard.isNull() || mgr.isNull()) return;
+                        auto *dlg = new TransferConflictDialog(conflicts, guard);
+                        dlg->setAttribute(Qt::WA_DeleteOnClose);
+                        if (dlg->exec() == QDialog::Accepted) {
+                            // Convert dialog result to manager's type.
+                            QHash<QString, remote::RemoteTransferManager::ConflictResolution> resMap;
+                            for (auto it = dlg->result().cbegin(); it != dlg->result().cend(); ++it) {
+                                resMap.insert(it.key(),
+                                    it.value() == TransferConflictDialog::Skip
+                                        ? remote::RemoteTransferManager::ConflictResolution::Skip
+                                        : remote::RemoteTransferManager::ConflictResolution::Replace);
+                            }
+                            mgr->resolveUploadConflicts(resMap, dlg->overrideAll());
+                        }
+                    }, Qt::SingleShotConnection);
+                    txMgr->uploadFiles(localFiles, targetUri.remotePath);
+                });
+                menu->addAction(ulFilesAction);
+
+                auto *ulFolderAction = new QAction(tr("Upload Folder..."), menu);
+                if (!txMgr || !targetUri.valid) ulFolderAction->setEnabled(false);
+                connect(ulFolderAction, &QAction::triggered, this,
+                        [this, txMgr, targetUri]() {
+                    if (!txMgr || !targetUri.valid) return;
+                    const QString localFolder = QFileDialog::getExistingDirectory(
+                        this, tr("Select Folder to Upload"), QDir::homePath());
+                    if (localFolder.isEmpty()) return;
+
+                    // W3: Ask upfront whether to override all conflicts or detect them.
+                    QMessageBox ask(this);
+                    ask.setWindowTitle(tr("Upload Folder"));
+                    ask.setText(tr("How should existing remote files be handled?"));
+                    QPushButton *detectBtn2   = ask.addButton(tr("Detect Conflicts"), QMessageBox::AcceptRole);
+                    QPushButton *overrideBtn2 = ask.addButton(tr("Overwrite All"),    QMessageBox::DestructiveRole);
+                    ask.addButton(QMessageBox::Cancel);
+                    ask.setDefaultButton(detectBtn2);
+                    ask.exec();
+                    if (ask.clickedButton() == nullptr ||
+                        ask.button(QMessageBox::Cancel) == ask.clickedButton())
+                        return;
+                    const bool overrideAll2 = (ask.clickedButton() == overrideBtn2);
+
+                    if (overrideAll2) {
+                        txMgr->uploadFolder(localFolder, targetUri.remotePath, {}, true);
+                        return;
+                    }
+
+                    QPointer<MainWindow> guard(this);
+                    QPointer<remote::RemoteTransferManager> mgr(txMgr);
+                    connect(txMgr, &remote::RemoteTransferManager::uploadConflictsDetected,
+                            this, [guard, mgr, localFolder](const QStringList &conflicts,
+                                  const QString & /*remoteDir*/, const QStringList & /*lPaths*/) {
+                        if (guard.isNull() || mgr.isNull()) return;
+                        auto *dlg = new TransferConflictDialog(conflicts, guard);
+                        dlg->setAttribute(Qt::WA_DeleteOnClose);
+                        if (dlg->exec() == QDialog::Accepted) {
+                            QHash<QString, remote::RemoteTransferManager::ConflictResolution> resMap;
+                            for (auto it = dlg->result().cbegin(); it != dlg->result().cend(); ++it) {
+                                resMap.insert(it.key(),
+                                    it.value() == TransferConflictDialog::Skip
+                                        ? remote::RemoteTransferManager::ConflictResolution::Skip
+                                        : remote::RemoteTransferManager::ConflictResolution::Replace);
+                            }
+                            mgr->resolveUploadConflicts(resMap, dlg->overrideAll());
+                        }
+                    }, Qt::SingleShotConnection);
+                    txMgr->uploadFolder(localFolder, targetUri.remotePath);
+                });
+                menu->addAction(ulFolderAction);
+            }
+        }
         if (isDir) {
             auto *openTerminal = new QAction(tr("Open Terminal Here"), menu);
             if (remote::isSshUri(wsRoot)) {

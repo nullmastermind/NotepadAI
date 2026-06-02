@@ -54,6 +54,8 @@ RemoteFsBackend::RemoteFsBackend(SshConnection *connection, QObject *parent)
         // SshConnection; resolve them to the right pending callback by reqId.
         connect(m_connection, &SshConnection::sftpReadResult,
                 this, &RemoteFsBackend::onReadResult);
+        connect(m_connection, &SshConnection::sftpReadChunkResult,
+                this, &RemoteFsBackend::onStreamChunk);
         connect(m_connection, &SshConnection::sftpWriteResult,
                 this, &RemoteFsBackend::onWriteResult);
         connect(m_connection, &SshConnection::sftpStatResult,
@@ -94,6 +96,12 @@ RemoteFsBackend::~RemoteFsBackend()
         if (it.value()) it.value()(false, reason);
     }
     m_mutateCallbacks.clear();
+    // Drain any in-flight streaming reads with a failure callback.
+    for (auto it = m_streamDoneCallbacks.begin(); it != m_streamDoneCallbacks.end(); ++it) {
+        if (it.value()) it.value()(false, reason);
+    }
+    m_streamChunkCallbacks.clear();
+    m_streamDoneCallbacks.clear();
 }
 
 // --- async API ---------------------------------------------------------------
@@ -115,6 +123,9 @@ void RemoteFsBackend::cancelReadAsync(quint64 reqId)
     // Remove the pending callback so a late sftpReadDone for this reqId is
     // silently discarded rather than firing after the timeout.
     m_readCallbacks.remove(reqId);
+    // Also handle streaming read cancellations.
+    m_streamChunkCallbacks.remove(reqId);
+    m_streamDoneCallbacks.remove(reqId);
     m_connection->sftpCancelBulk(reqId);
 }
 
@@ -150,6 +161,21 @@ quint64 RemoteFsBackend::readFileAsyncTracked(const QString &path, ReadCallback 
         m_readCallbacks.insert(reqId, std::move(wrapped));
     }
     m_connection->sftpRead(reqId, path);
+    return reqId;
+}
+
+quint64 RemoteFsBackend::readFileStreamAsync(const QString &path,
+                                              StreamChunkCallback chunkCb,
+                                              StreamDoneCallback doneCb)
+{
+    if (!m_connection) {
+        if (doneCb) doneCb(false, tr("No SSH connection"));
+        return 0;
+    }
+    const quint64 reqId = ++m_nextReqId;
+    if (chunkCb) m_streamChunkCallbacks.insert(reqId, std::move(chunkCb));
+    if (doneCb)  m_streamDoneCallbacks.insert(reqId, std::move(doneCb));
+    m_connection->sftpStreamRead(reqId, path);
     return reqId;
 }
 
@@ -299,9 +325,31 @@ void RemoteFsBackend::unlinkAsync(const QString &path, MutateCallback cb)
 
 // --- result handlers (UI thread) ---------------------------------------------
 
+void RemoteFsBackend::onStreamChunk(quint64 reqId, const QByteArray &chunk)
+{
+    auto it = m_streamChunkCallbacks.find(reqId);
+    if (it == m_streamChunkCallbacks.end()) {
+        return; // cancelled or not ours
+    }
+    if (it.value()) it.value()(chunk);
+}
+
 void RemoteFsBackend::onReadResult(quint64 reqId, bool ok, const QByteArray &data,
                                    const QString &error)
 {
+    // Check if this is a stream-read completion (StreamRead ops emit sftpReadDone
+    // on EOF with empty data, having delivered all content via sftpReadChunk).
+    {
+        auto doneIt = m_streamDoneCallbacks.find(reqId);
+        if (doneIt != m_streamDoneCallbacks.end()) {
+            const StreamDoneCallback doneCb = std::move(doneIt.value());
+            m_streamDoneCallbacks.erase(doneIt);
+            m_streamChunkCallbacks.remove(reqId); // clean up paired chunk map
+            if (doneCb) doneCb(ok, error);
+            return;
+        }
+    }
+
     auto it = m_readCallbacks.find(reqId);
     if (it == m_readCallbacks.end()) {
         return; // not ours (or already resolved)
@@ -391,6 +439,13 @@ void RemoteFsBackend::onConnectionLost(const QString &reason)
     QHash<quint64, MutateCallback> mutates = std::move(m_mutateCallbacks);
     m_mutateCallbacks.clear();
     for (auto &cb : mutates) {
+        if (cb) cb(false, msg);
+    }
+    // Drain in-flight streaming reads.
+    m_streamChunkCallbacks.clear(); // chunks are not replayed — just discard
+    QHash<quint64, StreamDoneCallback> streamDone = std::move(m_streamDoneCallbacks);
+    m_streamDoneCallbacks.clear();
+    for (auto &cb : streamDone) {
         if (cb) cb(false, msg);
     }
 }

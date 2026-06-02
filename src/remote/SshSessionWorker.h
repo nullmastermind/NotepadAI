@@ -176,6 +176,9 @@ public slots:
     // drives as far as it can now; EAGAIN re-arms on the next socket edge
     // (production) or serviceSftpForTest (tests).
     void requestSftpRead(quint64 reqId, const QString &path);
+    // Streaming variant: emits sftpReadChunk() per chunk instead of buffering.
+    // On EOF emits sftpReadDone(reqId, true, {}, "") with empty data.
+    void requestSftpStreamRead(quint64 reqId, const QString &path);
     void requestSftpWrite(quint64 reqId, const QString &path, const QByteArray &data);
     void requestSftpStat(quint64 reqId, const QString &path);
     void requestSftpReaddir(quint64 reqId, const QString &path);
@@ -232,6 +235,8 @@ signals:
 
     // --- SFTP result signals (D1) --------------------------------------------
     void sftpReadDone(quint64 reqId, bool ok, const QByteArray &data, const QString &error);
+    // Streaming read: each non-empty chunk emitted here as it arrives (StreamRead ops).
+    void sftpReadChunk(quint64 reqId, const QByteArray &chunk);
     void sftpWriteDone(quint64 reqId, bool ok, const QString &error);
     void sftpStatDone(quint64 reqId, bool ok, bool exists, bool isDir,
                       qint64 size, qint64 mtimeSecs, const QString &error);
@@ -358,7 +363,7 @@ private:
     // service function. Both are driven from onSocketActivity (after pump). Both
     // count toward the unified cap's 2-SFTP-reserved budget (FIX-2). A large bulk
     // read can never block tree-poll/readdir behind it.
-    enum class SftpKind { Read, Write, Stat, Readdir, Rename, Mkdir, Unlink };
+    enum class SftpKind { Read, StreamRead, Write, Stat, Readdir, Rename, Mkdir, Unlink };
     enum class SftpPhase { NeedOpen, Transfer, NeedClose };
     enum class SftpLane { Bulk, Meta };
 

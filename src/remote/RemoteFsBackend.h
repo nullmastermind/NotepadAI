@@ -76,6 +76,10 @@ public:
     using ReaddirCallback =
         std::function<void(bool ok, const QList<RemoteDirEntry> &entries, const QString &error)>;
     using MutateCallback = std::function<void(bool ok, const QString &error)>;
+    // Streaming file read callbacks: chunkCb fires for each chunk as it arrives;
+    // doneCb fires exactly once on EOF (ok=true) or error (ok=false).
+    using StreamChunkCallback = std::function<void(const QByteArray &chunk)>;
+    using StreamDoneCallback  = std::function<void(bool ok, const QString &error)>;
 
     explicit RemoteFsBackend(SshConnection *connection, QObject *parent = nullptr);
     ~RemoteFsBackend() override;
@@ -97,6 +101,11 @@ public:
     void readFileAsync(const QString &path, ReadCallback cb) override;
     // Like readFileAsync but returns the reqId so the caller can cancel it later.
     quint64 readFileAsyncTracked(const QString &path, ReadCallback cb);
+    // Streaming read: chunkCb fires for each chunk; doneCb fires once on completion.
+    // Returns the reqId (usable with cancelReadAsync). The bulk SFTP lane is used.
+    quint64 readFileStreamAsync(const QString &path,
+                                StreamChunkCallback chunkCb,
+                                StreamDoneCallback doneCb);
     void writeFileAsync(const QString &path, const QByteArray &data, WriteCallback cb) override;
     void statAsync(const QString &path, StatCallback cb);
     void readdirAsync(const QString &path, ReaddirCallback cb);
@@ -151,6 +160,7 @@ private:
     void readdirAttempt(const QString &path, ReaddirCallback cb, int attempt);
 
     void onReadResult(quint64 reqId, bool ok, const QByteArray &data, const QString &error);
+    void onStreamChunk(quint64 reqId, const QByteArray &chunk);
     void onWriteResult(quint64 reqId, bool ok, const QString &error);
     void onStatResult(quint64 reqId, bool ok, bool exists, bool isDir,
                       qint64 size, qint64 mtimeSecs, const QString &error);
@@ -169,6 +179,9 @@ private:
     QHash<quint64, StatCallback> m_statCallbacks;
     QHash<quint64, ReaddirCallback> m_readdirCallbacks;
     QHash<quint64, MutateCallback> m_mutateCallbacks; // rename / mkdir / unlink share one map
+    // Streaming read callbacks: a StreamRead reqId lives in BOTH of these maps.
+    QHash<quint64, StreamChunkCallback> m_streamChunkCallbacks;
+    QHash<quint64, StreamDoneCallback>  m_streamDoneCallbacks;
 };
 
 } // namespace remote
