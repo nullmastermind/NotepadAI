@@ -235,7 +235,7 @@ QVariant RemoteFileSystemModel::data(const QModelIndex &index, int role) const
         // their own basename.
         return n->parent ? n->name : QFileInfo(m_rootPath).fileName();
     case Qt::ToolTipRole:
-        return QDir::toNativeSeparators(pathOf(n));
+        return pathOf(n);
     case Qt::DecorationRole:
         return genericIcon(n->isDir);
     case Qt::ForegroundRole:

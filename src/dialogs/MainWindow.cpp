@@ -2576,26 +2576,35 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         }
 
         // --- Copy Path / Copy Relative Path ---
+        // Use the dock's own rootPath() — not currentWorkspaceRoot() — so that
+        // right-clicking in a non-active workspace dock still gets the correct
+        // SSH/local classification for that dock.
+        const QString dockRoot = dock ? dock->rootPath() : wsRoot;
+        const bool isSshDock = remote::isSshUri(dockRoot);
         auto *copyPath = new QAction(tr("Copy Path"), menu);
-        connect(copyPath, &QAction::triggered, this, [absPath]() {
-            QApplication::clipboard()->setText(QDir::toNativeSeparators(absPath));
+        connect(copyPath, &QAction::triggered, this, [absPath, isSshDock]() {
+            // SSH remote paths are POSIX — keep forward slashes unchanged.
+            // Local Windows paths use the native separator.
+            QApplication::clipboard()->setText(
+                isSshDock ? absPath : QDir::toNativeSeparators(absPath));
         });
         menu->addAction(copyPath);
 
         auto *copyRelPath = new QAction(tr("Copy Relative Path"), menu);
-        connect(copyRelPath, &QAction::triggered, this, [absPath, wsRoot]() {
+        connect(copyRelPath, &QAction::triggered, this, [absPath, dockRoot, isSshDock]() {
             QString rel = absPath;
-            // For SSH workspaces wsRoot is an ssh:// URI; strip the POSIX prefix
+            // For SSH workspaces dockRoot is an ssh:// URI; strip the POSIX prefix
             // from the POSIX absPath instead of the URI.
-            const QString prefix = remote::isSshUri(wsRoot)
-                ? remote::parseSshUri(wsRoot).remotePath
-                : wsRoot;
+            const QString prefix = isSshDock
+                ? remote::parseSshUri(dockRoot).remotePath
+                : dockRoot;
             if (!prefix.isEmpty() && rel.startsWith(prefix)) {
                 rel = rel.mid(prefix.length());
                 if (rel.startsWith(QLatin1Char('/')) || rel.startsWith(QLatin1Char('\\')))
                     rel = rel.mid(1);
             }
-            QApplication::clipboard()->setText(QDir::toNativeSeparators(rel));
+            QApplication::clipboard()->setText(
+                isSshDock ? rel : QDir::toNativeSeparators(rel));
         });
         menu->addAction(copyRelPath);
 

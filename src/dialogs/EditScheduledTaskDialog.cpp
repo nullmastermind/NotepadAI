@@ -43,6 +43,7 @@
 #include "NotepadNextApplication.h"
 #include "ai/CredentialStore.h"
 #include "ai/LlmHttpClient.h"
+#include "remote/SshProfile.h"
 
 EditScheduledTaskDialog::EditScheduledTaskDialog(const ScheduledTaskDefinition &def,
                                                  AcpAgentRegistry *agentRegistry,
@@ -96,11 +97,14 @@ EditScheduledTaskDialog::EditScheduledTaskDialog(const ScheduledTaskDefinition &
     m_workspaceCombo->setEditable(true);
     for (const QString &ws : recentWorkspaces) {
         if (!ws.isEmpty())
-            m_workspaceCombo->addItem(QDir::toNativeSeparators(ws), ws);
+            m_workspaceCombo->addItem(
+                remote::isSshUri(ws) ? ws : QDir::toNativeSeparators(ws), ws);
     }
     if (!def.cwd.isEmpty()) {
         if (m_workspaceCombo->findData(def.cwd) < 0)
-            m_workspaceCombo->insertItem(0, QDir::toNativeSeparators(def.cwd), def.cwd);
+            m_workspaceCombo->insertItem(0,
+                remote::isSshUri(def.cwd) ? def.cwd : QDir::toNativeSeparators(def.cwd),
+                def.cwd);
         m_workspaceCombo->setCurrentIndex(m_workspaceCombo->findData(def.cwd));
     }
     m_browseBtn = new QPushButton(tr("..."), this);
