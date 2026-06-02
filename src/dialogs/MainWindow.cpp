@@ -60,7 +60,13 @@
 #include <memory>
 
 #ifdef Q_OS_WIN
-#include <QSimpleUpdater.h>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QDesktopServices>
+#include <QRegularExpression>
 #include <Windows.h>
 #endif
 
@@ -4856,21 +4862,92 @@ void MainWindow::addEditor(ScintillaNext *editor)
     dockedEditor->addEditor(editor);
 }
 
+static bool compareVersions(const QString &remote, const QString &local)
+{
+    static QRegularExpression re("v?(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?");
+    QRegularExpressionMatch remoteMatch = re.match(remote);
+    QRegularExpressionMatch localMatch = re.match(local);
+
+    if (!remoteMatch.hasMatch() || !localMatch.hasMatch())
+        return false;
+
+    for (int i = 1; i <= 3; ++i) {
+        int r = remoteMatch.captured(i).toInt();
+        int l = localMatch.captured(i).toInt();
+        if (r > l) return true;
+        if (l > r) return false;
+    }
+    return false;
+}
+
 void MainWindow::checkForUpdates(bool silent)
 {
 #ifdef Q_OS_WIN
     qInfo(Q_FUNC_INFO);
 
-    QString url = "https://github.com/dail8859/NotepadNext/raw/master/updates.json";
-    QSimpleUpdater::getInstance()->checkForUpdates(url);
+    auto *manager = new QNetworkAccessManager(this);
+    QNetworkRequest request(QUrl("https://api.github.com/repos/nullmastermind/NotepadAI/releases/latest"));
+    request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("NotepadAI/%1").arg(APP_VERSION));
+    request.setRawHeader("Accept", "application/vnd.github+json");
 
-    if (!silent) {
-        connect(QSimpleUpdater::getInstance(), &QSimpleUpdater::checkingFinished, this, &MainWindow::checkForUpdatesFinished, Qt::UniqueConnection);
-    }
-    else {
-        disconnect(QSimpleUpdater::getInstance(), &QSimpleUpdater::checkingFinished, this, &MainWindow::checkForUpdatesFinished);
-    }
+    QNetworkReply *reply = manager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, manager, silent]() {
+        reply->deleteLater();
+        manager->deleteLater();
 
+        if (reply->error() != QNetworkReply::NoError) {
+            if (!silent)
+                QMessageBox::warning(this, QString(), tr("Failed to check for updates: %1").arg(reply->errorString()));
+            return;
+        }
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        if (doc.isNull()) {
+            if (!silent)
+                QMessageBox::warning(this, QString(), tr("Failed to parse update information."));
+            return;
+        }
+
+        QJsonObject obj = doc.object();
+        QString tagName = obj.value("tag_name").toString();
+        QString htmlUrl = obj.value("html_url").toString();
+        QString body = obj.value("body").toString();
+
+        if (compareVersions(tagName, APP_VERSION)) {
+            QString qtSuffix = QStringLiteral("qt%1%2").arg(QT_VERSION_MAJOR).arg(QT_VERSION_MINOR);
+            QString downloadUrl;
+            QJsonArray assets = obj.value("assets").toArray();
+            for (const QJsonValue &val : assets) {
+                QString name = val.toObject().value("name").toString();
+                if (name.contains(qtSuffix) && name.contains("win64") && name.endsWith(".zip")) {
+                    downloadUrl = val.toObject().value("browser_download_url").toString();
+                    break;
+                }
+            }
+            if (downloadUrl.isEmpty()) {
+                for (const QJsonValue &val : assets) {
+                    QString name = val.toObject().value("name").toString();
+                    if (name.contains(qtSuffix) && name.contains("Installer") && name.endsWith(".exe")) {
+                        downloadUrl = val.toObject().value("browser_download_url").toString();
+                        break;
+                    }
+                }
+            }
+
+            QString text = tr("A new version <b>%1</b> is available.").arg(tagName);
+            if (!body.isEmpty())
+                text += tr("<br><br><b>Release notes:</b><br>%1").arg(body.left(500).toHtmlEscaped().replace("\n", "<br>"));
+            text += tr("<br><br>Would you like to open the download page?");
+
+            auto result = QMessageBox::information(this, tr("Update Available"), text,
+                                                   QMessageBox::Yes | QMessageBox::No);
+            if (result == QMessageBox::Yes) {
+                QDesktopServices::openUrl(QUrl(downloadUrl.isEmpty() ? htmlUrl : downloadUrl));
+            }
+        } else if (!silent) {
+            QMessageBox::information(this, QString(), tr("No updates are available at this time."));
+        }
+    });
 
     app->getSettings()->setValue("App/LastUpdateCheck", QDateTime::currentDateTime());
 #else
@@ -4880,11 +4957,7 @@ void MainWindow::checkForUpdates(bool silent)
 
 void MainWindow::checkForUpdatesFinished(const QString &url)
 {
-#ifdef Q_OS_WIN
-    if (!QSimpleUpdater::getInstance()->getUpdateAvailable(url)) {
-        QMessageBox::information(this, QString(), tr("No updates are available at this time."));
-    }
-#endif
+    Q_UNUSED(url);
 }
 
 void MainWindow::initUpdateCheck()

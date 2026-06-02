@@ -604,7 +604,6 @@ target_link_libraries(NotepadAI
         Qt6::PrintSupport
         Qt6::Concurrent
         qtadvanceddocking-qt6
-        QSimpleUpdater
         SingleApplication::SingleApplication
         editorconfig-core-qt
         lua
@@ -624,7 +623,6 @@ target_link_libraries(NotepadAI
 target_compile_definitions(NotepadAI
     PRIVATE
         ADS_STATIC
-        QSIMPLEUPDATER_STATIC
         QAPPLICATION_CLASS=QApplication
         APP_VERSION="${PROJECT_VERSION}"
         APP_COPYRIGHT="${APP_COPYRIGHT}"
