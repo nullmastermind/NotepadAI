@@ -238,6 +238,10 @@ private:
     QComboBox *m_modeCombo = nullptr;
     QComboBox *m_effortCombo = nullptr;
     QString m_effortConfigOptionId;
+    // Non-empty when the agent exposes the model picker as a config option
+    // (e.g. Claude Code's `model` select) rather than the top-level models
+    // array. Drives whether model changes dispatch via session/set_config.
+    QString m_modelConfigOptionId;
 
     // Auto-approve
     QCheckBox *m_autoApproveCheck = nullptr;

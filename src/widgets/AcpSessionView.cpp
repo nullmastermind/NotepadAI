@@ -1090,17 +1090,41 @@ void AcpSessionView::onMetadataChanged()
     if (!m_model) return;
     m_updatingSelectors = true;
 
-    // Models combo.
+    // Models combo. Prefer the top-level models catalog; if the agent
+    // doesn't surface one, fall back to a `model` config option (Claude Code
+    // exposes the picker only via configOptions, never the models array).
     m_modelCombo->clear();
+    m_modelConfigOptionId.clear();
     const auto &models = m_model->availableModels();
-    for (const auto &m : models) {
-        m_modelCombo->addItem(m.name.isEmpty() ? m.id : m.name, m.id);
+    if (!models.isEmpty()) {
+        for (const auto &m : models) {
+            m_modelCombo->addItem(m.name.isEmpty() ? m.id : m.name, m.id);
+        }
+        if (!m_model->currentModelId().isEmpty()) {
+            const int idx = m_modelCombo->findData(m_model->currentModelId());
+            if (idx >= 0) m_modelCombo->setCurrentIndex(idx);
+        }
+    } else {
+        for (const auto &opt : m_model->configOptions()) {
+            const QString idLower = opt.id.toLower();
+            const QString catLower = opt.category.toLower();
+            const bool matches = idLower == QLatin1String("model")
+                || catLower == QLatin1String("model");
+            if (!matches) continue;
+            m_modelConfigOptionId = opt.id;
+            for (const auto &ch : opt.options) {
+                const QString label = ch.name.isEmpty() ? ch.value : ch.name;
+                if (!label.isEmpty()) m_modelCombo->addItem(label, ch.value);
+            }
+            const QString currentVal = opt.currentValue.toString();
+            if (!currentVal.isEmpty()) {
+                const int idx = m_modelCombo->findData(currentVal);
+                if (idx >= 0) m_modelCombo->setCurrentIndex(idx);
+            }
+            break;
+        }
     }
-    if (!m_model->currentModelId().isEmpty()) {
-        const int idx = m_modelCombo->findData(m_model->currentModelId());
-        if (idx >= 0) m_modelCombo->setCurrentIndex(idx);
-    }
-    m_modelCombo->setVisible(!models.isEmpty());
+    m_modelCombo->setVisible(m_modelCombo->count() > 0);
 
     // Modes combo.
     m_modeCombo->clear();
@@ -1160,8 +1184,11 @@ void AcpSessionView::onMetadataChanged()
         const QString agentId = m_connection->definition().id;
         if (!agentId.isEmpty()) {
             const QString curModel = m_model->currentModelId();
-            if (!curModel.isEmpty())
-                m_registry->setAgentPreference(agentId, QStringLiteral("model"), curModel);
+            if (!curModel.isEmpty()) {
+                const QString modelKey = m_modelConfigOptionId.isEmpty()
+                    ? QStringLiteral("model") : m_modelConfigOptionId;
+                m_registry->setAgentPreference(agentId, modelKey, curModel);
+            }
 
             const QString curMode = m_model->currentModeId();
             if (!curMode.isEmpty())
@@ -1471,10 +1498,17 @@ void AcpSessionView::onModelComboChanged(int index)
     if (m_updatingSelectors || !m_connection || index < 0) return;
     const QString id = m_modelCombo->itemData(index).toString();
     if (id.isEmpty()) return;
-    m_connection->setModel(id);
+    // Config-option-backed picker (Claude Code) → session/set_config; the
+    // dedicated session/set_model channel only applies to the models array.
+    const QString prefKey = m_modelConfigOptionId.isEmpty()
+        ? QStringLiteral("model") : m_modelConfigOptionId;
+    if (!m_modelConfigOptionId.isEmpty()) {
+        m_connection->setConfigOption(m_modelConfigOptionId, id);
+    } else {
+        m_connection->setModel(id);
+    }
     if (m_registry) {
-        m_registry->setAgentPreference(m_connection->definition().id,
-                                       QStringLiteral("model"), id);
+        m_registry->setAgentPreference(m_connection->definition().id, prefKey, id);
     }
 }
 
@@ -1518,12 +1552,28 @@ void AcpSessionView::applySavedPreferences()
     if (agentId.isEmpty()) return;
 
     // Model: send only if the saved id exists in the catalog and differs.
-    const QString savedModel = m_registry->agentPreference(agentId, QStringLiteral("model"));
+    // Config-option-backed pickers (Claude Code) restore via session/set_config.
+    const QString modelPrefKey = m_modelConfigOptionId.isEmpty()
+        ? QStringLiteral("model") : m_modelConfigOptionId;
+    const QString savedModel = m_registry->agentPreference(agentId, modelPrefKey);
     if (!savedModel.isEmpty() && savedModel != m_model->currentModelId()) {
-        for (const auto &m : m_model->availableModels()) {
-            if (m.id == savedModel) {
-                m_connection->setModel(savedModel);
+        if (!m_modelConfigOptionId.isEmpty()) {
+            for (const auto &opt : m_model->configOptions()) {
+                if (opt.id != m_modelConfigOptionId) continue;
+                for (const auto &ch : opt.options) {
+                    if (ch.value == savedModel) {
+                        m_connection->setConfigOption(m_modelConfigOptionId, savedModel);
+                        break;
+                    }
+                }
                 break;
+            }
+        } else {
+            for (const auto &m : m_model->availableModels()) {
+                if (m.id == savedModel) {
+                    m_connection->setModel(savedModel);
+                    break;
+                }
             }
         }
     }
