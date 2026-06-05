@@ -73,6 +73,60 @@ namespace {
 // when they reach this band) and for the programmatic scroll target.
 constexpr int kAtBottomEpsilonPx = 8;
 
+bool isEffortConfigOption(const AcpProtocol::AcpConfigOption &opt)
+{
+    const QString idLower = opt.id.toLower();
+    const QString catLower = opt.category.toLower();
+    const QString nameLower = opt.name.toLower();
+    return idLower.contains(QLatin1String("effort"))
+        || idLower.contains(QLatin1String("reasoning"))
+        || catLower.contains(QLatin1String("thought"))
+        || catLower.contains(QLatin1String("reasoning"))
+        || nameLower.contains(QLatin1String("effort"))
+        || nameLower.contains(QLatin1String("reasoning"));
+}
+
+bool isModelConfigOption(const AcpProtocol::AcpConfigOption &opt)
+{
+    const QString idLower = opt.id.toLower();
+    const QString catLower = opt.category.toLower();
+    return idLower == QLatin1String("model")
+        || catLower == QLatin1String("model");
+}
+
+QString baseModelId(const QString &modelId)
+{
+    const int slash = modelId.indexOf(QLatin1Char('/'));
+    return slash >= 0 ? modelId.left(slash) : modelId;
+}
+
+QString stripEffortSuffix(const QString &label)
+{
+    static const QRegularExpression re(
+        QStringLiteral(R"(\s+\((low|medium|high|xhigh)\)$)"),
+        QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch match = re.match(label);
+    return match.hasMatch() ? label.left(match.capturedStart()).trimmed() : label;
+}
+
+const AcpProtocol::AcpConfigOption *findModelConfigOption(
+    const QList<AcpProtocol::AcpConfigOption> &opts)
+{
+    for (const auto &opt : opts) {
+        if (isModelConfigOption(opt)) return &opt;
+    }
+    return nullptr;
+}
+
+const AcpProtocol::AcpConfigOption *findEffortConfigOption(
+    const QList<AcpProtocol::AcpConfigOption> &opts)
+{
+    for (const auto &opt : opts) {
+        if (isEffortConfigOption(opt)) return &opt;
+    }
+    return nullptr;
+}
+
 // SVG icons that use stroke="currentColor" resolve to opaque black under Qt's
 // svg icon engine, so they vanish on dark backgrounds. Re-render the icon at
 // the sizes Qt is likely to ask for and tint each pixmap via SourceIn so the
@@ -1090,38 +1144,62 @@ void AcpSessionView::onMetadataChanged()
     if (!m_model) return;
     m_updatingSelectors = true;
 
-    // Models combo. Prefer the top-level models catalog; if the agent
-    // doesn't surface one, fall back to a `model` config option (Claude Code
-    // exposes the picker only via configOptions, never the models array).
+    const auto &configOpts = m_model->configOptions();
+    const AcpProtocol::AcpConfigOption *modelOpt = findModelConfigOption(configOpts);
+    const AcpProtocol::AcpConfigOption *effortOpt = findEffortConfigOption(configOpts);
+
+    // Models combo. Codex exposes base models via configOptions.model and
+    // reasoning effort separately (reasoning_effort). Its legacy models array
+    // still lists every model×effort pair ("gpt-5.5 (medium)", id "gpt-5.5/medium").
+    // Prefer the config option; when falling back to the models array, collapse
+    // to unique base models whenever effort is configured separately.
     m_modelCombo->clear();
     m_modelConfigOptionId.clear();
-    const auto &models = m_model->availableModels();
-    if (!models.isEmpty()) {
-        for (const auto &m : models) {
-            m_modelCombo->addItem(m.name.isEmpty() ? m.id : m.name, m.id);
+
+    if (modelOpt) {
+        m_modelConfigOptionId = modelOpt->id;
+        for (const auto &ch : modelOpt->options) {
+            const QString label = ch.name.isEmpty() ? ch.value : ch.name;
+            if (label.isEmpty()) continue;
+            if (m_modelCombo->findData(ch.value) >= 0) continue;
+            m_modelCombo->addItem(label, ch.value);
         }
-        if (!m_model->currentModelId().isEmpty()) {
-            const int idx = m_modelCombo->findData(m_model->currentModelId());
+        const QString currentVal = modelOpt->currentValue.toString();
+        if (!currentVal.isEmpty()) {
+            const int idx = m_modelCombo->findData(currentVal);
             if (idx >= 0) m_modelCombo->setCurrentIndex(idx);
         }
-    } else {
-        for (const auto &opt : m_model->configOptions()) {
-            const QString idLower = opt.id.toLower();
-            const QString catLower = opt.category.toLower();
-            const bool matches = idLower == QLatin1String("model")
-                || catLower == QLatin1String("model");
-            if (!matches) continue;
-            m_modelConfigOptionId = opt.id;
-            for (const auto &ch : opt.options) {
-                const QString label = ch.name.isEmpty() ? ch.value : ch.name;
-                if (!label.isEmpty()) m_modelCombo->addItem(label, ch.value);
+    }
+
+    if (m_modelCombo->count() == 0) {
+        const auto &models = m_model->availableModels();
+        bool collapseEffort = effortOpt != nullptr;
+        if (!collapseEffort) {
+            for (const auto &m : models) {
+                if (m.id.contains(QLatin1Char('/'))) {
+                    collapseEffort = true;
+                    break;
+                }
             }
-            const QString currentVal = opt.currentValue.toString();
-            if (!currentVal.isEmpty()) {
-                const int idx = m_modelCombo->findData(currentVal);
-                if (idx >= 0) m_modelCombo->setCurrentIndex(idx);
+        }
+
+        for (const auto &m : models) {
+            QString id = m.id;
+            QString label = m.name.isEmpty() ? m.id : m.name;
+            if (collapseEffort) {
+                id = baseModelId(id);
+                label = stripEffortSuffix(label);
+                if (id.isEmpty()) continue;
             }
-            break;
+            if (m_modelCombo->findData(id) >= 0) continue;
+            m_modelCombo->addItem(label, id);
+        }
+
+        QString currentId = m_model->currentModelId();
+        if (!currentId.isEmpty()) {
+            if (collapseEffort) currentId = baseModelId(currentId);
+            const int idx = m_modelCombo->findData(currentId);
+            if (idx >= 0) m_modelCombo->setCurrentIndex(idx);
         }
     }
     m_modelCombo->setVisible(m_modelCombo->count() > 0);
@@ -1138,36 +1216,22 @@ void AcpSessionView::onMetadataChanged()
     }
     m_modeCombo->setVisible(!modes.isEmpty());
 
-    // Effort/reasoning config-option combo. Matches on id, category, or name
-    // so we pick up Claude Code's `effort` (category: "thought_level") as well
-    // as agents that surface a different label.
+    // Effort/reasoning combo (Claude Code, Codex reasoning_effort, etc).
     m_effortCombo->clear();
     m_effortConfigOptionId.clear();
-    const auto &configOpts = m_model->configOptions();
-    for (const auto &opt : configOpts) {
-        const QString idLower = opt.id.toLower();
-        const QString catLower = opt.category.toLower();
-        const QString nameLower = opt.name.toLower();
-        const bool matches = idLower.contains(QLatin1String("effort"))
-            || idLower.contains(QLatin1String("reasoning"))
-            || catLower.contains(QLatin1String("thought"))
-            || catLower.contains(QLatin1String("reasoning"))
-            || nameLower.contains(QLatin1String("effort"))
-            || nameLower.contains(QLatin1String("reasoning"));
-        if (!matches) continue;
-        m_effortConfigOptionId = opt.id;
-        for (const auto &ch : opt.options) {
+    if (effortOpt) {
+        m_effortConfigOptionId = effortOpt->id;
+        for (const auto &ch : effortOpt->options) {
             const QString label = ch.name.isEmpty() ? ch.value : ch.name;
-            if (!label.isEmpty()) {
-                m_effortCombo->addItem(label, ch.value);
-            }
+            if (label.isEmpty()) continue;
+            if (m_effortCombo->findData(ch.value) >= 0) continue;
+            m_effortCombo->addItem(label, ch.value);
         }
-        const QString currentVal = opt.currentValue.toString();
+        const QString currentVal = effortOpt->currentValue.toString();
         if (!currentVal.isEmpty()) {
             const int idx = m_effortCombo->findData(currentVal);
             if (idx >= 0) m_effortCombo->setCurrentIndex(idx);
         }
-        break;
     }
     m_effortCombo->setVisible(m_effortCombo->count() > 0);
 
@@ -1498,8 +1562,6 @@ void AcpSessionView::onModelComboChanged(int index)
     if (m_updatingSelectors || !m_connection || index < 0) return;
     const QString id = m_modelCombo->itemData(index).toString();
     if (id.isEmpty()) return;
-    // Config-option-backed picker (Claude Code) → session/set_config; the
-    // dedicated session/set_model channel only applies to the models array.
     const QString prefKey = m_modelConfigOptionId.isEmpty()
         ? QStringLiteral("model") : m_modelConfigOptionId;
     if (!m_modelConfigOptionId.isEmpty()) {
@@ -1511,6 +1573,7 @@ void AcpSessionView::onModelComboChanged(int index)
         m_registry->setAgentPreference(m_connection->definition().id, prefKey, id);
     }
 }
+
 
 void AcpSessionView::onModeComboChanged(int index)
 {
@@ -1536,6 +1599,7 @@ void AcpSessionView::onEffortComboChanged(int index)
     }
 }
 
+
 void AcpSessionView::applySavedPreferences()
 {
     if (m_savedPrefsApplied) return;
@@ -1556,13 +1620,15 @@ void AcpSessionView::applySavedPreferences()
     const QString modelPrefKey = m_modelConfigOptionId.isEmpty()
         ? QStringLiteral("model") : m_modelConfigOptionId;
     const QString savedModel = m_registry->agentPreference(agentId, modelPrefKey);
-    if (!savedModel.isEmpty() && savedModel != m_model->currentModelId()) {
+    const QString savedModelBase = baseModelId(savedModel);
+    const QString currentModelBase = baseModelId(m_model->currentModelId());
+    if (!savedModel.isEmpty() && savedModelBase != currentModelBase) {
         if (!m_modelConfigOptionId.isEmpty()) {
             for (const auto &opt : m_model->configOptions()) {
                 if (opt.id != m_modelConfigOptionId) continue;
                 for (const auto &ch : opt.options) {
-                    if (ch.value == savedModel) {
-                        m_connection->setConfigOption(m_modelConfigOptionId, savedModel);
+                    if (ch.value == savedModel || ch.value == savedModelBase) {
+                        m_connection->setConfigOption(m_modelConfigOptionId, ch.value);
                         break;
                     }
                 }
@@ -1570,8 +1636,10 @@ void AcpSessionView::applySavedPreferences()
             }
         } else {
             for (const auto &m : m_model->availableModels()) {
-                if (m.id == savedModel) {
-                    m_connection->setModel(savedModel);
+                if (m.id == savedModel || baseModelId(m.id) == savedModelBase) {
+                    m_connection->setModel(m.id.contains(QLatin1Char('/'))
+                                               ? baseModelId(m.id)
+                                               : m.id);
                     break;
                 }
             }
