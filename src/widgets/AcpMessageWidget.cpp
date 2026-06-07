@@ -407,7 +407,15 @@ void AcpMessageWidget::rerender()
         // round-trip carries it for prose; code keeps Qt's monospace family here
         // and is rewritten to the chat family in styleCodeInDocument() below.
         if (m_chatFontSet) tmp.setDefaultFont(m_chatFont);
-        tmp.setMarkdown(ensureHardBreaks(m_text));
+        // MarkdownNoHTML: agent output is markdown, never trusted HTML. Qt's
+        // default MarkdownDialectGitHub leaves md4c's HTML parsing on, so a bare
+        // angle-bracket construct in model text (Surreal<Db>, vector<int>,
+        // "a < b") is consumed as an inline HTML tag — it swallows everything
+        // after it and only inline-code fragments survive, garbling the bubble.
+        tmp.setMarkdown(ensureHardBreaks(m_text),
+                        QTextDocument::MarkdownFeatures(
+                            QTextDocument::MarkdownDialectGitHub
+                            | QTextDocument::MarkdownNoHTML));
         QString html = tmp.toHtml();
         html.replace(QRegularExpression(QStringLiteral("<table([^>]*)>")),
                      QStringLiteral("<table\\1 cellspacing=\"0\" cellpadding=\"8\">"));
@@ -435,7 +443,13 @@ void AcpMessageWidget::rerender()
                                    || text.endsWith(QLatin1Char('\t')))) {
             text.chop(1);
         }
-        m_browser->document()->setMarkdown(ensureHardBreaks(text));
+        // MarkdownNoHTML: see the assistant branch above — a bare "<tag>" in
+        // reasoning text (e.g. "one Surreal<Db> per repo") would otherwise be
+        // eaten as inline HTML, blanking the rest of the thought.
+        m_browser->document()->setMarkdown(ensureHardBreaks(text),
+                                           QTextDocument::MarkdownFeatures(
+                                               QTextDocument::MarkdownDialectGitHub
+                                               | QTextDocument::MarkdownNoHTML));
         normalizeBlockMargins(m_browser->document());
     } else {
         // Streamed chunks often end with "\n", which QTextDocument turns into
