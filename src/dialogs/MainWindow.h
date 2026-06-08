@@ -52,6 +52,7 @@ class DefaultDirectoryManager;
 class TabsQuickActionsBar;
 class TerminalManager;
 class AiAgentDock;
+class FindInFolderDock;
 class FolderAsWorkspaceDock;
 class ConflictListDock;
 class ConflictMergeViewerDock;
@@ -315,6 +316,7 @@ private:
     FileWatcher *fileWatcher = Q_NULLPTR;
     MiniAppManager *m_miniAppManager = nullptr;
     MiniAppRegistry *m_miniAppRegistry = nullptr;
+    FindInFolderDock *findInFolderDock = nullptr;
 
     QAction *m_actionPreview = nullptr;
     QAction *m_actionQuickFileOpen = nullptr;

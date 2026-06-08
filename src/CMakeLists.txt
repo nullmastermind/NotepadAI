@@ -57,6 +57,7 @@ qt_add_executable(NotepadAI
 	PreviewTabManager.h
 	IFaceTableMixer.h
 	ISearchResultsHandler.h
+	FolderSearchEngine.h
 	LanguageStylesModel.h
 	LuaExtension.h
 	LuaState.h
@@ -167,6 +168,7 @@ qt_add_executable(NotepadAI
 	ScheduledTaskRunner.cpp
 	SearchResultHighlighterDelegate.cpp
 	SearchResultsCollector.cpp
+	FolderSearchEngine.cpp
 	SelectionTracker.cpp
 	SessionManager.cpp
 	SpinBoxDelegate.cpp
@@ -393,6 +395,9 @@ qt_add_executable(NotepadAI
 	docks/SearchResultsDock.cpp
 	docks/SearchResultsDock.h
 	docks/SearchResultsDock.ui
+	docks/FindInFolderDock.cpp
+	docks/FindInFolderDock.h
+	docks/FindInFolderDock.ui
     widgets/AcpImageAttachmentList.cpp
 	widgets/AcpImageAttachmentList.h
 	widgets/AcpMessageWidget.cpp

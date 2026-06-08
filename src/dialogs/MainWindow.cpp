@@ -88,6 +88,7 @@
 #include "FolderAsWorkspaceDock.h"
 #include "GitStatusEntry.h"
 #include "SearchResultsDock.h"
+#include "FindInFolderDock.h"
 #include "DebugLogDock.h"
 #include "FileListDock.h"
 #include "TerminalDock.h"
@@ -883,6 +884,37 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         editor->verticalCentreCaret();
 
         editor->grabFocus();
+    });
+
+    findInFolderDock = new FindInFolderDock(this);
+    addDockWidget(Qt::BottomDockWidgetArea, findInFolderDock);
+    DockMiddleClickCloser::install(findInFolderDock);
+    findInFolderDock->hide();
+    ui->menuView->addAction(findInFolderDock->toggleViewAction());
+
+    connect(findInFolderDock, &FindInFolderDock::resultActivated, this,
+            [this, app](const QString &filePath, int lineNumber, int matchStart, int matchEnd) {
+        openFile(filePath);
+        ScintillaNext *editor = app->getEditorManager()->getEditorByFilePath(filePath);
+        if (editor) {
+            dockedEditor->switchToEditor(editor);
+            int linePos = editor->positionFromLine(lineNumber);
+            editor->goToRange({linePos + matchStart, linePos + matchEnd});
+            editor->verticalCentreCaret();
+            editor->grabFocus();
+        }
+    });
+
+    connect(findInFolderDock, &FindInFolderDock::resultClicked, this,
+            [this, app](const QString &filePath, int lineNumber, int matchStart, int matchEnd) {
+        previewFile(filePath);
+        ScintillaNext *editor = app->getEditorManager()->getEditorByFilePath(filePath);
+        if (editor) {
+            dockedEditor->switchToEditor(editor);
+            int linePos = editor->positionFromLine(lineNumber);
+            editor->goToRange({linePos + matchStart, linePos + matchEnd});
+            editor->verticalCentreCaret();
+        }
     });
 
     connect(ui->actionFind, &QAction::triggered, this, [this]() {
@@ -3117,6 +3149,15 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 });
             }
             menu->addAction(openTerminal);
+        }
+
+        // --- Find in Folder (local directories only) ---
+        if (isDir && !isSshDock) {
+            auto *findInFolder = new QAction(tr("Find in Folder..."), menu);
+            connect(findInFolder, &QAction::triggered, this, [this, absPath, wsRoot]() {
+                findInFolderDock->setFolder(absPath, wsRoot);
+            });
+            menu->addAction(findInFolder);
         }
 
         // --- Export via Pandoc (markdown files only, local workspaces only) ---
