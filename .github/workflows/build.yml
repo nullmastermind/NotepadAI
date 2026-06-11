@@ -87,9 +87,18 @@ jobs:
 
       - name: Install NSIS
         if: runner.os == 'Windows'
-        uses: repolevedavaj/install-nsis@v1.2.0
-        with:
-          nsis-version: '3.11'
+        shell: pwsh
+        run: |
+          $setup = "$env:TEMP\nsis-3.11-setup.exe"
+          Invoke-WebRequest -UserAgent "curl/8.20.0" `
+            "https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-setup.exe/download?" `
+            -OutFile $setup
+          Start-Process $setup -ArgumentList "/S" -Wait
+          $strlen = "$env:TEMP\nsis-3.11-strlen_8192.zip"
+          Invoke-WebRequest -UserAgent "curl/8.20.0" `
+            "https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11-strlen_8192.zip/download?" `
+            -OutFile $strlen
+          Expand-Archive $strlen -DestinationPath "C:\Program Files (x86)\NSIS" -Force
 
       - name: Install WebView2 SDK
         if: runner.os == 'Windows'
