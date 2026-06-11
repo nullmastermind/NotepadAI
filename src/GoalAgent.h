@@ -52,6 +52,7 @@ public:
         QString agentId;
         int maxIterations = 10;
         QString promptTemplateId;
+        QString originalUserMessage;
     };
 
     bool start(const StartRequest &req);
@@ -81,7 +82,8 @@ private:
     void beginAuthoringStep(const QString &verdict);
     void onAuthoringChunk(const QString &chunk);
     void onAuthoringPromptEnded();
-    void finalizeHandoff(const QString &verdict, const QString &authoredText);
+    void finalizeHandoff(const QString &verdict, const QString &authoredText,
+                         bool authoringSucceeded);
     void markTerminal(Status s, const QString &reason);
     void destroyJudgeConnection();
     void spawnJudgeForCriterion(int index);
@@ -98,6 +100,7 @@ private:
     int m_maxIterations = 10;
     QString m_agentId;
     QString m_promptTemplateId;
+    QString m_originalUserMessage;
     QString m_lastActionText;
 
     QPointer<AcpConnection> m_targetConnection;

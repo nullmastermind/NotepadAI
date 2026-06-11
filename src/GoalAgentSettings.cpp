@@ -53,24 +53,27 @@ GoalCriteriaPreset GoalCriteriaPreset::fromJson(const QJsonObject &obj)
 const QString &GoalAgentSettings::builtinPromptContent()
 {
     static const QString s = QStringLiteral(
-        "You are the goal-judging supervisor for a target coding agent.\n\n"
-        "Your job is to decide, after each turn of the target agent, whether the user's "
-        "success criterion has been met. You DO NOT have tool access — you can only read "
-        "the conversation transcript and make a decision based on it.\n\n"
+        "You are an automated goal evaluator. A developer has started a goal-driven session "
+        "with a coding agent. Your job is to observe the conversation and decide whether "
+        "the success criterion has been met.\n\n"
         "You are evaluating criterion {{criterionIndex}} of {{totalCriteria}}.\n\n"
-        "Success criterion (verbatim from the user):\n{{goal}}\n\n"
+        "The developer's original message (the request that started this session):\n"
+        "{{originalUserMessage}}\n\n"
+        "Success criterion:\n{{goal}}\n\n"
         "Iteration: {{iteration}} of {{maxIterations}}\n\n"
-        "Target-session conversation so far (events emitted since the previous evaluation):\n"
+        "Conversation since last evaluation:\n"
         "{{conversation}}\n\n"
         "Respond with EXACTLY ONE of the following XML actions and nothing else. "
         "Do not narrate. Do not use markdown. Do not include anything outside the action tag.\n\n"
-        "  <action type=\"continue\">Short, concrete, natural-language guidance for the target "
-        "agent on what to do next. Be specific. Address the target agent directly.</action>\n\n"
+        "  <action type=\"continue\">Write a follow-up message AS IF you are the developer "
+        "talking to the agent. Use first person. Be specific and conversational — like a "
+        "developer giving follow-up instructions in a chat. Match the language and tone of "
+        "the developer's original message above.</action>\n\n"
         "OR\n\n"
         "  <action type=\"complete\">Brief reason why the success criterion has been met "
         "based on the conversation above.</action>\n\n"
-        "If you are not sure, emit a continue action with guidance toward verification "
-        "(e.g. ask the target agent to run the tests or read the relevant file). "
+        "If you are not sure, emit a continue action nudging the agent toward verification "
+        "(e.g. ask it to run the tests or read the relevant file). "
         "Do NOT emit complete unless the conversation contains clear evidence the criterion "
         "is satisfied.\n");
     return s;
@@ -79,8 +82,8 @@ const QString &GoalAgentSettings::builtinPromptContent()
 const QString &GoalAgentSettings::builtinHandoffContent()
 {
     static const QString s = QStringLiteral(
-        "✓ Previous criterion satisfied: {{verdict}}\n\n"
-        "Now work toward the next success criterion ({{criterionIndex}}/{{totalCriteria}}):\n"
+        "Done with the previous part. Now move on to the next step "
+        "({{criterionIndex}}/{{totalCriteria}}):\n"
         "{{nextCriterion}}\n");
     return s;
 }
@@ -145,8 +148,11 @@ const GoalPromptTemplate &GoalAgentSettings::defaultTemplate() const
 QJsonObject GoalAgentSettings::toJson() const
 {
     QJsonArray tplArr;
-    for (const auto &t : promptTemplates)
+    for (const auto &t : promptTemplates) {
+        if (t.id == QLatin1String(kDefaultTemplateId))
+            continue;
         tplArr.append(t.toJson());
+    }
     QJsonArray presetArr;
     for (const auto &p : criteriaPresets)
         presetArr.append(p.toJson());
@@ -154,8 +160,6 @@ QJsonObject GoalAgentSettings::toJson() const
         {QStringLiteral("agentId"), agentId},
         {QStringLiteral("defaultMaxIterations"), defaultMaxIterations},
         {QStringLiteral("promptTemplates"), tplArr},
-        {QStringLiteral("handoffTemplate"), handoffTemplate},
-        {QStringLiteral("handoffAuthoringTemplate"), handoffAuthoringTemplate},
         {QStringLiteral("criteriaPresets"), presetArr},
     };
 }
@@ -172,23 +176,20 @@ GoalAgentSettings GoalAgentSettings::fromJson(const QJsonObject &obj)
 
     s.promptTemplates.clear();
     const auto tplArr = obj.value(QStringLiteral("promptTemplates")).toArray();
-    for (const auto &v : tplArr)
-        s.promptTemplates.append(GoalPromptTemplate::fromJson(v.toObject()));
-    if (s.findTemplate(QLatin1String(kDefaultTemplateId)) == nullptr) {
-        GoalPromptTemplate defaultTpl;
-        defaultTpl.id = QLatin1String(kDefaultTemplateId);
-        defaultTpl.name = QStringLiteral("Default");
-        defaultTpl.content = builtinPromptContent();
-        s.promptTemplates.prepend(defaultTpl);
+    for (const auto &v : tplArr) {
+        GoalPromptTemplate t = GoalPromptTemplate::fromJson(v.toObject());
+        if (t.id == QLatin1String(kDefaultTemplateId))
+            continue;
+        s.promptTemplates.append(t);
     }
+    GoalPromptTemplate defaultTpl;
+    defaultTpl.id = QLatin1String(kDefaultTemplateId);
+    defaultTpl.name = QStringLiteral("Default");
+    defaultTpl.content = builtinPromptContent();
+    s.promptTemplates.prepend(defaultTpl);
 
-    s.handoffTemplate = obj.value(QStringLiteral("handoffTemplate")).toString();
-    if (s.handoffTemplate.isEmpty())
-        s.handoffTemplate = builtinHandoffContent();
-
-    s.handoffAuthoringTemplate = obj.value(QStringLiteral("handoffAuthoringTemplate")).toString();
-    if (s.handoffAuthoringTemplate.isEmpty())
-        s.handoffAuthoringTemplate = builtinHandoffAuthoringContent();
+    s.handoffTemplate = builtinHandoffContent();
+    s.handoffAuthoringTemplate = builtinHandoffAuthoringContent();
 
     s.criteriaPresets.clear();
     const auto presetArr = obj.value(QStringLiteral("criteriaPresets")).toArray();

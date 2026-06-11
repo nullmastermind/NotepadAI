@@ -215,6 +215,7 @@ void ScheduledTaskRunner::fireTask(const QString &taskId)
             req.agentId = goalCfg.agentId;
             req.maxIterations = goalCfg.maxIterations;
             req.promptTemplateId = goalCfg.promptTemplateId;
+            req.originalUserMessage = prompt;
             goal->start(req);
         }
 

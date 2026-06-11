@@ -13,7 +13,8 @@ public:
                                      int iteration,
                                      int maxIterations,
                                      int criterionIndex,
-                                     int totalCriteria);
+                                     int totalCriteria,
+                                     const QString &originalUserMessage = QString());
 
     static QString renderHandoff(const QString &templateContent,
                                  const QString &verdict,

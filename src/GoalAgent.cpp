@@ -67,6 +67,7 @@ bool GoalAgent::start(const StartRequest &req)
     m_agentId = req.agentId;
     m_maxIterations = req.maxIterations;
     m_promptTemplateId = req.promptTemplateId;
+    m_originalUserMessage = req.originalUserMessage;
     m_currentCriterionIndex = 0;
     m_lastActionText.clear();
     m_judgeResponseBuffer.clear();
@@ -254,7 +255,8 @@ void GoalAgent::evaluateCurrentCriterion()
         crit.iteration + 1,
         m_maxIterations,
         m_currentCriterionIndex + 1,
-        m_criteria.size());
+        m_criteria.size(),
+        m_originalUserMessage);
 
     logDebug(QStringLiteral("evaluateCurrentCriterion: sending judge prompt (%1 chars)")
                  .arg(prompt.size()));
@@ -292,7 +294,7 @@ void GoalAgent::onJudgeExited(int exitCode, QProcess::ExitStatus exitStatus)
         m_awaitingAuthoring = false;
         logDebug(QStringLiteral("onJudgeExited: during authoring, falling back to raw criterion"));
         const int nextIdx = m_currentCriterionIndex + 1;
-        finalizeHandoff(m_authoringVerdict, m_criteria[nextIdx].text);
+        finalizeHandoff(m_authoringVerdict, m_criteria[nextIdx].text, /*authoringSucceeded=*/false);
         return;
     }
     markTerminal(Failed, QStringLiteral("goal_agent_exited"));
@@ -379,7 +381,7 @@ void GoalAgent::beginAuthoringStep(const QString &verdict)
 {
     if (!m_judgeConnection) {
         logDebug(QStringLiteral("beginAuthoringStep: no judge, falling back to raw criterion"));
-        finalizeHandoff(verdict, m_criteria[m_currentCriterionIndex + 1].text);
+        finalizeHandoff(verdict, m_criteria[m_currentCriterionIndex + 1].text, /*authoringSucceeded=*/false);
         return;
     }
 
@@ -441,17 +443,18 @@ void GoalAgent::onAuthoringPromptEnded()
     logDebug(QStringLiteral("onAuthoringPromptEnded: authored %1 chars, content=%2")
                  .arg(authored.size()).arg(authored.left(200)));
 
-    // If authoring produced empty/garbage, fall back to raw criterion text.
     const int nextIdx = m_currentCriterionIndex + 1;
     if (authored.isEmpty()) {
         logDebug(QStringLiteral("onAuthoringPromptEnded: empty response, using raw criterion"));
         authored = m_criteria[nextIdx].text;
+        finalizeHandoff(m_authoringVerdict, authored, /*authoringSucceeded=*/false);
+    } else {
+        finalizeHandoff(m_authoringVerdict, authored, /*authoringSucceeded=*/true);
     }
-
-    finalizeHandoff(m_authoringVerdict, authored);
 }
 
-void GoalAgent::finalizeHandoff(const QString &verdict, const QString &authoredText)
+void GoalAgent::finalizeHandoff(const QString &verdict, const QString &authoredText,
+                                bool authoringSucceeded)
 {
     // Advance cursor.
     m_currentCriterionIndex++;
@@ -462,21 +465,25 @@ void GoalAgent::finalizeHandoff(const QString &verdict, const QString &authoredT
     destroyJudgeConnection();
     spawnJudgeForCriterion(m_currentCriterionIndex);
 
-    // Render handoff with the authored text (not raw criterion).
-    const QString settingsJson = m_appSettings->get(
-        "Ai/GoalAgentSettings", QString());
-    GoalAgentSettings goalSettings;
-    if (!settingsJson.isEmpty()) {
-        goalSettings = GoalAgentSettings::fromJson(
-            QJsonDocument::fromJson(settingsJson.toUtf8()).object());
-    }
+    QString handoff;
+    if (authoringSucceeded) {
+        handoff = authoredText;
+    } else {
+        const QString settingsJson = m_appSettings->get(
+            "Ai/GoalAgentSettings", QString());
+        GoalAgentSettings goalSettings;
+        if (!settingsJson.isEmpty()) {
+            goalSettings = GoalAgentSettings::fromJson(
+                QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+        }
 
-    const QString handoff = GoalPromptRenderer::renderHandoff(
-        goalSettings.handoffTemplate,
-        verdict,
-        authoredText,
-        m_currentCriterionIndex + 1,
-        m_criteria.size());
+        handoff = GoalPromptRenderer::renderHandoff(
+            goalSettings.handoffTemplate,
+            verdict,
+            authoredText,
+            m_currentCriterionIndex + 1,
+            m_criteria.size());
+    }
 
     if (m_targetConnection) {
         logDebug(QStringLiteral("finalizeHandoff: sending handoff to target (%1 chars)")

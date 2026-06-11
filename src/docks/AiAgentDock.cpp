@@ -429,6 +429,7 @@ void AiAgentDock::sendWithGoal()
     req.agentId = res.agentId;
     req.maxIterations = res.maxIterations;
     req.promptTemplateId = res.promptTemplateId;
+    req.originalUserMessage = composerText;
 
     if (!m_goalAgent->start(req)) {
         QMessageBox::warning(this, tr("Send with Goal"),

@@ -33,7 +33,8 @@ QString GoalPromptRenderer::renderJudgePrompt(const QString &templateContent,
                                               int iteration,
                                               int maxIterations,
                                               int criterionIndex,
-                                              int totalCriteria)
+                                              int totalCriteria,
+                                              const QString &originalUserMessage)
 {
     QHash<QString, QString> vars;
     vars.insert(QStringLiteral("goal"), goal);
@@ -42,6 +43,10 @@ QString GoalPromptRenderer::renderJudgePrompt(const QString &templateContent,
     vars.insert(QStringLiteral("maxIterations"), QString::number(maxIterations));
     vars.insert(QStringLiteral("criterionIndex"), QString::number(criterionIndex));
     vars.insert(QStringLiteral("totalCriteria"), QString::number(totalCriteria));
+    vars.insert(QStringLiteral("originalUserMessage"),
+                originalUserMessage.isEmpty()
+                    ? QStringLiteral("(not provided)")
+                    : originalUserMessage);
     return singlePassReplace(templateContent, vars);
 }
 

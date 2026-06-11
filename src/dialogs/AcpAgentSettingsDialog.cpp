@@ -477,9 +477,9 @@ void AcpAgentSettingsDialog::saveGoalSettings()
     gs.agentId = m_goalAgentCombo->currentData().toString();
     gs.defaultMaxIterations = m_goalMaxIterSpin->value();
 
-    // Save current template content
+    // Save current template content (skip builtin — it's never persisted)
     const QString tplId = m_goalTemplateCombo->currentData().toString();
-    if (!tplId.isEmpty()) {
+    if (!tplId.isEmpty() && tplId != QLatin1String(GoalAgentSettings::kDefaultTemplateId)) {
         for (auto &tpl : gs.promptTemplates) {
             if (tpl.id == tplId) {
                 tpl.content = m_goalTemplateEdit->toPlainText();
@@ -601,6 +601,8 @@ void AcpAgentSettingsDialog::onGoalTemplateChanged(int index)
     if (!m_appSettings || index < 0) return;
 
     const QString tplId = m_goalTemplateCombo->itemData(index).toString();
+    const bool isBuiltin = (tplId == QLatin1String(GoalAgentSettings::kDefaultTemplateId));
+
     const QString settingsJson = m_appSettings->get(
         "Ai/GoalAgentSettings", QString());
     GoalAgentSettings gs;
@@ -612,6 +614,7 @@ void AcpAgentSettingsDialog::onGoalTemplateChanged(int index)
     const GoalPromptTemplate *tpl = gs.findTemplate(tplId);
     m_goalTemplateEdit->blockSignals(true);
     m_goalTemplateEdit->setPlainText(tpl ? tpl->content : QString());
+    m_goalTemplateEdit->setReadOnly(isBuiltin);
     m_goalTemplateEdit->blockSignals(false);
 }
 
