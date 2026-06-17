@@ -2062,11 +2062,7 @@ void AcpSessionView::showCommandPopup()
 
     m_commandPopup->clear();
     for (const auto &cmd : cmds) {
-        QString label = QStringLiteral("/") + cmd.name;
-        if (!cmd.description.isEmpty())
-            label += QStringLiteral("  ") + cmd.description;
-        auto *item = new QListWidgetItem(label, m_commandPopup);
-        item->setData(Qt::UserRole, cmd.name);
+        appendCommandItem(cmd);
     }
     m_commandPopup->setCurrentRow(0);
     m_commandPopup->show();
@@ -2114,22 +2110,37 @@ void AcpSessionView::filterCommandPopup()
         showCommandPopup();
     }
 
-    int firstVisible = -1;
-    for (int i = 0; i < m_commandPopup->count(); ++i) {
-        auto *item = m_commandPopup->item(i);
-        const QString name = item->data(Qt::UserRole).toString();
-        const bool match = prefix.isEmpty() || name.toLower().startsWith(prefix);
-        item->setHidden(!match);
-        if (match && firstVisible < 0) firstVisible = i;
+    // Rank: names that START WITH the typed prefix come first, names that only
+    // CONTAIN it as a substring come after. Original order is preserved within
+    // each tier. Empty prefix puts everything in the starts-with tier (no-op
+    // reorder), matching the unfiltered popup.
+    m_commandPopup->clear();
+    for (const auto &cmd : cmds) {
+        if (prefix.isEmpty() || cmd.name.toLower().startsWith(prefix))
+            appendCommandItem(cmd);
+    }
+    for (const auto &cmd : cmds) {
+        const QString lower = cmd.name.toLower();
+        if (!prefix.isEmpty() && !lower.startsWith(prefix) && lower.contains(prefix))
+            appendCommandItem(cmd);
     }
 
-    if (firstVisible < 0) {
+    if (m_commandPopup->count() == 0) {
         hideCommandPopup();
     } else {
-        if (m_commandPopup->currentItem() && m_commandPopup->currentItem()->isHidden())
-            m_commandPopup->setCurrentRow(firstVisible);
+        m_commandPopup->setCurrentRow(0);
         resizeCommandPopup();
     }
+}
+
+void AcpSessionView::appendCommandItem(const AcpProtocol::AcpCommandInfo &cmd)
+{
+    if (!m_commandPopup) return;
+    QString label = QStringLiteral("/") + cmd.name;
+    if (!cmd.description.isEmpty())
+        label += QStringLiteral("  ") + cmd.description;
+    auto *item = new QListWidgetItem(label, m_commandPopup);
+    item->setData(Qt::UserRole, cmd.name);
 }
 
 void AcpSessionView::acceptCommandCompletion()

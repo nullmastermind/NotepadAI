@@ -210,6 +210,7 @@ private:
     void resizeCommandPopup();
     void filterCommandPopup();
     void acceptCommandCompletion();
+    void appendCommandItem(const AcpProtocol::AcpCommandInfo &cmd);
 
     AcpSessionModel *m_model = nullptr;       // non-owning
     AcpConnection *m_connection = nullptr;    // non-owning
