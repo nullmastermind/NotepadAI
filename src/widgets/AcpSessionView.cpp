@@ -41,6 +41,7 @@
 #include <QElapsedTimer>
 #include <QEvent>
 #include <QFileDialog>
+#include <QFocusEvent>
 #include <QFont>
 #include <QFrame>
 #include <QGuiApplication>
@@ -1973,7 +1974,17 @@ bool AcpSessionView::eventFilter(QObject *watched, QEvent *event)
         positionImproveButton();
     }
     if (event->type() == QEvent::FocusIn && watched == m_input) {
-        emit inputFocused();
+        // Only a deliberate focus (mouse click / Tab navigation) counts as the
+        // user engaging this AI dock. Focus that merely *returns* to the input
+        // after a popup/menu closes (PopupFocusReason / ActiveWindowFocusReason /
+        // OtherFocusReason) must NOT trigger the workspace sync — otherwise it
+        // silently yanks the active workspace back to this dock's cwd, overriding
+        // a workspace the user just opened (e.g. from the recent-workspaces menu).
+        const Qt::FocusReason reason = static_cast<QFocusEvent *>(event)->reason();
+        if (reason == Qt::MouseFocusReason || reason == Qt::TabFocusReason
+            || reason == Qt::BacktabFocusReason) {
+            emit inputFocused();
+        }
     }
     return QWidget::eventFilter(watched, event);
 }
