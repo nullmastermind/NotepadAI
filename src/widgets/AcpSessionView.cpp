@@ -1111,10 +1111,19 @@ void AcpSessionView::onToolCallAddedOrUpdated(const QString &toolCallId)
         // Apply as an update: build an update payload from the latest state.
         AcpProtocol::AcpToolCallUpdate upd;
         upd.id = tc.id;
+        if (!tc.title.isEmpty()) {
+            upd.title = tc.title;
+        }
+        if (!tc.kind.isEmpty()) {
+            upd.kind = tc.kind;
+        }
         upd.status = tc.status;
         upd.content = tc.content;
         if (!tc.rawInput.isEmpty()) {
             upd.rawInput = tc.rawInput;
+        }
+        if (!tc.rawOutput.isEmpty()) {
+            upd.rawOutput = tc.rawOutput;
         }
         card->apply(upd);
     }

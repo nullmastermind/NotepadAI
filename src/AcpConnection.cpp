@@ -116,6 +116,35 @@ QList<AcpProtocol::AcpConfigOption> parseConfigOptions(const QJsonArray &arr)
     return out;
 }
 
+QString contentArrayText(const QJsonArray &arr)
+{
+    QString out;
+    for (const auto &v : arr) {
+        if (!v.isObject()) {
+            continue;
+        }
+        const QJsonObject obj = v.toObject();
+        const QString type = obj.value(QStringLiteral("type")).toString();
+        QString text;
+        if (type == QLatin1String("text")) {
+            text = obj.value(QStringLiteral("text")).toString();
+        } else if (type == QLatin1String("content")) {
+            const QJsonObject inner = obj.value(QStringLiteral("content")).toObject();
+            if (inner.value(QStringLiteral("type")).toString() == QLatin1String("text")) {
+                text = inner.value(QStringLiteral("text")).toString();
+            }
+        }
+        if (text.isEmpty()) {
+            continue;
+        }
+        if (!out.isEmpty()) {
+            out.append(QStringLiteral("\n\n"));
+        }
+        out.append(text.trimmed());
+    }
+    return out.trimmed();
+}
+
 } // namespace
 
 AcpConnection::AcpConnection(QObject *parent)
@@ -789,15 +818,25 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         AcpProtocol::AcpToolCall tc;
         tc.id = update.value(QStringLiteral("toolCallId")).toString();
         tc.title = update.value(QStringLiteral("title")).toString();
+        tc.kind = update.value(QStringLiteral("kind")).toString();
         tc.status = update.value(QStringLiteral("status")).toString();
         tc.content = update.value(QStringLiteral("content")).toArray();
         tc.rawInput = update.value(QStringLiteral("rawInput")).toObject();
+        tc.rawOutput = update.value(QStringLiteral("rawOutput")).toObject();
         tc.groupId = update.value(QStringLiteral("groupId")).toInt(0);
         emit toolCallReceived(tc);
     } else if (kind == QLatin1String("tool_call_update")) {
         m_promptProducedOutput = true;
         AcpProtocol::AcpToolCallUpdate u;
         u.id = update.value(QStringLiteral("toolCallId")).toString();
+        const QJsonValue title = update.value(QStringLiteral("title"));
+        if (title.isString()) {
+            u.title = title.toString();
+        }
+        const QJsonValue toolKind = update.value(QStringLiteral("kind"));
+        if (toolKind.isString()) {
+            u.kind = toolKind.toString();
+        }
         const QJsonValue st = update.value(QStringLiteral("status"));
         if (st.isString()) {
             u.status = st.toString();
@@ -809,6 +848,10 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         const QJsonValue ri = update.value(QStringLiteral("rawInput"));
         if (ri.isObject()) {
             u.rawInput = ri.toObject();
+        }
+        const QJsonValue ro = update.value(QStringLiteral("rawOutput"));
+        if (ro.isObject()) {
+            u.rawOutput = ro.toObject();
         }
         emit toolCallUpdated(u);
     } else if (kind == QLatin1String("plan")) {
@@ -1224,6 +1267,9 @@ void AcpConnection::handleRequestPermission(const QJsonValue &id,
     const QJsonObject toolCall = params.value(QStringLiteral("toolCall")).toObject();
     if (req.title.isEmpty()) {
         req.title = toolCall.value(QStringLiteral("title")).toString();
+    }
+    if (req.description.isEmpty()) {
+        req.description = contentArrayText(toolCall.value(QStringLiteral("content")).toArray());
     }
     for (const auto &v : params.value(QStringLiteral("options")).toArray()) {
         if (v.isObject()) {

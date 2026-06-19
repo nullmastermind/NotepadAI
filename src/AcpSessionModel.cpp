@@ -220,9 +220,11 @@ void AcpSessionModel::loadFromDisk()
         AcpToolCall tc;
         tc.id = to.value(QStringLiteral("toolCallId")).toString();
         tc.title = to.value(QStringLiteral("title")).toString();
+        tc.kind = to.value(QStringLiteral("kind")).toString();
         tc.status = to.value(QStringLiteral("status")).toString();
         tc.content = to.value(QStringLiteral("content")).toArray();
         tc.rawInput = to.value(QStringLiteral("rawInput")).toObject();
+        tc.rawOutput = to.value(QStringLiteral("rawOutput")).toObject();
         tc.groupId = to.value(QStringLiteral("groupId")).toInt();
         if (!tc.id.isEmpty()) {
             m_toolCalls.insert(tc.id, tc);
@@ -296,6 +298,9 @@ QJsonObject AcpSessionModel::toHistoryJson() const
         QJsonObject to;
         to.insert(QStringLiteral("toolCallId"), tc.id);
         to.insert(QStringLiteral("title"), tc.title);
+        if (!tc.kind.isEmpty()) {
+            to.insert(QStringLiteral("kind"), tc.kind);
+        }
         to.insert(QStringLiteral("status"), tc.status);
         to.insert(QStringLiteral("content"), tc.content);
         to.insert(QStringLiteral("groupId"), tc.groupId);
@@ -314,10 +319,24 @@ QJsonObject AcpSessionModel::toHistoryJson() const
             copyField(QLatin1String("subagent_type"));
             if (tc.rawInput.contains(QLatin1String("command"))) {
                 QString cmd = tc.rawInput.value(QLatin1String("command")).toString();
+                if (cmd.isEmpty() && tc.rawInput.value(QLatin1String("command")).isArray()) {
+                    QStringList parts;
+                    const QJsonArray command = tc.rawInput.value(QLatin1String("command")).toArray();
+                    parts.reserve(command.size());
+                    for (const auto &part : command) {
+                        const QString text = part.toString();
+                        if (!text.isEmpty()) {
+                            parts.append(text);
+                        }
+                    }
+                    cmd = parts.join(QLatin1Char(' '));
+                }
                 const int nl = cmd.indexOf(QLatin1Char('\n'));
                 if (nl >= 0) cmd.truncate(nl);
                 if (cmd.size() > 200) cmd.truncate(200);
-                slim.insert(QStringLiteral("command"), cmd);
+                if (!cmd.isEmpty()) {
+                    slim.insert(QStringLiteral("command"), cmd);
+                }
             }
             if (tc.rawInput.contains(QLatin1String("description"))) {
                 QString desc = tc.rawInput.value(QLatin1String("description")).toString();
@@ -326,6 +345,44 @@ QJsonObject AcpSessionModel::toHistoryJson() const
             }
             if (!slim.isEmpty()) {
                 to.insert(QStringLiteral("rawInput"), slim);
+            }
+        }
+        if (!tc.rawOutput.isEmpty()) {
+            QJsonObject slim;
+            auto copyField = [&](const QLatin1String &key) {
+                if (tc.rawOutput.contains(key)) {
+                    QJsonValue value = tc.rawOutput.value(key);
+                    if (value.isString()) {
+                        QString text = value.toString();
+                        if (text.size() > 4000) {
+                            text.truncate(4000);
+                        }
+                        value = QJsonValue(text);
+                    } else if (value.isArray() || value.isObject()) {
+                        QString text = QString::fromUtf8(QJsonDocument(value.isArray()
+                            ? QJsonDocument(value.toArray())
+                            : QJsonDocument(value.toObject()))
+                                .toJson(QJsonDocument::Compact));
+                        if (text.size() > 4000) {
+                            text.truncate(4000);
+                        }
+                        value = QJsonValue(text);
+                    }
+                    slim.insert(key, value);
+                }
+            };
+            copyField(QLatin1String("stdout"));
+            copyField(QLatin1String("stderr"));
+            copyField(QLatin1String("aggregated_output"));
+            copyField(QLatin1String("formatted_output"));
+            copyField(QLatin1String("output"));
+            copyField(QLatin1String("content"));
+            copyField(QLatin1String("result"));
+            copyField(QLatin1String("results"));
+            copyField(QLatin1String("exit_code"));
+            copyField(QLatin1String("status"));
+            if (!slim.isEmpty()) {
+                to.insert(QStringLiteral("rawOutput"), slim);
             }
         }
         tcs.append(to);
@@ -530,6 +587,12 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
 
         AcpToolCall tc;
         tc.id = update.id;
+        if (update.title.has_value()) {
+            tc.title = *update.title;
+        }
+        if (update.kind.has_value()) {
+            tc.kind = *update.kind;
+        }
         if (update.status.has_value()) {
             tc.status = *update.status;
         }
@@ -538,6 +601,9 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         }
         if (update.rawInput.has_value()) {
             tc.rawInput = *update.rawInput;
+        }
+        if (update.rawOutput.has_value()) {
+            tc.rawOutput = *update.rawOutput;
         }
         tc.groupId = m_currentGroupId;
         m_toolCalls.insert(update.id, tc);
@@ -548,6 +614,12 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         entry.groupId = m_currentGroupId;
         m_timeline.append(entry);
     } else {
+        if (update.title.has_value()) {
+            it.value().title = *update.title;
+        }
+        if (update.kind.has_value()) {
+            it.value().kind = *update.kind;
+        }
         if (update.status.has_value()) {
             it.value().status = *update.status;
         }
@@ -556,6 +628,9 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         }
         if (update.rawInput.has_value()) {
             it.value().rawInput = *update.rawInput;
+        }
+        if (update.rawOutput.has_value()) {
+            it.value().rawOutput = *update.rawOutput;
         }
     }
     emit toolCallAddedOrUpdated(update.id);

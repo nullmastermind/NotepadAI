@@ -50,7 +50,7 @@ AcpPermissionPrompt::AcpPermissionPrompt(const AcpProtocol::AcpPermissionRequest
     if (!request.description.isEmpty()) {
         auto *desc = new QLabel(request.description, this);
         desc->setWordWrap(true);
-        desc->setStyleSheet(QStringLiteral("color: palette(mid);"));
+        desc->setStyleSheet(QStringLiteral("color: palette(placeholder-text);"));
         outer->addWidget(desc);
     }
 
@@ -61,10 +61,10 @@ AcpPermissionPrompt::AcpPermissionPrompt(const AcpProtocol::AcpPermissionRequest
 
     for (const auto &opt : request.options) {
         auto *btn = new QPushButton(opt.label.isEmpty() ? opt.id : opt.label, this);
-        if (opt.kind == QLatin1String("deny")) {
-            btn->setStyleSheet(QStringLiteral("QPushButton { background: #d9534f; color: white; }"));
-        } else if (opt.kind == QLatin1String("allow_always")) {
-            btn->setStyleSheet(QStringLiteral("QPushButton { background: #4caf50; color: white; }"));
+        if (opt.kind == QLatin1String("allow_always")) {
+            btn->setStyleSheet(QStringLiteral(
+                "QPushButton { background: palette(highlight); "
+                "color: palette(highlighted-text); }"));
         }
         const QString optionId = opt.id;
         const QString outcome = (opt.kind == QLatin1String("deny"))

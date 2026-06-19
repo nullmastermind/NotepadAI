@@ -22,6 +22,7 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QHBoxLayout>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -52,6 +53,7 @@ constexpr const char *kDiffDelMark = "#d9534f";
 // Cap LCS to bound the O(m*n) memory/time. Real edit payloads are small; this
 // is just a guard so a pathological full-file paste doesn't lock the UI.
 constexpr int kMaxLcsLines = 2000;
+constexpr int kMaxRawOutputChars = 60000;
 
 enum class DiffKind : std::uint8_t { Context, Add, Remove };
 struct DiffLine
@@ -189,6 +191,11 @@ QString renderDiffBlock(const QJsonObject &block, const DiffPalette &pal)
 
     auto splitLines = [](const QString &s) {
         QStringList lines = s.split(QLatin1Char('\n'));
+        for (QString &line : lines) {
+            if (line.endsWith(QLatin1Char('\r'))) {
+                line.chop(1);
+            }
+        }
         if (!lines.isEmpty() && lines.last().isEmpty()) lines.removeLast();
         lines.removeAll(QStringLiteral("No newline at end of file"));
         return lines;
@@ -278,6 +285,171 @@ bool isEmptyContentJson(const QString &text)
     return false;
 }
 
+QString firstLine(QString text)
+{
+    text = text.trimmed();
+    const int nl = text.indexOf(QLatin1Char('\n'));
+    if (nl >= 0) {
+        text.truncate(nl);
+    }
+    return text;
+}
+
+QString truncateForUi(QString text)
+{
+    if (text.size() <= kMaxRawOutputChars) {
+        return text;
+    }
+    text.truncate(kMaxRawOutputChars);
+    text += QStringLiteral("\n\n[output truncated]");
+    return text;
+}
+
+QString commandFromRaw(const QJsonObject &raw)
+{
+    const QJsonArray parsed = raw.value(QStringLiteral("parsed_cmd")).toArray();
+    if (!parsed.isEmpty()) {
+        const QString cmd = parsed.first().toObject().value(QStringLiteral("cmd")).toString();
+        if (!cmd.isEmpty()) {
+            return cmd;
+        }
+    }
+
+    const QJsonValue command = raw.value(QStringLiteral("command"));
+    if (command.isString()) {
+        return command.toString();
+    }
+    if (command.isArray()) {
+        const QJsonArray arr = command.toArray();
+        for (int i = 0; i + 1 < arr.size(); ++i) {
+            if (arr.at(i).toString().compare(QStringLiteral("-Command"), Qt::CaseInsensitive) == 0
+                || arr.at(i).toString().compare(QStringLiteral("/C"), Qt::CaseInsensitive) == 0) {
+                const QString script = arr.at(i + 1).toString();
+                if (!script.isEmpty()) {
+                    return script;
+                }
+            }
+        }
+
+        QStringList parts;
+        parts.reserve(arr.size());
+        for (const auto &v : arr) {
+            const QString s = v.toString();
+            if (!s.isEmpty()) {
+                parts.append(s);
+            }
+        }
+        if (!parts.isEmpty()) {
+            return parts.join(QLatin1Char(' '));
+        }
+    }
+
+    return {};
+}
+
+QString jsonValueText(const QJsonValue &value)
+{
+    if (value.isString()) {
+        return value.toString();
+    }
+    if (value.isArray() || value.isObject()) {
+        return QString::fromUtf8(QJsonDocument(value.isArray()
+                                   ? QJsonDocument(value.toArray())
+                                   : QJsonDocument(value.toObject()))
+                                     .toJson(QJsonDocument::Indented));
+    }
+    if (value.isDouble()) {
+        return QString::number(value.toDouble());
+    }
+    if (value.isBool()) {
+        return value.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+    }
+    return {};
+}
+
+QString rawOutputText(const QJsonObject &raw)
+{
+    QString text;
+    const QString formatted = raw.value(QStringLiteral("formatted_output")).toString();
+    const QString aggregated = raw.value(QStringLiteral("aggregated_output")).toString();
+    const QString stdoutText = raw.value(QStringLiteral("stdout")).toString();
+    const QString stderrText = raw.value(QStringLiteral("stderr")).toString();
+    const QString outputText = jsonValueText(raw.value(QStringLiteral("output")));
+    const QString contentText = jsonValueText(raw.value(QStringLiteral("content")));
+    const QString resultText = jsonValueText(raw.value(QStringLiteral("result")));
+    const QString resultsText = jsonValueText(raw.value(QStringLiteral("results")));
+
+    if (!formatted.isEmpty()) {
+        text = formatted;
+    } else if (!aggregated.isEmpty()) {
+        text = aggregated;
+    } else if (!outputText.isEmpty()) {
+        text = outputText;
+    } else if (!contentText.isEmpty()) {
+        text = contentText;
+    } else if (!resultText.isEmpty()) {
+        text = resultText;
+    } else if (!resultsText.isEmpty()) {
+        text = resultsText;
+    } else {
+        if (!stdoutText.isEmpty()) {
+            text += stdoutText;
+            if (!text.endsWith(QLatin1Char('\n'))) {
+                text += QLatin1Char('\n');
+            }
+        }
+        if (!stderrText.isEmpty()) {
+            if (!text.isEmpty()) {
+                text += QStringLiteral("\nstderr:\n");
+            }
+            text += stderrText;
+        }
+    }
+
+    const QJsonValue exitCode = raw.value(QStringLiteral("exit_code"));
+    if (exitCode.isDouble()) {
+        if (!text.isEmpty() && !text.endsWith(QLatin1Char('\n'))) {
+            text += QLatin1Char('\n');
+        }
+        text += QStringLiteral("\nexit code: %1").arg(exitCode.toInt());
+    }
+
+    if (text.isEmpty()) {
+        text = QString::fromUtf8(QJsonDocument(raw).toJson(QJsonDocument::Indented));
+    }
+    return truncateForUi(text.trimmed());
+}
+
+QString webInputText(const QJsonObject &raw)
+{
+    const QJsonObject action = raw.value(QStringLiteral("action")).toObject();
+    const QString actionType = action.value(QStringLiteral("type")).toString();
+    QString query = raw.value(QStringLiteral("query")).toString();
+    if (query.isEmpty()) {
+        query = action.value(QStringLiteral("query")).toString();
+    }
+    QString url = raw.value(QStringLiteral("url")).toString();
+    if (url.isEmpty()) {
+        url = action.value(QStringLiteral("url")).toString();
+    }
+
+    if (query.isEmpty() && url.isEmpty()) {
+        return {};
+    }
+
+    QString text;
+    if (!actionType.isEmpty()) {
+        text += QStringLiteral("Action: %1\n").arg(actionType);
+    }
+    if (!query.isEmpty()) {
+        text += QStringLiteral("Query: %1\n").arg(query);
+    }
+    if (!url.isEmpty()) {
+        text += QStringLiteral("URL: %1\n").arg(url);
+    }
+    return text.trimmed();
+}
+
 // QTextDocument lays out lazily: after setHtml()/setPlainText() the document
 // reports a stale (often single-line) size until something forces the layout
 // engine to run for the current text width. Measuring height before that pass
@@ -309,10 +481,12 @@ AcpToolCallCard::AcpToolCallCard(const AcpProtocol::AcpToolCall &initial, QWidge
     : QFrame(parent)
     , m_id(initial.id)
     , m_title(initial.title)
+    , m_kind(initial.kind)
     , m_status(initial.status)
     , m_groupId(initial.groupId)
     , m_content(initial.content)
     , m_rawInput(initial.rawInput)
+    , m_rawOutput(initial.rawOutput)
 {
     setFrameShape(QFrame::NoFrame);
     setStyleSheet(QStringLiteral("AcpToolCallCard { background: palette(base); border-radius: 4px; }"));
@@ -370,6 +544,12 @@ AcpToolCallCard::AcpToolCallCard(const AcpProtocol::AcpToolCall &initial, QWidge
 
 void AcpToolCallCard::apply(const AcpProtocol::AcpToolCallUpdate &update)
 {
+    if (update.title.has_value()) {
+        m_title = *update.title;
+    }
+    if (update.kind.has_value()) {
+        m_kind = *update.kind;
+    }
     if (update.status.has_value()) {
         m_status = *update.status;
     }
@@ -378,6 +558,9 @@ void AcpToolCallCard::apply(const AcpProtocol::AcpToolCallUpdate &update)
     }
     if (update.rawInput.has_value()) {
         m_rawInput = *update.rawInput;
+    }
+    if (update.rawOutput.has_value()) {
+        m_rawOutput = *update.rawOutput;
     }
     refreshHeader();
     rerenderBody();
@@ -421,12 +604,34 @@ QString AcpToolCallCard::computeEnrichedTitle() const
 
     QString t = m_title.isEmpty() ? m_id : m_title;
     const QString tLower = t.toLower();
+    const QJsonObject args = m_rawInput.value(QStringLiteral("arguments")).toObject();
 
     if (t.contains(QLatin1String("codebase-retrieval"))) {
-        const QString req = m_rawInput.value(QStringLiteral("information_request")).toString();
+        QString req = m_rawInput.value(QStringLiteral("information_request")).toString();
+        if (req.isEmpty()) {
+            req = args.value(QStringLiteral("information_request")).toString();
+        }
         if (!req.isEmpty())
             return QStringLiteral("Context Engine: \"%1\"").arg(req);
         return QStringLiteral("Context Engine");
+    }
+
+    if (t.startsWith(QLatin1String("Tool: "))) {
+        const QString server = m_rawInput.value(QStringLiteral("server")).toString();
+        const QString tool = m_rawInput.value(QStringLiteral("tool")).toString();
+        if (!server.isEmpty() && !tool.isEmpty()) {
+            QString detail = args.value(QStringLiteral("information_request")).toString();
+            if (detail.isEmpty()) {
+                detail = args.value(QStringLiteral("file_path")).toString();
+            }
+            if (detail.isEmpty()) {
+                detail = args.value(QStringLiteral("query")).toString();
+            }
+            if (!detail.isEmpty()) {
+                return QStringLiteral("Tool %1/%2: %3").arg(server, tool, firstLine(detail));
+            }
+            return QStringLiteral("Tool %1/%2").arg(server, tool);
+        }
     }
 
     if (tLower == QLatin1String("skill")) {
@@ -492,16 +697,17 @@ QString AcpToolCallCard::computeEnrichedTitle() const
     static const QStringList bashTitles = {
         QStringLiteral("bash"), QStringLiteral("terminal")
     };
-    if (bashTitles.contains(tLower)) {
-        QString cmd = m_rawInput.value(QStringLiteral("command")).toString();
+    const QString rawCommand = commandFromRaw(m_rawInput);
+    if (bashTitles.contains(tLower)
+        || m_kind == QLatin1String("execute")
+        || (!rawCommand.isEmpty() && m_rawInput.contains(QStringLiteral("cwd")))) {
+        QString cmd = rawCommand;
         if (!cmd.isEmpty()) {
-            const int nl = cmd.indexOf(QLatin1Char('\n'));
-            if (nl >= 0) cmd.truncate(nl);
-            return QStringLiteral("Bash: %1").arg(cmd);
+            return QStringLiteral("Command: %1").arg(firstLine(cmd));
         }
         const QString desc = m_rawInput.value(QStringLiteral("description")).toString();
         if (!desc.isEmpty())
-            return QStringLiteral("Bash: %1").arg(desc);
+            return QStringLiteral("Command: %1").arg(desc);
         return t;
     }
 
@@ -526,20 +732,32 @@ QString AcpToolCallCard::computeEnrichedTitle() const
     }
 
     static const QStringList webSearchTitles = {
-        QStringLiteral("websearch"), QStringLiteral("web search")
+        QStringLiteral("websearch"), QStringLiteral("web search"), QStringLiteral("searching the web")
     };
     if (webSearchTitles.contains(tLower)) {
-        const QString query = m_rawInput.value(QStringLiteral("query")).toString();
+        QString query = m_rawInput.value(QStringLiteral("query")).toString();
+        if (query.isEmpty()) {
+            query = m_rawInput.value(QStringLiteral("action")).toObject()
+                        .value(QStringLiteral("query")).toString();
+        }
         if (!query.isEmpty())
             return QStringLiteral("Search: \"%1\"").arg(query);
-        return t;
+        if (tLower != QLatin1String("searching the web"))
+            return t;
     }
 
     static const QStringList webFetchTitles = {
-        QStringLiteral("webfetch"), QStringLiteral("web fetch")
+        QStringLiteral("webfetch"), QStringLiteral("web fetch"), QStringLiteral("searching the web")
     };
     if (webFetchTitles.contains(tLower)) {
-        const QString url = m_rawInput.value(QStringLiteral("url")).toString();
+        QString url = m_rawInput.value(QStringLiteral("url")).toString();
+        if (url.isEmpty()) {
+            const QJsonObject action = m_rawInput.value(QStringLiteral("action")).toObject();
+            url = action.value(QStringLiteral("url")).toString();
+            if (url.isEmpty()) {
+                url = action.value(QStringLiteral("query")).toString();
+            }
+        }
         if (!url.isEmpty())
             return QStringLiteral("Fetch: %1").arg(url);
         return t;
@@ -628,7 +846,13 @@ void AcpToolCallCard::rerenderBody()
                 }
             }
         }
-        if (!decodedSomething) {
+        if (!decodedSomething && !m_rawOutput.isEmpty()) {
+            html = QStringLiteral("<pre style=\"%1 "
+                                  "color: %2; white-space: pre-wrap; "
+                                  "margin: 0;\">%3</pre>")
+                       .arg(codeCss, dpal.text,
+                            rawOutputText(m_rawOutput).toHtmlEscaped());
+        } else if (!decodedSomething) {
             html = QStringLiteral("<pre style=\"color: %1;\">%2</pre>")
                        .arg(dpal.text,
                             QString::fromUtf8(QJsonDocument(m_content)
@@ -673,6 +897,14 @@ void AcpToolCallCard::rerenderBody()
                 decodedSomething = true;
             }
         }
+    }
+    if (!decodedSomething && !m_rawOutput.isEmpty()) {
+        text = rawOutputText(m_rawOutput);
+        decodedSomething = true;
+    }
+    if (!decodedSomething) {
+        text = webInputText(m_rawInput);
+        decodedSomething = !text.isEmpty();
     }
     if (!decodedSomething && !m_content.isEmpty()) {
         // Fall back to pretty JSON.

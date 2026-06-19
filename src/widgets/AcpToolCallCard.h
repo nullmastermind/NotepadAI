@@ -72,10 +72,12 @@ private:
 
     QString m_id;
     QString m_title;
+    QString m_kind;
     QString m_status;
     int m_groupId = 0;
     QJsonArray m_content;
     QJsonObject m_rawInput;
+    QJsonObject m_rawOutput;
 
     // Chat (Default Font) typeface pushed in via setChatFont(). Body HTML is
     // re-rendered with this font's family/size; default-constructed (and unused
