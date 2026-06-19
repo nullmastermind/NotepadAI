@@ -25,6 +25,12 @@
 
 namespace AcpProtocol {
 
+bool isPermissionRequestMethod(const QString &method)
+{
+    return method == QLatin1String(kMethodSessionRequestPermission)
+        || method == QLatin1String(kMethodRequestPermission);
+}
+
 QStringList acpExtractFrames(QByteArray &buffer)
 {
     QStringList out;
@@ -257,9 +263,34 @@ AcpPermissionOption permissionOptionFromJson(const QJsonObject &obj)
 {
     AcpPermissionOption o;
     o.id = obj.value(QStringLiteral("id")).toString();
+    if (o.id.isEmpty()) {
+        o.id = obj.value(QStringLiteral("optionId")).toString();
+    }
     o.label = obj.value(QStringLiteral("label")).toString();
+    if (o.label.isEmpty()) {
+        o.label = obj.value(QStringLiteral("name")).toString();
+    }
     o.kind = obj.value(QStringLiteral("kind")).toString();
     return o;
+}
+
+QJsonObject permissionResponseToJson(const QString &outcome,
+                                     const QString &optionId,
+                                     bool nestedOutcome)
+{
+    QJsonObject decision;
+    decision.insert(QStringLiteral("outcome"), outcome);
+    if (outcome == QLatin1String("selected")) {
+        decision.insert(QStringLiteral("optionId"), optionId);
+    }
+
+    if (!nestedOutcome) {
+        return decision;
+    }
+
+    QJsonObject result;
+    result.insert(QStringLiteral("outcome"), decision);
+    return result;
 }
 
 QJsonObject permissionRequestToJson(const AcpPermissionRequest &req)

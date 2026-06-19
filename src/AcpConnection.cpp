@@ -752,8 +752,9 @@ void AcpConnection::handleInboundRequest(const QJsonValue &id, const QString &me
         handleTerminalKill(id, params);
     } else if (method == QLatin1String(AcpProtocol::kMethodTerminalRelease)) {
         handleTerminalRelease(id, params);
-    } else if (method == QLatin1String(AcpProtocol::kMethodRequestPermission)) {
-        handleRequestPermission(id, params);
+    } else if (AcpProtocol::isPermissionRequestMethod(method)) {
+        handleRequestPermission(id, params,
+                                method == QLatin1String(AcpProtocol::kMethodSessionRequestPermission));
     } else {
         // ext_method passthrough (and any other unknown method).
         handleExtMethod(id, params);
@@ -1213,11 +1214,17 @@ void AcpConnection::handleTerminalRelease(const QJsonValue &id, const QJsonObjec
 
 // ---------- Permission ---------------------------------------------------
 
-void AcpConnection::handleRequestPermission(const QJsonValue &id, const QJsonObject &params)
+void AcpConnection::handleRequestPermission(const QJsonValue &id,
+                                            const QJsonObject &params,
+                                            bool nestedOutcome)
 {
     AcpProtocol::AcpPermissionRequest req;
     req.title = params.value(QStringLiteral("title")).toString();
     req.description = params.value(QStringLiteral("description")).toString();
+    const QJsonObject toolCall = params.value(QStringLiteral("toolCall")).toObject();
+    if (req.title.isEmpty()) {
+        req.title = toolCall.value(QStringLiteral("title")).toString();
+    }
     for (const auto &v : params.value(QStringLiteral("options")).toArray()) {
         if (v.isObject()) {
             req.options.append(AcpProtocol::permissionOptionFromJson(v.toObject()));
@@ -1238,10 +1245,9 @@ void AcpConnection::handleRequestPermission(const QJsonValue &id, const QJsonObj
     if (policy == QLatin1String("allowAll")) {
         const auto picked = AcpProtocol::pickAutoApproveOptionId(req.options);
         if (picked.has_value()) {
-            QJsonObject result;
-            result.insert(QStringLiteral("outcome"), QStringLiteral("selected"));
-            result.insert(QStringLiteral("optionId"), picked.value());
-            sendResponse(id, result);
+            sendResponse(id, AcpProtocol::permissionResponseToJson(QStringLiteral("selected"),
+                                                                    picked.value(),
+                                                                    nestedOutcome));
             return;
         }
         // No acceptable option — fall through to manual path.
@@ -1249,13 +1255,10 @@ void AcpConnection::handleRequestPermission(const QJsonValue &id, const QJsonObj
 
     const QJsonValue idCopy = id; // NOLINT(performance-unnecessary-copy-initialization) — captured by value in the resolver lambda below
     m_pendingPermissions.insert(requestKey,
-        [this, idCopy](const QString &outcome, const QString &optionId) {
-            QJsonObject result;
-            result.insert(QStringLiteral("outcome"), outcome);
-            if (outcome == QLatin1String("selected")) {
-                result.insert(QStringLiteral("optionId"), optionId);
-            }
-            sendResponse(idCopy, result);
+        [this, idCopy, nestedOutcome](const QString &outcome, const QString &optionId) {
+            sendResponse(idCopy, AcpProtocol::permissionResponseToJson(outcome,
+                                                                        optionId,
+                                                                        nestedOutcome));
         });
     emit permissionRequested(req);
 }

@@ -107,7 +107,7 @@ public slots:
     void setModel(const QString &id);
     void setConfigOption(const QString &id, const QJsonValue &value);
 
-    // User-facing reply to an inbound `request_permission` request.
+    // User-facing reply to an inbound permission request.
     // `outcome` is "selected" or "cancelled".
     void respondToPermission(const QString &requestId, const QString &outcome, const QString &optionId);
 
@@ -192,7 +192,7 @@ private:
     void handleTerminalWaitForExit(const QJsonValue &id, const QJsonObject &params);
     void handleTerminalKill(const QJsonValue &id, const QJsonObject &params);
     void handleTerminalRelease(const QJsonValue &id, const QJsonObject &params);
-    void handleRequestPermission(const QJsonValue &id, const QJsonObject &params);
+    void handleRequestPermission(const QJsonValue &id, const QJsonObject &params, bool nestedOutcome);
     void handleExtMethod(const QJsonValue &id, const QJsonObject &params);
 
     // Path sandbox: canonicalize + check against the working dir.

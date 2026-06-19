@@ -56,9 +56,12 @@ constexpr const char *kMethodTerminalOutput      = "terminal/output";
 constexpr const char *kMethodTerminalWaitForExit = "terminal/wait_for_exit";
 constexpr const char *kMethodTerminalKill        = "terminal/kill";
 constexpr const char *kMethodTerminalRelease     = "terminal/release";
+constexpr const char *kMethodSessionRequestPermission = "session/request_permission";
 constexpr const char *kMethodRequestPermission   = "request_permission";
 constexpr const char *kMethodSessionUpdate       = "session/update";
 constexpr const char *kMethodExtMethod           = "ext_method";
+
+bool isPermissionRequestMethod(const QString &method);
 
 // ----- POD payloads shared by the engine and the session model -----------
 
@@ -222,6 +225,9 @@ AcpContentBlock contentBlockFromJson(const QJsonObject &obj);
 
 QJsonObject permissionOptionToJson(const AcpPermissionOption &opt);
 AcpPermissionOption permissionOptionFromJson(const QJsonObject &obj);
+QJsonObject permissionResponseToJson(const QString &outcome,
+                                     const QString &optionId,
+                                     bool nestedOutcome);
 
 QJsonObject permissionRequestToJson(const AcpPermissionRequest &req);
 AcpPermissionRequest permissionRequestFromJson(const QJsonObject &obj);
