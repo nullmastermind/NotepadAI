@@ -18,7 +18,8 @@ class TestAcpToolCallCard : public QObject
 private slots:
     void collapsed_card_defers_body_render_until_expanded();
     void expanded_card_coalesces_running_updates();
-    void diff_card_stays_collapsed_until_user_expands();
+    void diff_card_auto_expands_at_terminal_status();
+    void running_diff_card_stays_collapsed();
 };
 
 namespace {
@@ -42,6 +43,16 @@ QJsonObject rawStdout(const QString &text)
     QJsonObject raw;
     raw.insert(QStringLiteral("stdout"), text);
     return raw;
+}
+
+QJsonObject diffBlock()
+{
+    QJsonObject diff;
+    diff.insert(QStringLiteral("type"), QStringLiteral("diff"));
+    diff.insert(QStringLiteral("path"), QStringLiteral("a.cpp"));
+    diff.insert(QStringLiteral("oldText"), QStringLiteral("old\n"));
+    diff.insert(QStringLiteral("newText"), QStringLiteral("new\n"));
+    return diff;
 }
 
 } // namespace
@@ -100,17 +111,31 @@ void TestAcpToolCallCard::expanded_card_coalesces_running_updates()
     QVERIFY(!body->toPlainText().contains(QStringLiteral("first output")));
 }
 
-void TestAcpToolCallCard::diff_card_stays_collapsed_until_user_expands()
+void TestAcpToolCallCard::diff_card_auto_expands_at_terminal_status()
 {
+    // A diff card arriving already-completed must auto-expand so the user sees
+    // the change without clicking. The render still rides the debounce path.
     AcpProtocol::AcpToolCall tc = baseCall();
     tc.status = QStringLiteral("completed");
+    tc.content.append(diffBlock());
 
-    QJsonObject diff;
-    diff.insert(QStringLiteral("type"), QStringLiteral("diff"));
-    diff.insert(QStringLiteral("path"), QStringLiteral("a.cpp"));
-    diff.insert(QStringLiteral("oldText"), QStringLiteral("old\n"));
-    diff.insert(QStringLiteral("newText"), QStringLiteral("new\n"));
-    tc.content.append(diff);
+    AcpToolCallCard card(tc);
+    card.resize(480, 120);
+    QTextBrowser *body = bodyFor(card);
+    QVERIFY(body);
+
+    QVERIFY(!card.isCollapsed());
+    QVERIFY(card.shouldPreserveExpanded());  // survives onTurnEnded() re-collapse
+    QTRY_VERIFY(body->toPlainText().contains(QStringLiteral("a.cpp")));
+}
+
+void TestAcpToolCallCard::running_diff_card_stays_collapsed()
+{
+    // Diff content present but tool still running: must NOT expand or render —
+    // expanding mid-stream drags the diff render into the update hot path.
+    AcpProtocol::AcpToolCall tc = baseCall();
+    tc.status = QStringLiteral("running");
+    tc.content.append(diffBlock());
 
     AcpToolCallCard card(tc);
     card.resize(480, 120);
@@ -121,8 +146,14 @@ void TestAcpToolCallCard::diff_card_stays_collapsed_until_user_expands()
     QTest::qWait(120);
     QVERIFY(body->toPlainText().isEmpty());
 
-    card.setCollapsed(false);
-    QVERIFY(body->toPlainText().contains(QStringLiteral("a.cpp")));
+    // Once it finishes, it auto-expands and renders.
+    AcpProtocol::AcpToolCallUpdate update;
+    update.id = tc.id;
+    update.status = QStringLiteral("completed");
+    card.apply(update);
+
+    QVERIFY(!card.isCollapsed());
+    QTRY_VERIFY(body->toPlainText().contains(QStringLiteral("a.cpp")));
 }
 
 QTEST_MAIN(TestAcpToolCallCard)

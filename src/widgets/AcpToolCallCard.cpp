@@ -546,6 +546,10 @@ AcpToolCallCard::AcpToolCallCard(const AcpProtocol::AcpToolCall &initial, QWidge
     // turn. Body rendering is intentionally lazy: tool output can be huge, and
     // collapsed QTextDocument layout must not sit in the update hot path.
     setCollapsed(true);
+    // A card restored from history (or constructed already-finished) may arrive
+    // at terminal status with diff content — auto-expand it here too, not just
+    // on a later apply().
+    maybeAutoExpandForDiff();
 }
 
 void AcpToolCallCard::apply(const AcpProtocol::AcpToolCallUpdate &update)
@@ -596,6 +600,7 @@ void AcpToolCallCard::apply(const AcpProtocol::AcpToolCallUpdate &update)
             scheduleBodyRender();
         }
     }
+    maybeAutoExpandForDiff();
 }
 
 bool AcpToolCallCard::hasDiffContent() const
@@ -615,6 +620,20 @@ bool AcpToolCallCard::isTerminalStatus() const
            || m_status == QLatin1String("failed")
            || m_status == QLatin1String("cancelled")
            || m_status == QLatin1String("canceled");
+}
+
+void AcpToolCallCard::maybeAutoExpandForDiff()
+{
+    // Diff cards (Edit/Write/any diff content) carry their value in the body,
+    // so auto-expand them — but only once the tool has FINISHED. Expanding
+    // mid-stream would drag the expensive QTextDocument diff render into the
+    // update hot path; gating on terminal status means setCollapsed(false)
+    // fires exactly one render, which still rides the debounce path below.
+    if (m_autoExpandedForDiff || m_userToggled) return;
+    if (!isTerminalStatus() || !hasDiffContent()) return;
+    m_autoExpandedForDiff = true;  // keep shouldPreserveExpanded() true so
+                                   // onTurnEnded() won't re-collapse it.
+    setCollapsed(false);
 }
 
 QString AcpToolCallCard::statusGlyph() const
