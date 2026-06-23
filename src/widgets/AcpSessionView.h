@@ -100,6 +100,7 @@ signals:
     // dock decides whether to confirm before forwarding to the manager.
     void restartSessionRequested();
     void sendWithGoalRequested();
+    void generatePromptWithGoalRequested();
     void goalStopRequested();
     // Emitted when the user clicks Cancel on the composer. The view already
     // cancels the in-flight ACP prompt itself (onCancelClicked); this lets the

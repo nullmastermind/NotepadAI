@@ -111,6 +111,7 @@ private slots:
     void onAgentExited(int exitCode, QProcess::ExitStatus status);
     void onRetryFromView();
     void onRestartFromView();
+    void generatePromptWithGoal();
     // Stop the attached GoalAgent if (and only if) one is currently running.
     // Shared sink for the goal-status-row Stop button and the composer Cancel
     // button so both terminate the supervisor loop. No-op when no goal is

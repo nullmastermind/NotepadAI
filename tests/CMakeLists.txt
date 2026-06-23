@@ -264,6 +264,44 @@ target_sources(test_acp_session_model_persistence_integration PRIVATE
 )
 add_test(NAME AcpSessionModelPersistenceIntegration COMMAND test_acp_session_model_persistence_integration)
 
+# --- GoalDraftGenerator: XML parse + transient connection teardown ---
+qt_add_executable(test_goal_draft_generator test_goal_draft_generator.cpp)
+target_include_directories(test_goal_draft_generator PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_goal_draft_generator PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_goal_draft_generator PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentDefinition.h
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.h
+    ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpConnection.h
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.h
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.h
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.h
+    ${CMAKE_SOURCE_DIR}/src/GoalActionParser.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalActionParser.h
+    ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
+    ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.h
+    ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.h
+    ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.h
+    ${CMAKE_SOURCE_DIR}/src/IAcpProcessChannel.h
+    ${CMAKE_SOURCE_DIR}/src/LocalAcpProcessChannel.cpp
+    ${CMAKE_SOURCE_DIR}/src/LocalAcpProcessChannel.h
+)
+add_test(NAME GoalDraftGenerator COMMAND test_goal_draft_generator)
+
 # --- AcpAgentManager: lifecycle, history worker-thread placement, shutdown ---
 qt_add_executable(test_acp_agent_manager test_acp_agent_manager.cpp)
 target_include_directories(test_acp_agent_manager PRIVATE
@@ -318,10 +356,16 @@ target_sources(test_acp_agent_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
+    ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.h
     ${CMAKE_SOURCE_DIR}/src/GoalActionParser.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalActionParser.h
+    ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.h
     ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.h
+    ${CMAKE_SOURCE_DIR}/src/dialogs/GoalDraftDialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/dialogs/GoalDraftDialog.h
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.cpp
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.h
 )
@@ -381,10 +425,16 @@ target_sources(test_acp_agent_exit_restart PRIVATE
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
+    ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.h
     ${CMAKE_SOURCE_DIR}/src/GoalActionParser.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalActionParser.h
+    ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.h
     ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.h
+    ${CMAKE_SOURCE_DIR}/src/dialogs/GoalDraftDialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/dialogs/GoalDraftDialog.h
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.cpp
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.h
 )
@@ -440,10 +490,16 @@ target_sources(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
+    ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.h
     ${CMAKE_SOURCE_DIR}/src/GoalActionParser.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalActionParser.h
+    ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.h
     ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.h
+    ${CMAKE_SOURCE_DIR}/src/dialogs/GoalDraftDialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/dialogs/GoalDraftDialog.h
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.cpp
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.h
 )

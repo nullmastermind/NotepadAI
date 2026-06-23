@@ -260,6 +260,7 @@ AcpSessionView::AcpSessionView(AcpSessionModel *model,
     buildUi();
     wireSignals();
     hydrateFromModel();
+    updateImproveButtonState();
 }
 
 AcpSessionView::~AcpSessionView() = default;
@@ -1749,6 +1750,7 @@ void AcpSessionView::refreshBusyPlaceholder()
         // instead of staying frozen on the last "Agent is working… (Xm Ys)".
         setInputPlaceholder(tr("Send a message"));
     }
+    updateImproveButtonState();
 }
 
 void AcpSessionView::updateBusyPlaceholderText()
@@ -2305,17 +2307,24 @@ void AcpSessionView::updateImproveButtonState()
 {
     if (!m_improveBtn || !m_input) return;
 
+    const bool agentBusy = (m_model && m_model->isProcessing()) || m_goalRunning;
+    if (agentBusy) {
+        m_improveBtn->hide();
+        return;
+    }
+
     const QString text = m_input->toPlainText().trimmed();
 
-    // Hide when empty.
-    if (text.isEmpty()) {
-        m_improveBtn->hide();
+    if (m_promptImprover && m_promptImprover->state() == ai::PromptImprover::State::Streaming) {
+        m_improveBtn->show();
+        positionImproveButton();
+        m_improveBtn->setEnabled(true);
         return;
     }
 
     // Hide when bare slash command or skill reference (no arguments).
     static const QRegularExpression bareCmd(QStringLiteral("^\\s*[/\\$]\\w+\\s*$"));
-    if (bareCmd.match(text).hasMatch()) {
+    if (!text.isEmpty() && bareCmd.match(text).hasMatch()) {
         m_improveBtn->hide();
         return;
     }
@@ -2323,14 +2332,20 @@ void AcpSessionView::updateImproveButtonState()
     m_improveBtn->show();
     positionImproveButton();
     m_improveBtn->setEnabled(true);
+    m_improveBtn->setToolTip(text.isEmpty()
+        ? tr("Generate prompt with Goal Agent (Ctrl+I)")
+        : tr("Improve prompt with AI (Ctrl+I)"));
+    m_improveBtn->setAccessibleDescription(text.isEmpty()
+        ? tr("Generate a prompt from Goal Agent criteria (Ctrl+I)")
+        : tr("Rewrite the current prompt to be clearer (Ctrl+I)"));
 }
 
 void AcpSessionView::onImproveClicked()
 {
-    if (!m_promptImprover || !m_input) return;
+    if (!m_input) return;
 
     // If already streaming, cancel.
-    if (m_promptImprover->state() == ai::PromptImprover::State::Streaming) {
+    if (m_promptImprover && m_promptImprover->state() == ai::PromptImprover::State::Streaming) {
         m_promptImprover->cancel();
         m_input->setReadOnly(false);
         m_improveBtn->setText(QStringLiteral("✨"));
@@ -2339,15 +2354,23 @@ void AcpSessionView::onImproveClicked()
         return;
     }
 
+    if ((m_model && m_model->isProcessing()) || m_goalRunning)
+        return;
+
+    const QString draft = m_input->toPlainText().trimmed();
+    if (draft.isEmpty()) {
+        emit generatePromptWithGoalRequested();
+        return;
+    }
+
+    if (!m_promptImprover) return;
+
     QString whyNot;
     if (!m_promptImprover->canImprove(&whyNot)) {
         setBanner(whyNot, BannerKind::Warning);
         QTimer::singleShot(5000, this, &AcpSessionView::clearBanner);
         return;
     }
-
-    const QString draft = m_input->toPlainText().trimmed();
-    if (draft.isEmpty()) return;
 
     const auto images = m_attachmentList->peekAll();
 

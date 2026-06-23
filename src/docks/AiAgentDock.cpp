@@ -23,6 +23,7 @@
 #include "AcpSessionModel.h"
 #include "ApplicationSettings.h"
 #include "GoalAgent.h"
+#include "dialogs/GoalDraftDialog.h"
 #include "dialogs/SendWithGoalDialog.h"
 #include "widgets/AcpSessionView.h"
 
@@ -88,6 +89,9 @@ void AiAgentDock::wireConnectionSignals()
         connect(m_view, &AcpSessionView::sendWithGoalRequested,
                 this, &AiAgentDock::sendWithGoal,
                 Qt::UniqueConnection);
+        connect(m_view, &AcpSessionView::generatePromptWithGoalRequested,
+                this, &AiAgentDock::generatePromptWithGoal,
+                Qt::UniqueConnection);
         // NOTE: both of these MUST target a member-function slot, not a lambda.
         // Qt::UniqueConnection silently refuses functor/lambda slots
         // (QObject::connectImpl returns an empty Connection for them), so a
@@ -111,6 +115,26 @@ void AiAgentDock::stopGoalAgentIfActive()
     if (m_goalAgent && m_goalAgent->status() == GoalAgent::Active) {
         m_goalAgent->stop();
     }
+}
+
+void AiAgentDock::generatePromptWithGoal()
+{
+    if (!m_view)
+        return;
+
+    GoalDraftDialog dlg(m_agentManager,
+                        m_registry,
+                        m_appSettings,
+                        m_model,
+                        m_connection ? m_connection->workingDirectory() : m_workingDirectory,
+                        m_connection ? m_connection->executionContext() : nullptr,
+                        this);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    const QString generated = dlg.generatedText().trimmed();
+    if (!generated.isEmpty())
+        m_view->insertTextToInput(generated);
 }
 
 void AiAgentDock::onAgentExited(int exitCode, QProcess::ExitStatus status)

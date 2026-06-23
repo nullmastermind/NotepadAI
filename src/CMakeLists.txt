@@ -15,6 +15,8 @@ qt_add_executable(NotepadAI
 	GoalActionParser.h
 	GoalAgent.h
 	GoalAgentSettings.h
+	GoalConversationSummary.h
+	GoalDraftGenerator.h
 	GoalPromptRenderer.h
 	BrowserProxyArgs.h
 	ByteArrayUtils.h
@@ -112,6 +114,8 @@ qt_add_executable(NotepadAI
 	GoalActionParser.cpp
 	GoalAgent.cpp
 	GoalAgentSettings.cpp
+	GoalConversationSummary.cpp
+	GoalDraftGenerator.cpp
 	GoalPromptRenderer.cpp
 	BrowserProxyArgs.cpp
 	ColorPickerDelegate.cpp
@@ -221,6 +225,8 @@ qt_add_executable(NotepadAI
 	dialogs/AcpAgentSettingsDialog.cpp
 	dialogs/AcpAgentSettingsDialog.h
 	dialogs/AcpAgentSettingsDialog.ui
+	dialogs/GoalDraftDialog.cpp
+	dialogs/GoalDraftDialog.h
 	dialogs/SendWithGoalDialog.cpp
 	dialogs/SendWithGoalDialog.h
 	dialogs/ScheduledTaskDialog.cpp

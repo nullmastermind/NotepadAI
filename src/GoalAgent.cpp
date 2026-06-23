@@ -9,6 +9,7 @@
 #include "ExecutionContext.h"
 #include "GoalActionParser.h"
 #include "GoalAgentSettings.h"
+#include "GoalConversationSummary.h"
 #include "GoalPromptRenderer.h"
 
 #include <QDir>
@@ -535,34 +536,10 @@ QString GoalAgent::buildConversationSummary()
         return QStringLiteral("<conversation />");
 
     const auto &msgs = m_targetModel->messages();
-    int startIdx = m_lastSeenTargetMessageCount;
+    const int startIdx = m_lastSeenTargetMessageCount;
     logDebug(QStringLiteral("buildConversationSummary: msgs=%1, startIdx=%2, new=%3")
                  .arg(msgs.size()).arg(startIdx).arg(msgs.size() - startIdx));
-    QString xml = QStringLiteral("<conversation>\n");
-
-    for (int i = startIdx; i < msgs.size(); ++i) {
-        const auto &msg = msgs[i];
-        if (msg.role == QLatin1String("user")) {
-            QString text;
-            for (const auto &block : msg.content) {
-                if (block.kind == AcpProtocol::AcpContentBlock::Kind::Text)
-                    text += block.text;
-            }
-            xml += QStringLiteral("  <message role=\"user\">")
-                   + text.toHtmlEscaped()
-                   + QStringLiteral("</message>\n");
-        } else if (msg.role == QLatin1String("assistant")) {
-            QString text;
-            for (const auto &block : msg.content) {
-                if (block.kind == AcpProtocol::AcpContentBlock::Kind::Text)
-                    text += block.text;
-            }
-            xml += QStringLiteral("  <message role=\"assistant\">")
-                   + text.toHtmlEscaped()
-                   + QStringLiteral("</message>\n");
-        }
-    }
-    xml += QStringLiteral("</conversation>");
+    const QString xml = GoalConversationSummary::fromModel(m_targetModel, startIdx);
     m_lastSeenTargetMessageCount = msgs.size();
     return xml;
 }
