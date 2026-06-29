@@ -751,9 +751,8 @@ QString AcpToolCallCard::computeEnrichedTitle() const
     if (bashTitles.contains(tLower)
         || m_kind == QLatin1String("execute")
         || (!rawCommand.isEmpty() && m_rawInput.contains(QStringLiteral("cwd")))) {
-        QString cmd = rawCommand;
-        if (!cmd.isEmpty()) {
-            return QStringLiteral("Command: %1").arg(firstLine(cmd));
+        if (!rawCommand.isEmpty()) {
+            return QStringLiteral("Command: %1").arg(firstLine(rawCommand));
         }
         const QString desc = m_rawInput.value(QStringLiteral("description")).toString();
         if (!desc.isEmpty())

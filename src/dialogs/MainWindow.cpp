@@ -3120,7 +3120,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                         if (dlg->exec() == QDialog::Accepted) {
                             // Convert dialog result to manager's type.
                             QHash<QString, remote::RemoteTransferManager::ConflictResolution> resMap;
-                            for (auto it = dlg->result().cbegin(); it != dlg->result().cend(); ++it) {
+                            for (auto it = dlg->resolutions().cbegin(); it != dlg->resolutions().cend(); ++it) {
                                 resMap.insert(it.key(),
                                     it.value() == TransferConflictDialog::Skip
                                         ? remote::RemoteTransferManager::ConflictResolution::Skip
@@ -3171,7 +3171,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                         dlg->setAttribute(Qt::WA_DeleteOnClose);
                         if (dlg->exec() == QDialog::Accepted) {
                             QHash<QString, remote::RemoteTransferManager::ConflictResolution> resMap;
-                            for (auto it = dlg->result().cbegin(); it != dlg->result().cend(); ++it) {
+                            for (auto it = dlg->resolutions().cbegin(); it != dlg->resolutions().cend(); ++it) {
                                 resMap.insert(it.key(),
                                     it.value() == TransferConflictDialog::Skip
                                         ? remote::RemoteTransferManager::ConflictResolution::Skip

@@ -40,7 +40,7 @@ namespace remote {
 // Classifies an exec channel for the admission budget. ShortLived (git-exec) may
 // use the reserved dynamic slot; LongLived (acp-exec) may not, preventing
 // starvation of short-lived work under heavy long-lived load.
-enum class ExecKind
+enum class ExecKind : quint8
 {
     ShortLived, // git-exec: opens, runs, closes quickly
     LongLived,  // acp-exec: holds the channel for the session's lifetime
@@ -80,7 +80,7 @@ class SshSessionWorker : public QObject
     Q_OBJECT
 
 public:
-    enum class State
+    enum class State : quint8
     {
         Idle,
         ConnectingSocket,
@@ -265,7 +265,7 @@ private slots:
     void onKeepaliveTick();    // FIX-3 keepalive send + miss detection
 
 private:
-    enum class ChPhase
+    enum class ChPhase : quint8
     {
         Queued,    // waiting for a slot (counts against queue, not the cap)
         Opening,   // openChannel in flight (counts against the cap)
@@ -316,7 +316,7 @@ private:
     // --- FIX-2: pending-open entry (unified sub-queue item) ------------------
     // Represents a channel or exec op waiting for admission. Tagged by kind so
     // the admission pass can prioritize short-lived over long-lived.
-    enum class OpenerSource { PtyChannel, ExecOp };
+    enum class OpenerSource : quint8 { PtyChannel, ExecOp };
     struct PendingOpen
     {
         OpenerSource source = OpenerSource::PtyChannel;
@@ -363,9 +363,9 @@ private:
     // service function. Both are driven from onSocketActivity (after pump). Both
     // count toward the unified cap's 2-SFTP-reserved budget (FIX-2). A large bulk
     // read can never block tree-poll/readdir behind it.
-    enum class SftpKind { Read, StreamRead, Write, Stat, Readdir, Rename, Mkdir, Unlink };
-    enum class SftpPhase { NeedOpen, Transfer, NeedClose };
-    enum class SftpLane { Bulk, Meta };
+    enum class SftpKind : quint8 { Read, StreamRead, Write, Stat, Readdir, Rename, Mkdir, Unlink };
+    enum class SftpPhase : quint8 { NeedOpen, Transfer, NeedClose };
+    enum class SftpLane : quint8 { Bulk, Meta };
 
     struct SftpOp
     {
@@ -393,7 +393,7 @@ private:
     void failAllSftp(const QString &reason);
 
     // --- exec engine (D6): independent non-PTY channels, run concurrently -----
-    enum class ExecPhase
+    enum class ExecPhase : quint8
     {
         Queued,     // FIX-2: waiting for admission (budget full)
         NeedOpen,   // admitted; openChannel in flight

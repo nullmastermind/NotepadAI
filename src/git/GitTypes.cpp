@@ -19,7 +19,6 @@
 #include "GitError.h"
 
 namespace {
-struct GitTypesRegistrar {
-    GitTypesRegistrar() { qRegisterMetaType<GitError>("GitError"); }
-} g_registrar;
+void registerGitTypes() { qRegisterMetaType<GitError>("GitError"); }
 }
+Q_CONSTRUCTOR_FUNCTION(registerGitTypes)

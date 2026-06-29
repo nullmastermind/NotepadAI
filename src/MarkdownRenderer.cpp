@@ -29,15 +29,23 @@ struct CodePalette {
     QString type;
 };
 
-static const CodePalette kLightPalette = {
-    "#1f2328", "#cf222e", "#0a3069", "#6e7781",
-    "#0550ae", "#116329", "#1f2328", "#953800"
-};
+static const CodePalette &lightPalette()
+{
+    static const CodePalette p = {
+        "#1f2328", "#cf222e", "#0a3069", "#6e7781",
+        "#0550ae", "#116329", "#1f2328", "#953800"
+    };
+    return p;
+}
 
-static const CodePalette kDarkPalette = {
-    "#e6edf3", "#ff7b72", "#a5d6ff", "#8b949e",
-    "#79c0ff", "#7ee787", "#e6edf3", "#ffa657"
-};
+static const CodePalette &darkPalette()
+{
+    static const CodePalette p = {
+        "#e6edf3", "#ff7b72", "#a5d6ff", "#8b949e",
+        "#79c0ff", "#7ee787", "#e6edf3", "#ffa657"
+    };
+    return p;
+}
 
 enum class SemanticStyle : uint8_t {
     Default, Keyword, String, Comment, Number, Preprocessor, Operator, Type
@@ -71,7 +79,7 @@ SemanticStyle classifyStyle(int styleId)
 
 const QString &colorForSemantic(SemanticStyle s, bool isDark)
 {
-    const CodePalette &pal = isDark ? kDarkPalette : kLightPalette;
+    const CodePalette &pal = isDark ? darkPalette() : lightPalette();
     switch (s) {
     case SemanticStyle::Keyword:      return pal.keyword;
     case SemanticStyle::String:       return pal.string;
@@ -179,7 +187,9 @@ private:
 
 // PLACEHOLDER_FENCE_MAP
 
-static const QHash<QString, QString> kFenceAliases = {
+static const QHash<QString, QString> &fenceAliases()
+{
+    static const QHash<QString, QString> m = {
     {"c++", "cpp"}, {"cxx", "cpp"}, {"cc", "cpp"}, {"h", "cpp"}, {"hpp", "cpp"},
     {"py", "python"},
     {"js", "javascript"}, {"mjs", "javascript"}, {"cjs", "javascript"}, {"jsx", "javascript"},
@@ -193,9 +203,13 @@ static const QHash<QString, QString> kFenceAliases = {
     {"pl", "perl"},
     {"ps1", "powershell"},
     {"md", "markdown"},
-};
+    };
+    return m;
+}
 
-static const QHash<QString, QString> kLanguageToLexer = {
+static const QHash<QString, QString> &languageToLexer()
+{
+    static const QHash<QString, QString> m = {
     {"cpp", "cpp"}, {"c", "cpp"}, {"python", "python"}, {"javascript", "cpp"},
     {"rust", "rust"}, {"java", "cpp"}, {"go", "cpp"}, {"cs", "cpp"},
     {"bash", "bash"}, {"html", "hypertext"}, {"css", "css"}, {"json", "json"},
@@ -203,7 +217,9 @@ static const QHash<QString, QString> kLanguageToLexer = {
     {"perl", "perl"}, {"yaml", "yaml"}, {"toml", "toml"}, {"markdown", "markdown"},
     {"cmake", "cmake"}, {"makefile", "makefile"}, {"powershell", "powershell"},
     {"dart", "dart"}, {"kotlin", "cpp"}, {"swift", "cpp"},
-};
+    };
+    return m;
+}
 
 } // anonymous namespace
 
@@ -212,8 +228,8 @@ static const QHash<QString, QString> kLanguageToLexer = {
 QString MarkdownRenderer::normalizeFenceLabel(const QString &label)
 {
     QString lower = label.toLower().trimmed();
-    auto it = kFenceAliases.constFind(lower);
-    return it != kFenceAliases.constEnd() ? it.value() : lower;
+    auto it = fenceAliases().constFind(lower);
+    return it != fenceAliases().constEnd() ? it.value() : lower;
 }
 
 QSet<QString> MarkdownRenderer::scanFenceLabels(const QString &source)
@@ -492,8 +508,8 @@ MarkdownRenderResult MarkdownRenderer::render(const MarkdownRenderRequest &reque
         if (it != request.resolvedLexers.constEnd()) {
             lexerName = it.value();
         } else {
-            auto lit = kLanguageToLexer.constFind(normalized);
-            if (lit != kLanguageToLexer.constEnd()) lexerName = lit.value();
+            auto lit = languageToLexer().constFind(normalized);
+            if (lit != languageToLexer().constEnd()) lexerName = lit.value();
         }
 
         QString highlighted = highlightCodeBlock(codeText.toUtf8(), lexerName, request.isDark);

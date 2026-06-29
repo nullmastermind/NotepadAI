@@ -31,7 +31,7 @@ namespace remote {
 // is persisted in the `Ssh/Profiles` settings array (SshProfileRegistry).
 struct SshProfile
 {
-    enum class AuthMethod
+    enum class AuthMethod : quint8
     {
         Password = 0,
         KeyFile = 1,   // private key file (+ optional passphrase in keychain)

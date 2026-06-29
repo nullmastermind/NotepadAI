@@ -15,7 +15,9 @@ namespace ai {
 
 namespace {
 
-const QString kSystemTemplate = QStringLiteral(
+const QString &kSystemTemplate()
+{
+    static const QString tpl = QStringLiteral(
     "You are a prompt improvement assistant for a coding agent chat interface.\n"
     "\n"
     "Your task: rewrite the user's draft prompt to be clearer, more specific, "
@@ -35,6 +37,8 @@ const QString kSystemTemplate = QStringLiteral(
     "- Output ONLY the improved prompt wrapped in "
     "<improved_prompt></improved_prompt> tags. No explanation, no preamble, "
     "no alternatives.\n");
+    return tpl;
+}
 
 } // namespace
 
@@ -190,7 +194,7 @@ QString PromptImprover::buildSystemPrompt(
     const QList<AcpProtocol::AcpCommandInfo> &commands,
     int imageCount) const
 {
-    QString prompt = kSystemTemplate;
+    QString prompt = kSystemTemplate();
 
     if (imageCount > 0) {
         prompt += QStringLiteral(

@@ -38,7 +38,7 @@ class ISshTransport
 {
 public:
     // Per-step outcome for the connect/auth/channel-setup state machine.
-    enum class Step
+    enum class Step : quint8
     {
         Ok,          // completed
         Again,       // EAGAIN — retry on next socket activity
@@ -56,7 +56,7 @@ public:
     // Bulk = file read/write (editor open/save); Meta = readdir/stat/poll-watch.
     // Each lane opens its own LIBSSH2_SFTP session so a large bulk transfer never
     // blocks latency-sensitive metadata ops.
-    enum class SftpLane { Bulk, Meta };
+    enum class SftpLane : quint8 { Bulk, Meta };
 
     // openChannel outcome: Ok carries a transport channel id.
     struct OpenResult
@@ -117,7 +117,7 @@ public:
     // `kind` distinguishes a real entry from end-of-stream / retry / fatal.
     struct SftpDirEntry
     {
-        enum class Kind
+        enum class Kind : quint8
         {
             Entry, // `name` + `attrs` valid
             Done,  // directory fully enumerated

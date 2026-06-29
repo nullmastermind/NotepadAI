@@ -44,13 +44,13 @@ class TransferConflictDialog : public QDialog
     Q_OBJECT
 
 public:
-    enum Resolution { Skip, Replace };
+    enum Resolution : quint8 { Skip, Replace };
 
     explicit TransferConflictDialog(const QStringList &conflictPaths, QWidget *parent = nullptr);
 
     // Returns the per-path resolutions for all paths shown in the dialog.
     // Only meaningful if overrideAll() returns false.
-    QHash<QString, Resolution> result() const { return m_resolutions; }
+    QHash<QString, Resolution> resolutions() const { return m_resolutions; }
 
     // True if the user checked "Override current" — bypass conflict checking.
     bool overrideAll() const;

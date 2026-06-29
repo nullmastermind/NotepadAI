@@ -69,7 +69,7 @@ class RemoteFileSystemModel : public QAbstractItemModel, public IWorkspaceFsMode
 public:
     // Custom roles. LoadingRole reports whether a directory node is mid-fetch so
     // a delegate can show a spinner (Asynchronous remote directory listing).
-    enum Roles
+    enum Roles : quint16
     {
         LoadingRole = Qt::UserRole + 1,
     };

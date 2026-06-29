@@ -51,13 +51,13 @@ class RemoteTransferManager : public QObject
 
 public:
     // Transfer direction enum for queue entries.
-    enum class Direction { Download, Upload };
+    enum class Direction : quint8 { Download, Upload };
 
     // How to handle gitignore during download.
-    enum class GitignoreFilter { None, Apply };
+    enum class GitignoreFilter : quint8 { None, Apply };
 
     // Upload conflict resolution.
-    enum class ConflictResolution { Skip, Replace };
+    enum class ConflictResolution : quint8 { Skip, Replace };
 
     // A pending transfer in the queue.
     struct PendingTransfer

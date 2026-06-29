@@ -56,7 +56,7 @@ class ExecutionContext : public QObject
     Q_OBJECT
 
 public:
-    enum class State
+    enum class State : quint8
     {
         Disconnected,
         Connecting,

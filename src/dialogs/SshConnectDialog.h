@@ -46,7 +46,7 @@ public:
     ~SshConnectDialog() override;
 
 private:
-    enum class Page { Progress, HostKey, Error };
+    enum class Page : quint8 { Progress, HostKey, Error };
 
     void wireConnection();
     void showPage(Page page);
