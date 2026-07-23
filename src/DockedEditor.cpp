@@ -415,7 +415,7 @@ void DockedEditor::closeFocusedTab()
     if (!focused) return;
 
     if (focused->property("nn_previewTab").toBool()) {
-        focused->closeDockWidget();
+        focused->requestCloseDockWidget();
     } else {
         ScintillaNext *editor = qobject_cast<ScintillaNext *>(focused->widget());
         if (editor)

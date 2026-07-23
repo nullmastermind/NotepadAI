@@ -18,6 +18,7 @@
 
 
 #include "PreferencesDialog.h"
+#include "MainWindow.h"
 #include "DataPaths.h"
 #include "NotepadNextApplication.h"
 #include "TranslationManager.h"
@@ -34,7 +35,6 @@
 #include <QKeySequenceEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
-#include <QProcess>
 #include <QSpinBox>
 #include <QStandardPaths>
 
@@ -614,9 +614,11 @@ void PreferencesDialog::offerRestart()
         tr("The data directory has been changed. Restart now to apply?"),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
     if (result == QMessageBox::Yes) {
-        const QString exe = QCoreApplication::applicationFilePath();
-        QProcess::startDetached(exe, QCoreApplication::arguments().mid(1));
-        QCoreApplication::quit();
+        QWidget *owner = parentWidget();
+        while (owner && owner->parentWidget())
+            owner = owner->parentWidget();
+        if (auto *mainWindow = qobject_cast<MainWindow *>(owner))
+            mainWindow->requestRestart();
     } else {
         showApplicationRestartRequired();
     }

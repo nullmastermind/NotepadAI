@@ -29,6 +29,7 @@
 #include "DockedEditor.h"
 
 #include "MacroManager.h"
+#include "PendingCloseState.h"
 #include "ScintillaNext.h"
 #include "NppImporter.h"
 #include "SearchResultsCollector.h"
@@ -59,6 +60,7 @@ class ConflictMergeViewerDock;
 class GitOperationManager;
 class MiniAppManager;
 class MiniAppRegistry;
+class EmbeddedWindowManager;
 class WorkspaceFileEnumerator;
 class QuickFileOpenDialog;
 namespace remote { class ExecutionContext; }
@@ -106,6 +108,9 @@ public slots:
     void closeAllExceptActive();
     void closeAllToLeft();
     void closeAllToRight();
+    // Request a restart through the same vetoable close lifecycle. The new
+    // process starts only after close is actually accepted.
+    void requestRestart();
 
     bool saveCurrentFile();
     bool saveFile(ScintillaNext *editor);
@@ -318,6 +323,10 @@ private:
     TerminalManager *terminalManager = Q_NULLPTR;
     FileWatcher *fileWatcher = Q_NULLPTR;
     MiniAppManager *m_miniAppManager = nullptr;
+    EmbeddedWindowManager *m_embeddedWindowManager = nullptr;
+    PendingCloseState m_pendingClose;
+    void queuePendingCloseRetry();
+    void finishAcceptedCloseIntent(PendingCloseState::Intent intent);
     MiniAppRegistry *m_miniAppRegistry = nullptr;
     FindInFolderDock *findInFolderDock = nullptr;
 

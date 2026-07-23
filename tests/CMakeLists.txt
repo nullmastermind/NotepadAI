@@ -1364,6 +1364,19 @@ target_sources(test_async_editor_load PRIVATE
 )
 add_test(NAME AsyncEditorLoad COMMAND test_async_editor_load)
 
+# --- Embedded-window lifecycle (offline): pure state-machine + injected fake
+#     platform hooks. No HWND, desktop, ADS, or NativeWindowHost dependency. ---
+qt_add_executable(test_embedded_window_controller test_embedded_window_controller.cpp)
+target_include_directories(test_embedded_window_controller PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_embedded_window_controller PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_embedded_window_controller PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/EmbeddedWindowController.cpp
+    ${CMAKE_SOURCE_DIR}/src/EmbeddedWindowController.h
+    ${CMAKE_SOURCE_DIR}/src/EmbeddedWindowWin32.h
+    ${CMAKE_SOURCE_DIR}/src/PendingCloseState.h
+)
+add_test(NAME EmbeddedWindowController COMMAND test_embedded_window_controller)
+
 # --- Optional: real-localhost-sshd smoke test of Libssh2Transport end-to-end.
 #     Excluded from CI (needs a live sshd + libssh2 vendored). Enable with
 #     -DNOTEPADAI_SSH_INTEGRATION=ON and the env NOTEPADAI_SSH_TEST_HOST/USER. ---

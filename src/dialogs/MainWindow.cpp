@@ -101,6 +101,7 @@
 #include "EditTasksDialog.h"
 #include "MiniAppManager.h"
 #include "MiniAppRegistry.h"
+#include "EmbeddedWindowManager.h"
 #include "EditMiniAppsDialog.h"
 
 #include "remote/ExecutionContext.h"
@@ -1829,6 +1830,31 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
     m_miniAppRegistry = new MiniAppRegistry(app->getSettings());
     m_miniAppManager = new MiniAppManager(app, m_miniAppRegistry, dockedEditor, this);
 
+    // --- Embedded native windows menu (Windows; empty elsewhere) ---
+    m_embeddedWindowManager = new EmbeddedWindowManager(dockedEditor, dockedEditor);
+    connect(m_embeddedWindowManager, &EmbeddedWindowManager::allEmbedsReleased,
+            this, &MainWindow::queuePendingCloseRetry);
+
+    connect(ui->menuEmbed, &QMenu::aboutToShow, this, [this]() {
+        ui->menuEmbed->clear();
+        const QList<EmbeddedWindowManager::WindowInfo> windows =
+            m_embeddedWindowManager->enumerateEmbeddableWindows();
+        if (windows.isEmpty()) {
+            QAction *emptyAction = ui->menuEmbed->addAction(tr("No embeddable windows"));
+            emptyAction->setEnabled(false);
+            return;
+        }
+
+        for (const EmbeddedWindowManager::WindowInfo &window : windows) {
+            QString label = window.title;
+            label.replace(QLatin1Char('&'), QStringLiteral("&&"));
+            QAction *action = ui->menuEmbed->addAction(label);
+            connect(action, &QAction::triggered, this, [this, window]() {
+                m_embeddedWindowManager->embedWindow(window.handle, window.title);
+            });
+        }
+    });
+
     connect(ui->menuMiniAppsSub, &QMenu::aboutToShow, this, [this]() {
         // Clear dynamic items (keep only the static "Edit Mini Apps..." action)
         while (ui->menuMiniAppsSub->actions().size() > 1) {
@@ -1981,6 +2007,8 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
     });
 
     connect(app, &QCoreApplication::aboutToQuit, this, [this]() {
+        if (m_embeddedWindowManager)
+            m_embeddedWindowManager->shutdown();
         if (m_miniAppManager)
             m_miniAppManager->shutdown();
     });
@@ -2205,6 +2233,12 @@ MainWindow::~MainWindow()
     // early delete prevents that.
     delete fileWatcher;
     fileWatcher = nullptr;
+
+    // EmbeddedWindowManager must drain foreign children while ADS dock widgets
+    // still exist. It is parented to DockedEditor, but explicit deletion here
+    // makes the order independent of MainWindow's QObject child ordering.
+    delete m_embeddedWindowManager;
+    m_embeddedWindowManager = nullptr;
 
     delete ui;
 }
@@ -3823,6 +3857,36 @@ void MainWindow::reloadFile()
     }
 }
 
+void MainWindow::requestRestart()
+{
+    // Restart supersedes a pending ordinary exit. closeEvent owns completion:
+    // it starts the replacement process only after the close is accepted.
+    m_pendingClose.begin(PendingCloseState::Intent::Restart);
+    close();
+}
+
+void MainWindow::queuePendingCloseRetry()
+{
+    if (!m_pendingClose.requestRetry())
+        return;
+    QMetaObject::invokeMethod(this, [this]() {
+        m_pendingClose.retryDequeued();
+        if (m_pendingClose.active())
+            close();
+    }, Qt::QueuedConnection);
+}
+
+void MainWindow::finishAcceptedCloseIntent(PendingCloseState::Intent intent)
+{
+    if (m_pendingClose.intent() != intent)
+        return;
+    const PendingCloseState::Intent accepted = m_pendingClose.accept();
+    if (accepted == PendingCloseState::Intent::Restart) {
+        const QString exe = QCoreApplication::applicationFilePath();
+        QProcess::startDetached(exe, QCoreApplication::arguments().mid(1));
+    }
+}
+
 void MainWindow::closeCurrentFile()
 {
     dockedEditor->closeFocusedTab();
@@ -5212,6 +5276,31 @@ void MainWindow::closeEvent(QCloseEvent *event)
         }
 
         if (!checkEditorsBeforeClose(e)) {
+            m_pendingClose.cancel();
+            event->ignore();
+            return;
+        }
+    }
+
+    if (!m_pendingClose.active())
+        m_pendingClose.begin(PendingCloseState::Intent::Exit);
+
+    if (m_embeddedWindowManager) {
+        m_embeddedWindowManager->shutdown();
+        if (m_embeddedWindowManager->hasPendingEmbeds()) {
+            if (!m_pendingClose.feedbackShown()) {
+                m_pendingClose.markFeedbackShown();
+                const auto choice = QMessageBox::warning(
+                    this, tr("Close Embedded Window"),
+                    tr("Windows refused to detach an embedded window. The tab and application "
+                       "will remain open and closing will retry automatically.\n\n"
+                       "Choose Cancel to cancel the pending exit/restart request."),
+                    QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Ok);
+                if (choice == QMessageBox::Cancel) {
+                    m_pendingClose.cancel();
+                    m_embeddedWindowManager->cancelPendingClose();
+                }
+            }
             event->ignore();
             return;
         }
@@ -5233,12 +5322,15 @@ void MainWindow::closeEvent(QCloseEvent *event)
         emit aboutToClose();
     }
 
+    const PendingCloseState::Intent acceptedIntent = m_pendingClose.intent();
     event->accept();
 
     {
         PROFILE_SCOPE("MainWindow::closeEvent.QMainWindowCloseEvent");
         QMainWindow::closeEvent(event);
     }
+    if (event->isAccepted())
+        finishAcceptedCloseIntent(acceptedIntent);
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent *event)
