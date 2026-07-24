@@ -326,12 +326,13 @@ bool focusForeign(quintptr targetHandle, quintptr token)
     // top-level window, so there is no separate top-level to SetActiveWindow.
     SetLastError(ERROR_SUCCESS);
     SetFocus(target);
+    const bool focused = GetFocus() == target;
+    const DWORD focusError = GetLastError();
     // Self-drawn apps (Godot, Chromium/Edge, ...) gate keyboard/IME input on
     // their OWN activation flag, which they update only from WM_NCACTIVATE /
     // WM_ACTIVATE. A WS_CHILD window never receives those (only top-levels do),
     // so after reparenting they believe they are inactive and silently drop
-    // every keystroke even though GetFocus() already points at them (proven by
-    // the diagnostic log: Godot/Edge keep GetActiveWindow on our Qt window).
+    // every keystroke even when Win32 focus already points at them.
     // Synthesize activation to re-enable their input path. PostMessage (async) so
     // a hung foreign message loop can never block our GUI thread — matches
     // syncGeometry. lParam (the "other" window) is left 0; these apps ignore it.
@@ -339,10 +340,9 @@ bool focusForeign(quintptr targetHandle, quintptr token)
         qWarning("EmbeddedWindow: WM_NCACTIVATE post failed (err=%lu)", GetLastError());
     if (!PostMessageW(target, WM_ACTIVATE, MAKEWPARAM(WA_ACTIVE, 0), 0))
         qWarning("EmbeddedWindow: WM_ACTIVATE post failed (err=%lu)", GetLastError());
-    if (GetFocus() == target)
+    if (focused)
         return true;
-    const DWORD error = GetLastError();
-    qWarning("EmbeddedWindow: SetFocus on foreign child failed (err=%lu)", error);
+    qWarning("EmbeddedWindow: SetFocus on foreign child failed (err=%lu)", focusError);
     return false;
 #else
     Q_UNUSED(targetHandle) Q_UNUSED(token)

@@ -29,8 +29,28 @@
 #include "ScintillaNext.h"
 
 #include <QEvent>
+#include <QFontMetrics>
 #include <QTimer>
 #include <QUuid>
+
+
+namespace {
+
+// Upper bound for a center tab's width. File and preview tabs (browser, embed,
+// file preview) can carry long titles; left uncapped a single tab expands to
+// its full text and monopolises the tab bar. Derived from the tab's own font so
+// it scales with the UI font / DPI rather than a hard-coded pixel value: ~28
+// average glyph widths plus fixed slack for the icon, close button and layout
+// margins. Cheap — one QFontMetrics query per tab creation, never on a hot path.
+int centerTabMaxWidth(const QWidget *tab)
+{
+    const QFontMetrics fm(tab->font());
+    constexpr int kTitleChars = 28;
+    constexpr int kChromeSlack = 56; // icon + close button + margins
+    return fm.averageCharWidth() * kTitleChars + kChromeSlack;
+}
+
+} // namespace
 
 
 class DockedEditorComponentsFactory : public ads::CDockComponentsFactory
@@ -260,8 +280,10 @@ void DockedEditor::addEditor(ScintillaNext *editor)
     // Create the dock widget for the editor
     ads::CDockWidget *dockWidget = dockManager->createDockWidget(editor->getName());
 
-    // Disable elide, elided file names not readable when lots of files opened
-    dockWidget->tabWidget()->setElideMode(Qt::ElideNone);
+    // Keep long file names readable via the tooltip without letting one tab
+    // consume the entire tab bar.
+    dockWidget->tabWidget()->setElideMode(Qt::ElideRight);
+    dockWidget->tabWidget()->setMaximumWidth(centerTabMaxWidth(dockWidget->tabWidget()));
 
     // We need a unique object name. Can't use the name or file path so use a uuid
     dockWidget->setObjectName(QUuid::createUuid().toString());
@@ -400,9 +422,17 @@ ads::CDockWidget *DockedEditor::addPreviewTab(QWidget *widget, const QString &ti
     dockWidget->setFeature(ads::CDockWidget::DockWidgetFeature::DockWidgetDeleteOnClose, true);
     dockWidget->setFeature(ads::CDockWidget::DockWidgetFeature::DockWidgetFloatable, false);
 
-    dockWidget->tabWidget()->setElideMode(Qt::ElideNone);
+    // Preview tabs (browser/embed/file-preview) can carry long, dynamic titles
+    // such as web page <title>s. Cap the tab width and elide from the right so a
+    // single tab can't monopolise the tab bar; the full title stays reachable as
+    // a hover tooltip, kept in sync with subsequent dock-title changes.
+    auto *tab = dockWidget->tabWidget();
+    tab->setElideMode(Qt::ElideRight);
+    tab->setMaximumWidth(centerTabMaxWidth(tab));
+    tab->setToolTip(title);
+    connect(dockWidget, &QWidget::windowTitleChanged, tab, &QWidget::setToolTip);
     if (!icon.isNull())
-        dockWidget->tabWidget()->setIcon(icon);
+        tab->setIcon(icon);
 
     latestDockArea = dockManager->addDockWidget(ads::CenterDockWidgetArea, dockWidget, currentDockArea());
 
