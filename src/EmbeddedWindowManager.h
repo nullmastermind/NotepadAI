@@ -8,6 +8,7 @@
 #pragma once
 
 #include "EmbeddedWindowController.h"
+#include "EmbeddedWindowFocusRouter.h"
 
 #include <QHash>
 #include <QList>
@@ -58,5 +59,6 @@ private:
     struct Tab;
 
     DockedEditor *m_dockedEditor = nullptr;
+    EmbeddedWindowFocusRouter m_focusRouter;
     QHash<quintptr, Tab *> m_tabs;
 };

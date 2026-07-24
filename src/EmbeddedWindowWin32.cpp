@@ -284,4 +284,126 @@ SyncResult syncGeometry(quintptr targetHandle, quintptr hostHandle, quintptr tok
 #endif
 }
 
+bool attachForeignInput(quintptr targetHandle, quintptr token, quint32 *foreignThreadIdOut,
+                        quint32 *foreignProcessIdOut)
+{
+#ifdef Q_OS_WIN
+    if (!foreignThreadIdOut || !foreignProcessIdOut)
+        return false;
+    *foreignThreadIdOut = 0;
+    *foreignProcessIdOut = 0;
+    HWND target = reinterpret_cast<HWND>(targetHandle);
+    if (!IsWindow(target) || GetPropW(target, EmbedPropertyName) != reinterpret_cast<HANDLE>(token))
+        return false;
+    DWORD foreignProcessId = 0;
+    const DWORD foreignThreadId = GetWindowThreadProcessId(target, &foreignProcessId);
+    const DWORD currentThreadId = GetCurrentThreadId();
+    if (!foreignThreadId || !foreignProcessId)
+        return false;
+    if (foreignThreadId == currentThreadId)
+        return true;
+    if (!AttachThreadInput(currentThreadId, foreignThreadId, TRUE)) {
+        qWarning("EmbeddedWindow: AttachThreadInput failed (err=%lu)", GetLastError());
+        return false;
+    }
+    *foreignThreadIdOut = static_cast<quint32>(foreignThreadId);
+    *foreignProcessIdOut = static_cast<quint32>(foreignProcessId);
+    return true;
+#else
+    Q_UNUSED(targetHandle) Q_UNUSED(token) Q_UNUSED(foreignThreadIdOut) Q_UNUSED(foreignProcessIdOut)
+    return false;
+#endif
+}
+
+bool focusForeign(quintptr targetHandle, quintptr token)
+{
+#ifdef Q_OS_WIN
+    HWND target = reinterpret_cast<HWND>(targetHandle);
+    if (!IsWindow(target) || GetPropW(target, EmbedPropertyName) != reinterpret_cast<HANDLE>(token))
+        return false;
+    // With the input queues merged by attachForeignInput(), SetFocus routes
+    // keystrokes to the foreign child; the child is now parented under our
+    // top-level window, so there is no separate top-level to SetActiveWindow.
+    SetLastError(ERROR_SUCCESS);
+    SetFocus(target);
+    // Self-drawn apps (Godot, Chromium/Edge, ...) gate keyboard/IME input on
+    // their OWN activation flag, which they update only from WM_NCACTIVATE /
+    // WM_ACTIVATE. A WS_CHILD window never receives those (only top-levels do),
+    // so after reparenting they believe they are inactive and silently drop
+    // every keystroke even though GetFocus() already points at them (proven by
+    // the diagnostic log: Godot/Edge keep GetActiveWindow on our Qt window).
+    // Synthesize activation to re-enable their input path. PostMessage (async) so
+    // a hung foreign message loop can never block our GUI thread — matches
+    // syncGeometry. lParam (the "other" window) is left 0; these apps ignore it.
+    if (!PostMessageW(target, WM_NCACTIVATE, TRUE, 0))
+        qWarning("EmbeddedWindow: WM_NCACTIVATE post failed (err=%lu)", GetLastError());
+    if (!PostMessageW(target, WM_ACTIVATE, MAKEWPARAM(WA_ACTIVE, 0), 0))
+        qWarning("EmbeddedWindow: WM_ACTIVATE post failed (err=%lu)", GetLastError());
+    if (GetFocus() == target)
+        return true;
+    const DWORD error = GetLastError();
+    qWarning("EmbeddedWindow: SetFocus on foreign child failed (err=%lu)", error);
+    return false;
+#else
+    Q_UNUSED(targetHandle) Q_UNUSED(token)
+    return false;
+#endif
+}
+
+bool detachForeignInput(quint32 foreignThreadId, quint32 foreignProcessId)
+{
+#ifdef Q_OS_WIN
+    if (!foreignThreadId)
+        return true;
+    const DWORD threadId = static_cast<DWORD>(foreignThreadId);
+    HANDLE thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, threadId);
+    if (!thread) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_INVALID_PARAMETER)
+            return true; // Thread exited; Windows automatically detached its queue.
+        qWarning("EmbeddedWindow: OpenThread before input detach failed (err=%lu)", error);
+        return false;
+    }
+    const DWORD currentProcessId = GetProcessIdOfThread(thread);
+    CloseHandle(thread);
+    if (!currentProcessId)
+        return true; // Thread exited during validation.
+    if (currentProcessId != static_cast<DWORD>(foreignProcessId))
+        return true; // Thread id was reused; never mutate the replacement thread.
+    if (AttachThreadInput(GetCurrentThreadId(), threadId, FALSE))
+        return true;
+    const DWORD error = GetLastError();
+    if (error == ERROR_INVALID_PARAMETER)
+        return true; // Thread exited between validation and detach.
+    qWarning("EmbeddedWindow: AttachThreadInput detach failed (err=%lu)", error);
+    return false;
+#else
+    Q_UNUSED(foreignThreadId) Q_UNUSED(foreignProcessId)
+    return true;
+#endif
+}
+
+bool isChildMouseActivationMessage(const void *message)
+{
+#ifdef Q_OS_WIN
+    if (!message)
+        return false;
+    const auto *native = static_cast<const MSG *>(message);
+    if (native->message != WM_PARENTNOTIFY)
+        return false;
+    switch (LOWORD(native->wParam)) {
+    case WM_LBUTTONDOWN:
+    case WM_RBUTTONDOWN:
+    case WM_MBUTTONDOWN:
+    case WM_XBUTTONDOWN:
+        return true;
+    default:
+        return false;
+    }
+#else
+    Q_UNUSED(message)
+    return false;
+#endif
+}
+
 } // namespace EmbeddedWindowWin32

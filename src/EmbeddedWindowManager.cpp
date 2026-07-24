@@ -29,6 +29,9 @@ EmbeddedWindowManager::EmbeddedWindowManager(DockedEditor *dockedEditor, QObject
     : EmbeddedWindowController(parent)
     , m_dockedEditor(dockedEditor)
 {
+    connect(m_dockedEditor, &DockedEditor::previewTabActivated, this, [this](QWidget *widget) {
+        m_focusRouter.request(widget);
+    });
 }
 
 EmbeddedWindowManager::~EmbeddedWindowManager()
@@ -38,8 +41,11 @@ EmbeddedWindowManager::~EmbeddedWindowManager()
     // pending. This assert catches any future exit path that bypasses it.
     Q_ASSERT(!hasPendingEmbeds());
     for (Tab *tab : std::as_const(m_tabs)) {
-        if (tab->host)
+        if (tab->host) {
+            m_focusRouter.unregisterHost(tab->host.data());
+            tab->host->setFocusRequestCallback(NativeWindowHost::FocusRequestCallback());
             tab->host->setChildLostCallback(NativeWindowHost::ChildLostCallback());
+        }
         delete tab; // metadata only; ADS owns dock/host widgets
     }
 }
@@ -77,6 +83,15 @@ quintptr EmbeddedWindowManager::platCreateTab(quintptr token, const QString &tit
     auto *tab = new Tab{host, dock};
     m_tabs.insert(token, tab);
     const QPointer<EmbeddedWindowManager> managerGuard(this);
+    const QPointer<NativeWindowHost> hostGuard(host);
+    m_focusRouter.registerHost(host, [hostGuard]() {
+        if (hostGuard)
+            hostGuard->restoreForeignFocus();
+    });
+    host->setFocusRequestCallback([managerGuard, hostGuard]() {
+        if (managerGuard && hostGuard)
+            managerGuard->m_focusRouter.request(hostGuard.data());
+    });
     host->setChildLostCallback([managerGuard, token]() {
         if (!managerGuard)
             return;
@@ -173,6 +188,10 @@ void EmbeddedWindowManager::platForceCloseTab(quintptr token)
     if (!tab)
         return;
     const QPointer<ads::CDockWidget> dock = tab->dock;
+    if (tab->host) {
+        m_focusRouter.unregisterHost(tab->host.data());
+        tab->host->setFocusRequestCallback(NativeWindowHost::FocusRequestCallback());
+    }
     delete tab;
     if (dock && !dock->isClosed())
         dock->closeDockWidget();

@@ -331,9 +331,13 @@ target_include_directories(test_acp_agent_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/dialogs
     ${CMAKE_SOURCE_DIR}/src/docks
+    ${CMAKE_SOURCE_DIR}/src/remote
     ${CMAKE_SOURCE_DIR}/src/widgets
 )
-target_link_libraries(test_acp_agent_manager PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_link_libraries(test_acp_agent_manager PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+    SingleApplication::SingleApplication
+)
 target_sources(test_acp_agent_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
@@ -400,9 +404,13 @@ target_include_directories(test_acp_agent_exit_restart PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/dialogs
     ${CMAKE_SOURCE_DIR}/src/docks
+    ${CMAKE_SOURCE_DIR}/src/remote
     ${CMAKE_SOURCE_DIR}/src/widgets
 )
-target_link_libraries(test_acp_agent_exit_restart PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_link_libraries(test_acp_agent_exit_restart PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+    SingleApplication::SingleApplication
+)
 target_sources(test_acp_agent_exit_restart PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
@@ -469,9 +477,13 @@ target_include_directories(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/dialogs
     ${CMAKE_SOURCE_DIR}/src/docks
+    ${CMAKE_SOURCE_DIR}/src/remote
     ${CMAKE_SOURCE_DIR}/src/widgets
 )
-target_link_libraries(test_acp_dock_close_event PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_link_libraries(test_acp_dock_close_event PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+    SingleApplication::SingleApplication
+)
 target_sources(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpAgentDefinition.h
     ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.cpp
@@ -1376,6 +1388,16 @@ target_sources(test_embedded_window_controller PRIVATE
     ${CMAKE_SOURCE_DIR}/src/PendingCloseState.h
 )
 add_test(NAME EmbeddedWindowController COMMAND test_embedded_window_controller)
+
+# --- Embedded-window focus routing (offline): coalescing, tab identity, and
+#     QObject lifetime guards. No HWND, ADS, or foreign process required. ---
+qt_add_executable(test_embedded_window_focus_router test_embedded_window_focus_router.cpp)
+target_include_directories(test_embedded_window_focus_router PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_embedded_window_focus_router PRIVATE Qt6::Widgets Qt6::Test)
+target_sources(test_embedded_window_focus_router PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/EmbeddedWindowFocusRouter.h
+)
+add_test(NAME EmbeddedWindowFocusRouter COMMAND test_embedded_window_focus_router)
 
 # --- Optional: real-localhost-sshd smoke test of Libssh2Transport end-to-end.
 #     Excluded from CI (needs a live sshd + libssh2 vendored). Enable with

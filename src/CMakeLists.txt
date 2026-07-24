@@ -466,6 +466,7 @@ qt_add_executable(NotepadAI
 	EmbeddedWindowController.cpp
 	EmbeddedWindowManager.h
 	EmbeddedWindowManager.cpp
+	EmbeddedWindowFocusRouter.h
 	EmbeddedWindowWin32.h
 	EmbeddedWindowWin32.cpp
 	EmbeddedWindowEnumeration.cpp
