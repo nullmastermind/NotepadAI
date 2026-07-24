@@ -124,6 +124,7 @@ jobs:
 
       - name: Upload Sentry Debug Symbols
         if: matrix.qt_version == '6.8'
+        continue-on-error: true
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
