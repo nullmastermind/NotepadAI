@@ -88,3 +88,54 @@ add_custom_target(appimage
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     DEPENDS appdir download_linuxdeploy
 )
+
+# ---------------------------------------------------------------------------
+# CPack shared metadata
+# ---------------------------------------------------------------------------
+set(CPACK_PACKAGE_NAME "notepadai")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_CONTACT "NotepadAI Maintainers <maintainers@notepadai.app>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AI-powered text editor")
+set(CPACK_PACKAGE_DESCRIPTION
+    "NotepadAI is an AI-powered cross-platform text editor built with Qt6.")
+set(CPACK_PACKAGE_FILE_NAME "NotepadAI-${PROJECT_VERSION}-Linux-x86_64")
+
+# ---------------------------------------------------------------------------
+# CPack DEB configuration
+# ---------------------------------------------------------------------------
+set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "NotepadAI Maintainers <maintainers@notepadai.app>")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/nullmastermind/NotepadAI")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS
+    "libqt6core6 (>= 6.5), libqt6gui6 (>= 6.5), libqt6widgets6 (>= 6.5), libqt6network6 (>= 6.5), libqt6printsupport6 (>= 6.5), libqt6concurrent6 (>= 6.5), libxkbcommon0, libxcb-cursor0")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "libsecret-1-0")
+set(CPACK_DEBIAN_PACKAGE_SECTION "editors")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+
+# ---------------------------------------------------------------------------
+# CPack RPM configuration
+# ---------------------------------------------------------------------------
+set(CPACK_RPM_PACKAGE_ARCHITECTURE "x86_64")
+set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
+set(CPACK_RPM_PACKAGE_VENDOR "NotepadAI")
+set(CPACK_RPM_PACKAGE_URL "https://github.com/nullmastermind/NotepadAI")
+set(CPACK_RPM_PACKAGE_DESCRIPTION
+    "NotepadAI is an AI-powered cross-platform text editor built with Qt6.")
+set(CPACK_RPM_PACKAGE_REQUIRES "qt6-qtbase >= 6.5, libxkbcommon, libsecret")
+set(CPACK_RPM_PACKAGE_GROUP "Applications/Editors")
+
+include(CPack)
+
+# Custom target: build .deb package
+add_custom_target(deb
+    COMMAND ${CMAKE_CPACK_COMMAND} -G DEB
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Building DEB package"
+)
+
+# Custom target: build .rpm package
+add_custom_target(rpm
+    COMMAND ${CMAKE_CPACK_COMMAND} -G RPM
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Building RPM package"
+)

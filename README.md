@@ -34,24 +34,92 @@ You can define mini-apps — small HTML/JS tools that run in a native WebView in
 
 ## Installation
 
-Grab a binary from the [Releases](https://github.com/nullmastermind/NotepadAI/releases) page.
+Download from the [Releases](https://github.com/nullmastermind/NotepadAI/releases) page.
 
-| Platform | Format |
-|----------|--------|
-| Windows  | Installer (.exe) or portable zip |
-| Linux    | AppImage |
-| macOS    | Disk image (.dmg) |
+### Windows
 
-## Building from source
+Download the installer (.exe) or the portable zip. The installer registers file associations and adds a Start Menu shortcut. The portable zip runs from any folder with no install step.
 
-You need CMake 3.21+, Qt 6.5+, Ninja, and a C++20 compiler (MSVC, clang-cl, GCC, or Clang).
+### macOS
+
+Download the disk image (.dmg), open it, and drag NotepadAI to Applications.
+
+### Linux
+
+#### AppImage (all distributions)
+
+AppImage runs on any x86_64 Linux distribution without installation.
+
+Requirements: FUSE 2 (`libfuse2`). Ubuntu 22.04+ and Fedora 38+ include it. On Ubuntu 24.04:
 
 ```bash
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
+sudo apt-get install libfuse2
 ```
 
-For platform-specific details and packaging on Windows, macOS, and Linux, see [doc/Building.md](doc/Building.md).
+Run:
+
+```bash
+chmod +x NotepadAI-*.AppImage
+./NotepadAI-*.AppImage
+```
+
+To integrate with your desktop, move to `~/.local/bin/` and use a tool like `appimaged`.
+
+#### DEB package (Ubuntu 24.04+ / Debian 12+)
+
+```bash
+sudo apt install ./NotepadAI-*-amd64.deb
+```
+
+Uninstall: `sudo apt remove notepadai`
+
+#### RPM package (Fedora 38+ / openSUSE Tumbleweed)
+
+Fedora:
+
+```bash
+sudo dnf install ./NotepadAI-*-x86_64.rpm
+```
+
+openSUSE:
+
+```bash
+sudo zypper install ./NotepadAI-*-x86_64.rpm
+```
+
+Uninstall: `sudo dnf remove notepadai` or `sudo zypper remove notepadai`
+
+### Building from source
+
+You need CMake 3.21+, Qt 6.5+, Ninja, and a C++20 compiler.
+
+Ubuntu/Debian build deps:
+
+```bash
+sudo apt-get install cmake ninja-build \
+  qt6-base-dev qt6-base-private-dev libqt6core5compat6-dev \
+  libxkbcommon-dev libxcb-cursor-dev libcups2-dev libcurl4-openssl-dev
+```
+
+Fedora build deps:
+
+```bash
+sudo dnf install cmake ninja-build \
+  qt6-qtbase-devel qt6-qt5compat-devel \
+  libxkbcommon-devel libxcb-devel
+```
+
+Build:
+
+```bash
+git clone https://github.com/nullmastermind/NotepadAI.git
+cd NotepadAI
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+sudo cmake --install build --prefix /usr/local
+```
+
+For packaging details see [doc/Building.md](doc/Building.md).
 
 ## Multi-instance and portable mode
 
