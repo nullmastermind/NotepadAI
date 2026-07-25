@@ -2666,7 +2666,6 @@ void MainWindow::openFolderAsWorkspacePath(const QString &dir, bool showGitTab)
     dock->setObjectName(QStringLiteral("FolderAsWorkspaceDock_extra_%1").arg(++extraIdx));
     dock->setAttribute(Qt::WA_DeleteOnClose, true);
 
-    addDockWidget(Qt::LeftDockWidgetArea, dock);
     DockMiddleClickCloser::install(dock);
     ui->menuView->addAction(dock->toggleViewAction());
     connect(dock, &FolderAsWorkspaceDock::fileDoubleClicked, this, &MainWindow::openFile);
@@ -2675,7 +2674,10 @@ void MainWindow::openFolderAsWorkspacePath(const QString &dir, bool showGitTab)
     registerWorkspaceDock(dock);
 
     if (anchor) {
+        addDockWidget(Qt::LeftDockWidgetArea, dock);
         tabifyDockWidget(anchor, dock);
+    } else {
+        addDockWidget(Qt::LeftDockWidgetArea, dock);
     }
 
     if (isSsh) {
@@ -5430,6 +5432,10 @@ void MainWindow::attachAiAgentDock(AiAgentDock *dock, bool raise)
             return;
         for (auto *ws : findChildren<FolderAsWorkspaceDock *>()) {
             if (QDir::cleanPath(ws->rootPath()) == aiCwd) {
+                // Skip raise if the workspace is tabified with this AI dock —
+                // raising it would immediately hide the AI dock we just switched to.
+                if (tabifiedDockWidgets(ws).contains(dock))
+                    break;
                 ws->setVisible(true);
                 ws->raise();
                 break;
@@ -5447,8 +5453,8 @@ void MainWindow::attachAiAgentDock(AiAgentDock *dock, bool raise)
 
     connect(dock, &AiAgentDock::inputFocused, this, syncWorkspaceForDock);
 
-    addDockWidget(AiAgentDock::defaultArea(), dock);
     DockMiddleClickCloser::install(dock);
+    addDockWidget(AiAgentDock::defaultArea(), dock);
     if (existing) {
         tabifyDockWidget(existing, dock);
     } else {

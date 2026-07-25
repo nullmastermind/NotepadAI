@@ -112,6 +112,7 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(QWidget *parent) :
     tooltipTimer(new QTimer(this))
 {
     ui->setupUi(this);
+    setAllowedAreas(Qt::AllDockWidgetAreas);
 
     fsModel = model;
     proxy->setSourceModel(model);
@@ -184,6 +185,7 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(const QString &initialPath, QWidget
     tooltipTimer(new QTimer(this))
 {
     ui->setupUi(this);
+    setAllowedAreas(Qt::AllDockWidgetAreas);
 
     fsModel = model;
     proxy->setSourceModel(model);
