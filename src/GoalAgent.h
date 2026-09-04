@@ -52,7 +52,7 @@ public:
         QString targetSessionId;
         QStringList successCriteriaList;
         QString agentId;
-        int maxIterations = 10;
+        int maxIterations = GoalAgentSettings::kDefaultMaxIterations;
         QString promptTemplateId;
         QString originalUserMessage;
     };
@@ -106,7 +106,7 @@ private:
     QString m_targetSessionId;
     QList<Criterion> m_criteria;
     int m_currentCriterionIndex = 0;
-    int m_maxIterations = 10;
+    int m_maxIterations = GoalAgentSettings::kDefaultMaxIterations;
     QString m_agentId;
     QString m_promptTemplateId;
     QString m_originalUserMessage;

@@ -436,6 +436,8 @@ qt_add_executable(NotepadAI
 	widgets/FuzzyHighlightDelegate.h
 	widgets/GoalConfigWidget.cpp
 	widgets/GoalConfigWidget.h
+	widgets/GoalCustomApiFields.cpp
+	widgets/GoalCustomApiFields.h
 	widgets/MinimapMath.h
 	widgets/TaskRunnerGutter.cpp
 	widgets/TaskRunnerGutter.h

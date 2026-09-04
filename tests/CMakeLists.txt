@@ -266,8 +266,12 @@ add_test(NAME AcpSessionModelPersistenceIntegration COMMAND test_acp_session_mod
 
 # --- GoalDraftGenerator: XML parse + transient connection teardown ---
 qt_add_executable(test_goal_draft_generator test_goal_draft_generator.cpp)
-target_include_directories(test_goal_draft_generator PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(test_goal_draft_generator PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_include_directories(test_goal_draft_generator PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/dialogs
+    ${CMAKE_SOURCE_DIR}/src/widgets
+)
+target_link_libraries(test_goal_draft_generator PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Test)
 target_sources(test_goal_draft_generator PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpAgentDefinition.h
     ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.cpp
@@ -294,13 +298,41 @@ target_sources(test_goal_draft_generator PRIVATE
     ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.h
     ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.h
+    ${CMAKE_SOURCE_DIR}/src/dialogs/GoalDraftDialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/dialogs/GoalDraftDialog.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeSession.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeSession.h
     ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.h
+    ${CMAKE_SOURCE_DIR}/src/ai/IAnthropicMessagesClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/AnthropicMessagesClient.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/AnthropicMessagesClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
     ${CMAKE_SOURCE_DIR}/src/IAcpProcessChannel.h
     ${CMAKE_SOURCE_DIR}/src/LocalAcpProcessChannel.cpp
     ${CMAKE_SOURCE_DIR}/src/LocalAcpProcessChannel.h
 )
 add_test(NAME GoalDraftGenerator COMMAND test_goal_draft_generator)
+if(WIN32)
+    target_sources(test_goal_draft_generator PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Windows.cpp)
+    target_link_libraries(test_goal_draft_generator PRIVATE crypt32)
+elseif(APPLE)
+    target_sources(test_goal_draft_generator PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Mac.mm)
+    target_link_libraries(test_goal_draft_generator PRIVATE
+        "-framework Security" "-framework CoreFoundation")
+else()
+    target_sources(test_goal_draft_generator PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Linux.cpp)
+endif()
 
 # --- SendWithGoalDialog: persist and restore agent selection across dialog exits ---
 qt_add_executable(test_send_with_goal_dialog test_send_with_goal_dialog.cpp)
@@ -318,12 +350,18 @@ target_sources(test_send_with_goal_dialog PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
+    ${CMAKE_SOURCE_DIR}/src/GoalActionParser.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalActionParser.h
     ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.h
+    ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.h
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.cpp
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.h
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.h
     ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore.h
     ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
 )
@@ -398,6 +436,8 @@ target_sources(test_acp_agent_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
     ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.cpp
@@ -484,6 +524,8 @@ target_sources(test_acp_agent_exit_restart PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
     ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.cpp
@@ -566,6 +608,8 @@ target_sources(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
     ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.cpp

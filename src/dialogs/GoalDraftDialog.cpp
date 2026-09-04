@@ -23,7 +23,9 @@
 #include "AcpSessionModel.h"
 #include "ApplicationSettings.h"
 #include "GoalAgentSettings.h"
+#include "GoalCustomApiFields.h"
 #include "GoalDraftGenerator.h"
+#include "GoalHttpJudge.h"
 
 #include <QAction>
 #include <QCloseEvent>
@@ -31,12 +33,15 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
+#include <QWidget>
+#include <QtGlobal>
 
 #include <utility>
 
@@ -62,7 +67,7 @@ GoalDraftDialog::GoalDraftDialog(AcpAgentManager *manager,
     mainLayout->setSpacing(8);
 
     auto *form = new QFormLayout;
-    form->setSpacing(6);
+    form->setSpacing(8);
 
     m_templateCombo = new QComboBox(this);
     populateTemplates();
@@ -84,10 +89,15 @@ GoalDraftDialog::GoalDraftDialog(AcpAgentManager *manager,
     form->addRow(tr("Criteria:"), m_criteriaEdit);
 
     m_agentCombo = new QComboBox(this);
-    populateAgents();
     form->addRow(tr("Goal-agent:"), m_agentCombo);
 
+    m_customApi = new GoalCustomApiFields(this);
+    m_customApi->setSettings(m_settings);
+    m_customApi->hide();
+    populateAgents();
+
     mainLayout->addLayout(form);
+    mainLayout->addWidget(m_customApi);
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setWordWrap(true);
@@ -114,11 +124,17 @@ GoalDraftDialog::GoalDraftDialog(AcpAgentManager *manager,
             this, &GoalDraftDialog::onGenerated);
     connect(m_generator, &GoalDraftGenerator::errorOccurred,
             this, &GoalDraftDialog::onError);
+    connect(m_generator, &GoalDraftGenerator::debugLogEntry, this, [](const QString &entry) {
+        qWarning("%s", qUtf8Printable(entry));
+    });
 
     connect(m_criteriaEdit, &QPlainTextEdit::textChanged,
             this, &GoalDraftDialog::updateGenerateButton);
     connect(m_agentCombo, qOverload<int>(&QComboBox::currentIndexChanged),
-            this, &GoalDraftDialog::updateGenerateButton);
+            this, [this](int) {
+                updateCustomApiVisibility();
+                updateGenerateButton();
+            });
     connect(m_templateCombo, qOverload<int>(&QComboBox::currentIndexChanged),
             this, &GoalDraftDialog::updateGenerateButton);
     updateGenerateButton();
@@ -143,6 +159,10 @@ void GoalDraftDialog::closeEvent(QCloseEvent *event)
 
 void GoalDraftDialog::onGenerateClicked()
 {
+    if (m_generator && m_generator->isRunning())
+        return;
+
+    persistPendingCustomApi();
     if (!validate())
         return;
 
@@ -178,30 +198,44 @@ void GoalDraftDialog::onError(const QString &message)
 
 void GoalDraftDialog::populateAgents()
 {
-    if (!m_agentCombo || !m_registry)
+    if (!m_agentCombo)
         return;
 
     m_agentCombo->clear();
 
-    QString preferredAgentId;
+    GoalAgentSettings goalSettings;
     if (m_settings) {
         const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
         if (!settingsJson.isEmpty()) {
-            preferredAgentId = GoalAgentSettings::fromJson(
-                QJsonDocument::fromJson(settingsJson.toUtf8()).object()).agentId;
+            goalSettings = GoalAgentSettings::fromJson(
+                QJsonDocument::fromJson(settingsJson.toUtf8()).object());
         }
     }
+    const QString preferredAgentId = goalSettings.agentId;
 
-    const auto agents = m_registry->agents();
     int selectedIdx = 0;
-    for (int i = 0; i < agents.size(); ++i) {
-        const auto &agent = agents[i];
-        m_agentCombo->addItem(agent.name.isEmpty() ? agent.id : agent.name, agent.id);
-        if (!preferredAgentId.isEmpty() && agent.id == preferredAgentId)
-            selectedIdx = i;
+    if (m_registry) {
+        const auto agents = m_registry->agents();
+        for (int i = 0; i < agents.size(); ++i) {
+            const auto &agent = agents[i];
+            m_agentCombo->addItem(agent.name.isEmpty() ? agent.id : agent.name, agent.id);
+            if (!preferredAgentId.isEmpty() && agent.id == preferredAgentId)
+                selectedIdx = i;
+        }
     }
-    if (m_agentCombo->count() > 0)
-        m_agentCombo->setCurrentIndex(selectedIdx);
+    const int customIdx = m_agentCombo->count();
+    m_agentCombo->addItem(tr("Custom API"), QLatin1String(GoalHttpJudge::kAgentId));
+    if (preferredAgentId == QLatin1String(GoalHttpJudge::kAgentId))
+        selectedIdx = customIdx;
+
+    if (m_customApi)
+        m_customApi->loadFromSettings();
+
+    if (m_agentCombo->count() == 0)
+        return;
+
+    m_agentCombo->setCurrentIndex(selectedIdx);
+    updateCustomApiVisibility();
 }
 
 void GoalDraftDialog::populatePresets()
@@ -277,6 +311,12 @@ bool GoalDraftDialog::validate()
         m_statusLabel->show();
         return false;
     }
+    const QString customErr = customApiValidationError();
+    if (!customErr.isEmpty()) {
+        m_statusLabel->setText(customErr);
+        m_statusLabel->show();
+        return false;
+    }
 
     m_statusLabel->hide();
     return true;
@@ -295,6 +335,8 @@ void GoalDraftDialog::setGenerating(bool generating)
     m_templateCombo->setEnabled(!generating);
     m_criteriaEdit->setReadOnly(generating);
     m_agentCombo->setEnabled(!generating);
+    if (m_customApi && GoalHttpJudge::isCustomApiAgent(m_agentCombo->currentData().toString()))
+        m_customApi->setLoading(generating);
     m_generateBtn->setEnabled(!generating);
     m_cancelBtn->setEnabled(true);
     if (!generating)
@@ -305,4 +347,39 @@ void GoalDraftDialog::cancelGeneration()
 {
     if (m_generator && m_generator->isRunning())
         m_generator->cancel();
+}
+
+void GoalDraftDialog::persistPendingCustomApi()
+{
+    if (m_customApi)
+        m_customApi->persistPending();
+
+    if (!m_settings || !m_agentCombo)
+        return;
+    const QString agentId = m_agentCombo->currentData().toString();
+    const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
+    QJsonObject settingsObject = QJsonDocument::fromJson(settingsJson.toUtf8()).object();
+    if (settingsObject.value(QStringLiteral("agentId")).toString() == agentId)
+        return;
+    settingsObject.insert(QStringLiteral("agentId"), agentId);
+    m_settings->setValue(
+        QStringLiteral("Ai/GoalAgentSettings"),
+        QString::fromUtf8(QJsonDocument(settingsObject).toJson(QJsonDocument::Compact)));
+}
+
+QString GoalDraftDialog::customApiValidationError() const
+{
+    if (!m_agentCombo || !GoalHttpJudge::isCustomApiAgent(m_agentCombo->currentData().toString()))
+        return {};
+    return m_customApi ? m_customApi->validationError() : QString();
+}
+
+void GoalDraftDialog::updateCustomApiVisibility()
+{
+    if (!m_customApi || !m_agentCombo)
+        return;
+    const bool custom = GoalHttpJudge::isCustomApiAgent(m_agentCombo->currentData().toString());
+    m_customApi->setVisible(custom);
+    if (custom)
+        m_customApi->refreshStatus();
 }

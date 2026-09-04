@@ -19,6 +19,8 @@
 #ifndef GOAL_DRAFT_GENERATOR_H
 #define GOAL_DRAFT_GENERATOR_H
 
+#include "GoalActionParser.h"
+
 #include <QObject>
 #include <QPointer>
 #include <QProcess>
@@ -28,6 +30,8 @@ class AcpAgentManager;
 class AcpConnection;
 class AcpSessionModel;
 class ApplicationSettings;
+class GoalHttpJudgeRunner;
+class GoalHttpJudgeSession;
 
 namespace remote { class ExecutionContext; }
 
@@ -58,6 +62,7 @@ public:
                                              bool *complete = nullptr);
     QString renderPromptForTesting(const Request &request) const;
     void setConnectionForTesting(AcpConnection *connection, bool running);
+    void setHttpRunnerForTesting(GoalHttpJudgeRunner *runner);
     int teardownCountForTesting() const { return m_teardownCount; }
 
 signals:
@@ -75,15 +80,22 @@ private:
                                    bool *complete = nullptr);
 
     QString renderPrompt(const Request &request) const;
+    bool startHttp(const QString &prompt);
+    void ensureHttpSession();
+    void handleHttpVerdict(const GoalAction &action);
+    void handleHttpFailed(const QString &message);
     void finishWithError(const QString &message);
     void finishAndTeardown();
 
     AcpAgentManager *m_manager = nullptr;
     ApplicationSettings *m_settings = nullptr;
     QPointer<AcpConnection> m_connection;
+    GoalHttpJudgeRunner *m_httpRunner = nullptr;
+    QPointer<GoalHttpJudgeSession> m_httpSession;
     QString m_responseBuffer;
     bool m_running = false;
     bool m_teardownDone = true;
+    bool m_httpSyncFailed = false;
     int m_teardownCount = 0;
 };
 

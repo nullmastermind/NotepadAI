@@ -626,7 +626,16 @@ void GoalAgent::onHttpFailed(const QString &message)
     if (m_status != Active)
         return;
     m_awaitingJudgeResponse = false;
-    m_lastActionText = message;
+    QString userMessage = message;
+    if (message == QLatin1String(GoalHttpJudge::kUnavailableReason)) {
+        userMessage = tr("Custom API is temporarily unavailable. Try again in a moment.");
+    } else if (message == QLatin1String("custom_api_key_invalid")
+               || message == QLatin1String("custom_api_key_missing")) {
+        userMessage = tr("Enter an API key for Custom API.");
+    } else if (message == QLatin1String("custom_api_not_configured")) {
+        userMessage = tr("Configure Custom API (Base URL and model) before generating a prompt.");
+    }
+    m_lastActionText = userMessage;
     logDebug(QStringLiteral("onHttpFailed: %1").arg(message));
-    markTerminal(Failed, message);
+    markTerminal(Failed, userMessage);
 }

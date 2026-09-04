@@ -6,6 +6,10 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+
 bool GoalHttpJudge::isCustomApiAgent(const QString &agentId)
 {
     return agentId == QLatin1String(kAgentId);
@@ -229,8 +233,12 @@ bool GoalHttpJudge::isUsableEndpointUrl(const QString &baseUrl)
 {
     if (baseUrl.trimmed().isEmpty())
         return false;
+    if (!isSafeHeaderValue(baseUrl))
+        return false;
     const QUrl u = messagesUrl(baseUrl);
     if (!u.isValid() || u.host().isEmpty())
+        return false;
+    if (!u.userInfo().isEmpty())
         return false;
     const QString scheme = u.scheme().toLower();
     return scheme == QLatin1String("http") || scheme == QLatin1String("https");
@@ -246,4 +254,167 @@ QString GoalHttpJudge::formatFailureTrace(const QString &reason, const QUrl &url
 {
     return QStringLiteral("%1 | url=%2 model=%3")
         .arg(reason, url.toString(), model);
+}
+
+namespace {
+
+enum GuardState : std::uint8_t { GuardClosed = 0, GuardOpen = 1, GuardHalfOpen = 2 };
+
+std::atomic<std::uint8_t> g_state{GuardClosed};
+std::atomic<int> g_fails{0};
+std::atomic<int> g_probe{0};
+std::atomic<qint64> g_openUntilMs{0};
+std::atomic<qint64> g_nowMs{-1};
+std::atomic<quint64> g_req{0};
+std::atomic<quint64> g_ok{0};
+std::atomic<quint64> g_fail{0};
+std::atomic<quint64> g_rej{0};
+std::atomic<quint64> g_retries{0};
+std::atomic<quint64> g_trace{0};
+std::atomic<quint64> g_lat{0};
+
+qint64 nowMs()
+{
+    const qint64 overrideMs = g_nowMs.load(std::memory_order_relaxed);
+    if (overrideMs >= 0)
+        return overrideMs;
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+} // namespace
+
+bool GoalHttpJudge::isSafeHeaderValue(const QString &value)
+{
+    return !value.contains(QLatin1Char('\r')) && !value.contains(QLatin1Char('\n'))
+        && !value.contains(QChar(0));
+}
+
+bool GoalHttpJudge::isTransportOutage(int httpStatus)
+{
+    return httpStatus == 0 || httpStatus == 429 || httpStatus >= 500;
+}
+
+QString GoalHttpJudge::sanitizePlainText(const QString &text)
+{
+    QString out;
+    out.reserve(text.size());
+    for (const QChar c : text) {
+        const ushort u = c.unicode();
+        if (u == 0)
+            continue;
+        if (u < 32 && c != QLatin1Char('\n') && c != QLatin1Char('\t'))
+            continue;
+        out.append(c);
+    }
+    return out;
+}
+
+bool GoalHttpJudge::circuitAllow()
+{
+    g_req.fetch_add(1, std::memory_order_relaxed);
+    const auto state = g_state.load(std::memory_order_acquire);
+    if (state == GuardClosed)
+        return true;
+    if (state == GuardOpen) {
+        if (nowMs() < g_openUntilMs.load(std::memory_order_relaxed)) {
+            g_rej.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        auto expected = static_cast<std::uint8_t>(GuardOpen);
+        if (g_state.compare_exchange_strong(expected, GuardHalfOpen, std::memory_order_acq_rel)) {
+            g_probe.store(1, std::memory_order_relaxed);
+            return true;
+        }
+        g_rej.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    if (g_probe.exchange(1, std::memory_order_acq_rel) != 0) {
+        g_rej.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    return true;
+}
+
+void GoalHttpJudge::circuitRecordSuccess()
+{
+    g_fails.store(0, std::memory_order_relaxed);
+    g_probe.store(0, std::memory_order_relaxed);
+    g_state.store(GuardClosed, std::memory_order_release);
+    g_ok.fetch_add(1, std::memory_order_relaxed);
+}
+
+void GoalHttpJudge::circuitRecordTransportFailure()
+{
+    g_fail.fetch_add(1, std::memory_order_relaxed);
+    g_probe.store(0, std::memory_order_relaxed);
+    const int n = g_fails.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n >= kCircuitFailureThreshold) {
+        g_openUntilMs.store(nowMs() + kCircuitOpenMs, std::memory_order_relaxed);
+        g_state.store(GuardOpen, std::memory_order_release);
+    } else {
+        g_state.store(GuardClosed, std::memory_order_release);
+    }
+}
+
+GoalHttpJudge::Circuit GoalHttpJudge::circuitState()
+{
+    switch (g_state.load(std::memory_order_acquire)) {
+    case GuardOpen:
+        return Circuit::Open;
+    case GuardHalfOpen:
+        return Circuit::HalfOpen;
+    default:
+        return Circuit::Closed;
+    }
+}
+
+GoalHttpJudge::HttpMetrics GoalHttpJudge::httpMetrics()
+{
+    HttpMetrics m;
+    m.requests = g_req.load(std::memory_order_relaxed);
+    m.successes = g_ok.load(std::memory_order_relaxed);
+    m.failures = g_fail.load(std::memory_order_relaxed);
+    m.rejected = g_rej.load(std::memory_order_relaxed);
+    m.retries = g_retries.load(std::memory_order_relaxed);
+    m.lastTraceId = g_trace.load(std::memory_order_relaxed);
+    m.lastLatencyNs = g_lat.load(std::memory_order_relaxed);
+    return m;
+}
+
+quint64 GoalHttpJudge::nextTraceId()
+{
+    return g_trace.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+void GoalHttpJudge::recordLatencyNs(quint64 ns)
+{
+    g_lat.store(ns, std::memory_order_relaxed);
+}
+
+void GoalHttpJudge::recordRetry()
+{
+    g_retries.fetch_add(1, std::memory_order_relaxed);
+}
+
+void GoalHttpJudge::resetHttpGuardForTesting()
+{
+    g_state.store(GuardClosed, std::memory_order_relaxed);
+    g_fails.store(0, std::memory_order_relaxed);
+    g_probe.store(0, std::memory_order_relaxed);
+    g_openUntilMs.store(0, std::memory_order_relaxed);
+    g_nowMs.store(-1, std::memory_order_relaxed);
+    g_req.store(0, std::memory_order_relaxed);
+    g_ok.store(0, std::memory_order_relaxed);
+    g_fail.store(0, std::memory_order_relaxed);
+    g_rej.store(0, std::memory_order_relaxed);
+    g_retries.store(0, std::memory_order_relaxed);
+    g_trace.store(0, std::memory_order_relaxed);
+    g_lat.store(0, std::memory_order_relaxed);
+}
+
+void GoalHttpJudge::setNowMsForTesting(qint64 ms)
+{
+    g_nowMs.store(ms, std::memory_order_relaxed);
 }

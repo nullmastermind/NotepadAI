@@ -186,6 +186,8 @@ void TestSendWithGoalDialog::customApi_showsFieldsWhenSelected()
     combo->setCurrentIndex(idx);
     QVERIFY(!fields->isHidden());
     QVERIFY(fields->findChild<QLineEdit *>());
+    QCOMPARE(QString::fromLatin1(fields->metaObject()->className()),
+             QStringLiteral("GoalCustomApiFields"));
 }
 
 void TestSendWithGoalDialog::customApi_statusEmptyPartialInvalidIdeal()

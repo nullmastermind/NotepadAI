@@ -27,13 +27,16 @@ class AcpAgentManager;
 class AcpAgentRegistry;
 class AcpSessionModel;
 class ApplicationSettings;
+class GoalCustomApiFields;
 class GoalDraftGenerator;
 class QLabel;
 class QCloseEvent;
 class QComboBox;
+class QLabel;
 class QMenu;
 class QPlainTextEdit;
 class QPushButton;
+class QWidget;
 
 namespace remote { class ExecutionContext; }
 
@@ -61,6 +64,7 @@ private slots:
     void onGenerateClicked();
     void onGenerated(const QString &text);
     void onError(const QString &message);
+    void setGenerating(bool generating);
 
 private:
     void populateAgents();
@@ -68,8 +72,10 @@ private:
     void populateTemplates();
     bool validate();
     void updateGenerateButton();
-    void setGenerating(bool generating);
     void cancelGeneration();
+    void persistPendingCustomApi();
+    QString customApiValidationError() const;
+    void updateCustomApiVisibility();
 
     AcpAgentManager *m_manager = nullptr;
     AcpAgentRegistry *m_registry = nullptr;
@@ -83,6 +89,7 @@ private:
     QMenu *m_presetMenu = nullptr;
     QPlainTextEdit *m_criteriaEdit = nullptr;
     QComboBox *m_agentCombo = nullptr;
+    GoalCustomApiFields *m_customApi = nullptr;
     QLabel *m_statusLabel = nullptr;
     QPushButton *m_generateBtn = nullptr;
     QPushButton *m_cancelBtn = nullptr;

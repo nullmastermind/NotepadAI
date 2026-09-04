@@ -27,12 +27,17 @@
 #include "GoalActionParser.h"
 #include "GoalAgentSettings.h"
 #include "GoalConversationSummary.h"
+#include "GoalHttpJudge.h"
+#include "GoalHttpJudgeRunner.h"
+#include "GoalHttpJudgeSession.h"
 #include "GoalPromptRenderer.h"
 #include "remote/ExecutionContext.h"
 
 #include <QDir>
 #include <QJsonDocument>
 #include <QStringList>
+#include <QUrl>
+#include <exception>
 
 namespace {
 
@@ -77,6 +82,16 @@ bool GoalDraftGenerator::start(const Request &request)
         emit errorOccurred(tr("Enter criteria before generating a prompt."));
         return false;
     }
+
+    const QString prompt = renderPrompt(request);
+    if (prompt.trimmed().isEmpty()) {
+        emit errorOccurred(tr("Could not generate prompt. Check the selected template."));
+        return false;
+    }
+
+    if (GoalHttpJudge::isCustomApiAgent(request.agentId))
+        return startHttp(prompt);
+
     if (!m_manager || !m_manager->registry()) {
         emit errorOccurred(tr("Could not generate prompt. Goal-agent settings are unavailable."));
         return false;
@@ -85,12 +100,6 @@ bool GoalDraftGenerator::start(const Request &request)
     const AcpAgentDefinition agent = m_manager->registry()->agent(request.agentId);
     if (agent.id.isEmpty()) {
         emit errorOccurred(tr("Select a goal-agent before generating a prompt."));
-        return false;
-    }
-
-    const QString prompt = renderPrompt(request);
-    if (prompt.trimmed().isEmpty()) {
-        emit errorOccurred(tr("Could not generate prompt. Check the selected template."));
         return false;
     }
 
@@ -163,6 +172,118 @@ void GoalDraftGenerator::setConnectionForTesting(AcpConnection *connection, bool
     m_teardownDone = false;
 }
 
+void GoalDraftGenerator::setHttpRunnerForTesting(GoalHttpJudgeRunner *runner)
+{
+    m_httpRunner = runner;
+}
+
+bool GoalDraftGenerator::startHttp(const QString &prompt)
+{
+    m_responseBuffer.clear();
+    m_running = true;
+    m_teardownDone = false;
+    m_httpSyncFailed = false;
+
+    try {
+        if (m_httpRunner) {
+            connect(m_httpRunner, &GoalHttpJudgeRunner::verdict,
+                    this, &GoalDraftGenerator::handleHttpVerdict, Qt::UniqueConnection);
+            connect(m_httpRunner, &GoalHttpJudgeRunner::failed,
+                    this, &GoalDraftGenerator::handleHttpFailed, Qt::UniqueConnection);
+            connect(m_httpRunner, &GoalHttpJudgeRunner::assumedAchieved,
+                    this, [this](const QString &) {
+                        handleHttpFailed(QStringLiteral("invalid_judge_response"));
+                    });
+            m_httpRunner->evaluate(QUrl(QStringLiteral("https://example.test/v1/messages")),
+                                   QStringLiteral("test-key"),
+                                   QStringLiteral("test-model"),
+                                   prompt);
+            return !m_httpSyncFailed;
+        }
+
+        ensureHttpSession();
+        if (!m_httpSession) {
+            finishWithError(tr("Could not generate prompt. Check Custom API settings."));
+            return false;
+        }
+        m_httpSession->evaluate(m_settings, prompt);
+        return !m_httpSyncFailed;
+    } catch (const std::exception &ex) {
+        emit debugLogEntry(QStringLiteral("[draft] http exception: %1")
+                               .arg(QString::fromUtf8(ex.what())));
+        if (m_running) {
+            finishWithError(tr("Could not generate prompt. Check Custom API settings."));
+        }
+        return false;
+    } catch (...) {
+        emit debugLogEntry(QStringLiteral("[draft] http exception"));
+        if (m_running) {
+            finishWithError(tr("Could not generate prompt. Check Custom API settings."));
+        }
+        return false;
+    }
+}
+
+void GoalDraftGenerator::ensureHttpSession()
+{
+    if (m_httpSession)
+        return;
+
+    m_httpSession = new GoalHttpJudgeSession(this);
+    connect(m_httpSession, &GoalHttpJudgeSession::verdict,
+            this, &GoalDraftGenerator::handleHttpVerdict);
+    connect(m_httpSession, &GoalHttpJudgeSession::failed,
+            this, &GoalDraftGenerator::handleHttpFailed);
+    connect(m_httpSession, &GoalHttpJudgeSession::assumedAchieved,
+            this, [this](const QString &) {
+                handleHttpFailed(QStringLiteral("invalid_judge_response"));
+            });
+}
+
+void GoalDraftGenerator::handleHttpVerdict(const GoalAction &action)
+{
+    if (!m_running)
+        return;
+
+    if (action.type == GoalAction::Complete) {
+        finishWithError(tr("Goal is already complete. No prompt was generated."));
+        return;
+    }
+
+    const QString text = GoalHttpJudge::sanitizePlainText(action.text.trimmed());
+    if (text.isEmpty()) {
+        finishWithError(tr("Goal-agent returned an invalid prompt. Adjust the criteria and try again."));
+        return;
+    }
+
+    finishAndTeardown();
+    emit finished(text);
+}
+
+void GoalDraftGenerator::handleHttpFailed(const QString &message)
+{
+    if (!m_running)
+        return;
+
+    m_httpSyncFailed = true;
+    emit debugLogEntry(QStringLiteral("[draft] http failed: %1").arg(message));
+
+    QString userMessage = message;
+    if (message == QLatin1String("custom_api_not_configured")) {
+        userMessage = tr("Configure Custom API (Base URL and model) before generating a prompt.");
+    } else if (message == QLatin1String("custom_api_key_missing")
+               || message == QLatin1String("custom_api_key_invalid")) {
+        userMessage = tr("Enter an API key for Custom API.");
+    } else if (message == QLatin1String(GoalHttpJudge::kUnavailableReason)) {
+        userMessage = tr("Custom API is temporarily unavailable. Try again in a moment.");
+    } else if (message == QLatin1String("invalid_judge_response")) {
+        userMessage = tr("Goal-agent returned an invalid prompt. Adjust the criteria and try again.");
+    } else if (message.isEmpty()) {
+        userMessage = tr("Could not generate prompt. Check Custom API settings.");
+    }
+    finishWithError(userMessage);
+}
+
 void GoalDraftGenerator::onMessageChunk(const QString &chunk)
 {
     if (!m_running)
@@ -228,7 +349,7 @@ bool GoalDraftGenerator::parseDraftResponse(const QString &response, QString *dr
         return true;
     }
 
-    const QString text = action.text.trimmed();
+    const QString text = GoalHttpJudge::sanitizePlainText(action.text.trimmed());
     if (text.isEmpty()) {
         if (draft)
             draft->clear();
@@ -254,7 +375,8 @@ QString GoalDraftGenerator::renderPrompt(const Request &request) const
     if (!tpl)
         tpl = &goalSettings.defaultTemplate();
 
-    const QStringList criteria = criteriaLines(request.criteria);
+    const QString sanitized = GoalHttpJudge::sanitizePlainText(request.criteria);
+    const QStringList criteria = criteriaLines(sanitized);
     if (criteria.isEmpty())
         return QString();
 
@@ -266,11 +388,12 @@ QString GoalDraftGenerator::renderPrompt(const Request &request) const
         goalSettings.defaultMaxIterations,
         1,
         criteria.size(),
-        request.criteria.trimmed());
+        sanitized.trimmed());
 }
 
 void GoalDraftGenerator::finishWithError(const QString &message)
 {
+    m_httpSyncFailed = true;
     finishAndTeardown();
     emit errorOccurred(message);
 }
@@ -284,6 +407,18 @@ void GoalDraftGenerator::finishAndTeardown()
     ++m_teardownCount;
     m_running = false;
     m_responseBuffer.clear();
+
+    if (m_httpRunner) {
+        disconnect(m_httpRunner, nullptr, this, nullptr);
+        m_httpRunner->cancel();
+    }
+
+    if (m_httpSession) {
+        disconnect(m_httpSession, nullptr, this, nullptr);
+        m_httpSession->cancel();
+        m_httpSession->deleteLater();
+        m_httpSession = nullptr;
+    }
 
     AcpConnection *conn = m_connection.data();
     m_connection = nullptr;

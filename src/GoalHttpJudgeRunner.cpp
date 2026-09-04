@@ -21,6 +21,19 @@ void GoalHttpJudgeRunner::evaluate(const QUrl &url,
                                    const QString &model,
                                    const QString &userPrompt)
 {
+    const quint64 trace = GoalHttpJudge::nextTraceId();
+    qWarning("notepadai.goal.http: trace=%llu start", static_cast<unsigned long long>(trace));
+
+    if (!GoalHttpJudge::circuitAllow()) {
+        qWarning("notepadai.goal.http: trace=%llu rejected circuit_open",
+                 static_cast<unsigned long long>(trace));
+        emit failed(QLatin1String(GoalHttpJudge::kUnavailableReason));
+        return;
+    }
+    if (!GoalHttpJudge::isSafeHeaderValue(apiKey) || !GoalHttpJudge::isSafeHeaderValue(model)) {
+        emit failed(QStringLiteral("custom_api_key_invalid"));
+        return;
+    }
     if (!m_client) {
         emit failed(QStringLiteral("no_http_client"));
         return;
@@ -65,10 +78,13 @@ void GoalHttpJudgeRunner::onFinished(const QByteArray &body)
     case GoalHttpJudge::ApplyContinue:
     case GoalHttpJudge::ApplyComplete:
         m_busy = false;
+        GoalHttpJudge::circuitRecordSuccess();
         emit verdict(action);
         break;
     case GoalHttpJudge::RetryOnce: {
         m_retried = true;
+        GoalHttpJudge::recordRetry();
+        qWarning("notepadai.goal.http: retry");
         ai::IAnthropicMessagesClient::Request req;
         req.url = m_url;
         req.apiKey = m_apiKey;
@@ -82,6 +98,7 @@ void GoalHttpJudgeRunner::onFinished(const QByteArray &body)
     }
     case GoalHttpJudge::AssumeAchieved:
         m_busy = false;
+        GoalHttpJudge::circuitRecordSuccess();
         emit assumedAchieved(QStringLiteral(
             "Goal assumed achieved (model did not call submit_goal_verdict)."));
         break;
@@ -99,6 +116,8 @@ void GoalHttpJudgeRunner::onError(int httpStatus, const QString &message)
     if (!m_busy)
         return;
     m_busy = false;
+    if (GoalHttpJudge::isTransportOutage(httpStatus))
+        GoalHttpJudge::circuitRecordTransportFailure();
     qWarning("notepadai.goal.http: HTTP %d %s", httpStatus, qUtf8Printable(message));
     emit failed(message.isEmpty() ? QStringLiteral("http_error") : message);
 }

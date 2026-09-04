@@ -8,9 +8,9 @@
 
 class AcpAgentRegistry;
 class ApplicationSettings;
+class GoalCustomApiFields;
 class QComboBox;
 class QLabel;
-class QLineEdit;
 class QMenu;
 class QPlainTextEdit;
 class QPushButton;
@@ -23,7 +23,7 @@ struct GoalConfigResult
 {
     QStringList criteriaList;
     QString agentId;
-    int maxIterations = 10;
+    int maxIterations = 100;
     QString promptTemplateId;
 };
 
@@ -63,11 +63,7 @@ private:
     void updateRowCount();
     void updateTemplateButtons();
     QPlainTextEdit *createCriterionEdit(const QString &text = QString());
-
-    void persistCustomApiConfig();
-    void persistCustomApiKey();
     void updateCustomApiVisibility();
-    void updateCustomApiStatus();
 
     AcpAgentRegistry *m_registry;
     ApplicationSettings *m_settings;
@@ -82,12 +78,7 @@ private:
     QPushButton *m_savePresetBtn = nullptr;
     QMenu *m_presetMenu = nullptr;
     QComboBox *m_agentCombo = nullptr;
-    QWidget *m_customApiFields = nullptr;
-    QLineEdit *m_baseUrlEdit = nullptr;
-    QLineEdit *m_apiKeyEdit = nullptr;
-    QLineEdit *m_modelEdit = nullptr;
-    QLabel *m_customApiStatus = nullptr;
-    bool m_keyStored = false;
+    GoalCustomApiFields *m_customApi = nullptr;
     bool m_judgeLoading = false;
     QComboBox *m_templateCombo = nullptr;
     QPushButton *m_tplRenameBtn = nullptr;

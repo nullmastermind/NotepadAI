@@ -31,7 +31,7 @@ class GoalAgentSettings
 {
 public:
     static constexpr const char *kDefaultTemplateId = "default";
-    static constexpr int kDefaultMaxIterations = 10;
+    static constexpr int kDefaultMaxIterations = 100;
     static constexpr int kMaxIterationsMin = 1;
     static constexpr int kMaxIterationsMax = 1000;
     static constexpr int kMaxCriteriaRows = 50;

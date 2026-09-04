@@ -43,12 +43,31 @@ private slots:
     void buildRequestBody_includesModelToolAndUserPrompt();
     void settings_roundTripsCustomApiFields();
     void settings_oldJsonWithoutCustomApiFields_doesNotCrash();
+    void settings_fromJson_unknownExtraFields_doesNotCrash();
     void isCustomApiAgent_matchesAgentId();
     void runner_continueTool_emitsVerdict();
     void runner_xmlText_emitsVerdict();
     void runner_noToolThenComplete_retriesOnce();
     void runner_noToolTwice_assumesAchieved();
+    void init();
+    void isSafeHeaderValue_rejectsCRLF();
+    void isUsableEndpointUrl_rejectsUserinfoAndCrlf();
+    void isTransportOutage_networkAnd5xx_not401();
+    void circuit_threeTransportFailures_rejectsFourth();
+    void circuit_authFailures_doNotOpen();
+    void circuit_successResetsFailures();
+    void circuit_openThenAdvance_allowsHalfOpenProbe();
+    void settings_toJson_doesNotContainApiKey();
+    void sanitizePlainText_stripsNulKeepsScriptLiteral();
+    void httpMetrics_retryIncrements();
+    void buildRequestBody_escapesUserQuotes();
+    void observability_http500_metricsAndNoSecret();
 };
+
+void TestGoalHttpJudge::init()
+{
+    GoalHttpJudge::resetHttpGuardForTesting();
+}
 
 void TestGoalHttpJudge::messagesUrl_appendsV1MessagesToBareHost()
 {
@@ -290,6 +309,23 @@ void TestGoalHttpJudge::settings_oldJsonWithoutCustomApiFields_doesNotCrash()
     const QJsonObject out = s.toJson();
     QVERIFY(out.contains(QStringLiteral("customApiBaseUrl")));
     QVERIFY(out.contains(QStringLiteral("customApiModel")));
+}
+
+void TestGoalHttpJudge::settings_fromJson_unknownExtraFields_doesNotCrash()
+{
+    const QJsonObject future{
+        {QStringLiteral("agentId"), QStringLiteral("claude-code")},
+        {QStringLiteral("defaultMaxIterations"), 7},
+        {QStringLiteral("unknownFutureFlag"), true},
+        {QStringLiteral("legacyDbUrl"), QStringLiteral("postgres://old")},
+        {QStringLiteral("promptTemplates"), QJsonArray{}},
+    };
+    const GoalAgentSettings s = GoalAgentSettings::fromJson(future);
+    QCOMPARE(s.agentId, QStringLiteral("claude-code"));
+    QCOMPARE(s.defaultMaxIterations, 7);
+    QVERIFY(s.customApiBaseUrl.isEmpty());
+    QVERIFY(!s.toJson().contains(QStringLiteral("unknownFutureFlag")));
+    QVERIFY(!s.toJson().contains(QStringLiteral("legacyDbUrl")));
 }
 
 void TestGoalHttpJudge::isCustomApiAgent_matchesAgentId()
@@ -540,6 +576,203 @@ void TestGoalHttpJudge::sessionFail_emitsReasonWithoutUrlModelOrKey()
     QVERIFY(!failMsg.contains(QLatin1String("http://")));
     QVERIFY(!failMsg.contains(QLatin1String("https://")));
     QVERIFY(!failMsg.contains(QLatin1String("sk-"), Qt::CaseInsensitive));
+}
+
+void TestGoalHttpJudge::isSafeHeaderValue_rejectsCRLF()
+{
+    QVERIFY(GoalHttpJudge::isSafeHeaderValue(QStringLiteral("sk-test")));
+    QVERIFY(!GoalHttpJudge::isSafeHeaderValue(QStringLiteral("sk-test\r\nX-Injected: 1")));
+    QVERIFY(!GoalHttpJudge::isSafeHeaderValue(QStringLiteral("sk-test\n")));
+    QVERIFY(!GoalHttpJudge::isSafeHeaderValue(QStringLiteral("sk-test\r")));
+}
+
+void TestGoalHttpJudge::isUsableEndpointUrl_rejectsUserinfoAndCrlf()
+{
+    QVERIFY(GoalHttpJudge::isUsableEndpointUrl(QStringLiteral("https://api.anthropic.com")));
+    QVERIFY(!GoalHttpJudge::isUsableEndpointUrl(
+        QStringLiteral("https://user:pass@api.anthropic.com")));
+    QVERIFY(!GoalHttpJudge::isUsableEndpointUrl(
+        QStringLiteral("https://api.anthropic.com\r\nX-Injected: 1")));
+    QVERIFY(!GoalHttpJudge::isUsableEndpointUrl(QStringLiteral("file:///tmp/x")));
+}
+
+void TestGoalHttpJudge::isTransportOutage_networkAnd5xx_not401()
+{
+    QVERIFY(GoalHttpJudge::isTransportOutage(0));
+    QVERIFY(GoalHttpJudge::isTransportOutage(429));
+    QVERIFY(GoalHttpJudge::isTransportOutage(503));
+    QVERIFY(GoalHttpJudge::isTransportOutage(500));
+    QVERIFY(!GoalHttpJudge::isTransportOutage(401));
+    QVERIFY(!GoalHttpJudge::isTransportOutage(403));
+    QVERIFY(!GoalHttpJudge::isTransportOutage(400));
+}
+
+static void fireTransportFail(GoalHttpJudgeRunner *runner, FakeAnthropicClient *fake)
+{
+    fake->errorStatus = 503;
+    fake->errorMessage = QStringLiteral("HTTP 503");
+    runner->evaluate(QUrl(QStringLiteral("https://api.anthropic.com/v1/messages")),
+                     QStringLiteral("sk-test"),
+                     QStringLiteral("claude-opus-5"),
+                     QStringLiteral("Evaluate criterion 1"));
+}
+
+void TestGoalHttpJudge::circuit_threeTransportFailures_rejectsFourth()
+{
+    FakeAnthropicClient fake;
+    GoalHttpJudgeRunner runner(&fake);
+    int failed = 0;
+    QString last;
+    QObject::connect(&runner, &GoalHttpJudgeRunner::failed, [&](const QString &m) {
+        last = m;
+        ++failed;
+    });
+    fireTransportFail(&runner, &fake);
+    fireTransportFail(&runner, &fake);
+    fireTransportFail(&runner, &fake);
+    QCOMPARE(fake.posts.size(), 3);
+    QCOMPARE(GoalHttpJudge::circuitState(), GoalHttpJudge::Circuit::Open);
+
+    fireTransportFail(&runner, &fake);
+    QCOMPARE(fake.posts.size(), 3);
+    QCOMPARE(failed, 4);
+    QCOMPARE(last, QLatin1String(GoalHttpJudge::kUnavailableReason));
+    QCOMPARE(GoalHttpJudge::httpMetrics().rejected, quint64(1));
+}
+
+void TestGoalHttpJudge::circuit_authFailures_doNotOpen()
+{
+    FakeAnthropicClient fake;
+    fake.errorStatus = 401;
+    fake.errorMessage = QStringLiteral("Unauthorized");
+    GoalHttpJudgeRunner runner(&fake);
+    for (int i = 0; i < 5; ++i) {
+        runner.evaluate(QUrl(QStringLiteral("https://api.anthropic.com/v1/messages")),
+                        QStringLiteral("sk-test"),
+                        QStringLiteral("claude-opus-5"),
+                        QStringLiteral("Evaluate criterion 1"));
+    }
+    QCOMPARE(fake.posts.size(), 5);
+    QCOMPARE(GoalHttpJudge::circuitState(), GoalHttpJudge::Circuit::Closed);
+}
+
+void TestGoalHttpJudge::circuit_successResetsFailures()
+{
+    FakeAnthropicClient fake;
+    GoalHttpJudgeRunner runner(&fake);
+    fireTransportFail(&runner, &fake);
+    fireTransportFail(&runner, &fake);
+    fake.errorStatus = 0;
+    fake.errorMessage.clear();
+    while (fake.replies.size() < fake.posts.size())
+        fake.replies.append(QByteArray());
+    fake.replies.append(toolJson("continue", "Please run the tests."));
+    runner.evaluate(QUrl(QStringLiteral("https://api.anthropic.com/v1/messages")),
+                    QStringLiteral("sk-test"),
+                    QStringLiteral("claude-opus-5"),
+                    QStringLiteral("Evaluate criterion 1"));
+    QCOMPARE(GoalHttpJudge::circuitState(), GoalHttpJudge::Circuit::Closed);
+    fireTransportFail(&runner, &fake);
+    QCOMPARE(GoalHttpJudge::circuitState(), GoalHttpJudge::Circuit::Closed);
+}
+
+void TestGoalHttpJudge::circuit_openThenAdvance_allowsHalfOpenProbe()
+{
+    GoalHttpJudge::setNowMsForTesting(1000);
+    FakeAnthropicClient fake;
+    GoalHttpJudgeRunner runner(&fake);
+    fireTransportFail(&runner, &fake);
+    fireTransportFail(&runner, &fake);
+    fireTransportFail(&runner, &fake);
+    QCOMPARE(GoalHttpJudge::circuitState(), GoalHttpJudge::Circuit::Open);
+
+    GoalHttpJudge::setNowMsForTesting(1000 + GoalHttpJudge::kCircuitOpenMs);
+    fake.errorStatus = 0;
+    while (fake.replies.size() < fake.posts.size())
+        fake.replies.append(QByteArray());
+    fake.replies.append(toolJson("continue", "Please run the tests."));
+    runner.evaluate(QUrl(QStringLiteral("https://api.anthropic.com/v1/messages")),
+                    QStringLiteral("sk-test"),
+                    QStringLiteral("claude-opus-5"),
+                    QStringLiteral("Evaluate criterion 1"));
+    QCOMPARE(fake.posts.size(), 4);
+    QCOMPARE(GoalHttpJudge::circuitState(), GoalHttpJudge::Circuit::Closed);
+}
+
+void TestGoalHttpJudge::settings_toJson_doesNotContainApiKey()
+{
+    GoalAgentSettings s;
+    s.customApiBaseUrl = QStringLiteral("https://api.anthropic.com");
+    s.customApiModel = QStringLiteral("claude-opus-5");
+    const QJsonObject obj = s.toJson();
+    QVERIFY(!obj.contains(QStringLiteral("apiKey")));
+    QVERIFY(!obj.contains(QStringLiteral("api_key")));
+    const QByteArray json = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    QVERIFY(!json.contains("sk-"));
+}
+
+void TestGoalHttpJudge::sanitizePlainText_stripsNulKeepsScriptLiteral()
+{
+    const QString raw = QStringLiteral("ok") + QChar(0) + QStringLiteral("<script>x</script>");
+    QCOMPARE(GoalHttpJudge::sanitizePlainText(raw), QStringLiteral("ok<script>x</script>"));
+    QVERIFY(GoalHttpJudge::sanitizePlainText(QStringLiteral("a\rb")).contains(QLatin1Char('a')));
+    QVERIFY(!GoalHttpJudge::sanitizePlainText(QStringLiteral("a\rb")).contains(QLatin1Char('\r')));
+}
+
+void TestGoalHttpJudge::httpMetrics_retryIncrements()
+{
+    FakeAnthropicClient fake;
+    fake.replies.append(QByteArrayLiteral(
+        R"({"content":[{"type":"text","text":"Looks good."}],"stop_reason":"end_turn"})"));
+    fake.replies.append(toolJson("continue", "Please run the tests."));
+    GoalHttpJudgeRunner runner(&fake);
+    int verdicts = 0;
+    QObject::connect(&runner, &GoalHttpJudgeRunner::verdict, [&](const GoalAction &) {
+        ++verdicts;
+    });
+    runner.evaluate(QUrl(QStringLiteral("https://api.anthropic.com/v1/messages")),
+                    QStringLiteral("sk-test"),
+                    QStringLiteral("claude-opus-5"),
+                    QStringLiteral("Evaluate criterion 1"));
+    QCOMPARE(verdicts, 1);
+    QCOMPARE(GoalHttpJudge::httpMetrics().retries, quint64(1));
+    QCOMPARE(GoalHttpJudge::httpMetrics().requests, quint64(1));
+    QCOMPARE(GoalHttpJudge::httpMetrics().successes, quint64(1));
+}
+
+void TestGoalHttpJudge::buildRequestBody_escapesUserQuotes()
+{
+    const QByteArray body = GoalHttpJudge::buildRequestBody(
+        QStringLiteral("claude-opus-5"),
+        QStringLiteral("say \"hi\"\nand <script>x</script>"));
+    const QJsonDocument doc = QJsonDocument::fromJson(body);
+    QVERIFY(doc.isObject());
+    const QJsonArray messages = doc.object().value(QLatin1String("messages")).toArray();
+    QVERIFY(!messages.isEmpty());
+    QCOMPARE(messages.first().toObject().value(QLatin1String("content")).toString(),
+             QStringLiteral("say \"hi\"\nand <script>x</script>"));
+    QVERIFY(!body.contains("sk-"));
+}
+
+void TestGoalHttpJudge::observability_http500_metricsAndNoSecret()
+{
+    FakeAnthropicClient fake;
+    fake.errorStatus = 500;
+    fake.errorMessage = QStringLiteral("HTTP 500");
+    GoalHttpJudgeRunner runner(&fake);
+    QString failMsg;
+    QObject::connect(&runner, &GoalHttpJudgeRunner::failed, [&](const QString &m) {
+        failMsg = m;
+    });
+    runner.evaluate(QUrl(QStringLiteral("https://api.anthropic.com/v1/messages")),
+                    QStringLiteral("sk-observability-secret"),
+                    QStringLiteral("claude-opus-5"),
+                    QStringLiteral("Evaluate criterion 1"));
+    QCOMPARE(failMsg, QStringLiteral("HTTP 500"));
+    QVERIFY(!failMsg.contains(QLatin1String("sk-")));
+    QVERIFY(GoalHttpJudge::httpMetrics().failures >= 1);
+    QVERIFY(GoalHttpJudge::httpMetrics().lastTraceId >= 1);
+    QVERIFY(GoalHttpJudge::httpMetrics().requests >= 1);
 }
 
 QTEST_MAIN(TestGoalHttpJudge)

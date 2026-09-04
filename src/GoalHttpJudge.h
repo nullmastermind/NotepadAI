@@ -58,8 +58,38 @@ public:
                                     const QString &correctionPrompt);
     static QString assistantText(const QByteArray &json);
     static bool isUsableEndpointUrl(const QString &baseUrl);
+    static bool isSafeHeaderValue(const QString &value);
+    static bool isTransportOutage(int httpStatus);
+    static QString sanitizePlainText(const QString &text);
     static QString apiKeyPlaceholder(bool keyStored);
     static QString formatFailureTrace(const QString &reason, const QUrl &url, const QString &model);
+
+    static constexpr int kCircuitFailureThreshold = 3;
+    static constexpr qint64 kCircuitOpenMs = 30000;
+    static constexpr const char *kUnavailableReason = "custom_api_unavailable";
+
+    enum class Circuit : std::uint8_t { Closed, Open, HalfOpen };
+
+    static bool circuitAllow();
+    static void circuitRecordSuccess();
+    static void circuitRecordTransportFailure();
+    static Circuit circuitState();
+
+    struct HttpMetrics {
+        quint64 requests = 0;
+        quint64 successes = 0;
+        quint64 failures = 0;
+        quint64 rejected = 0;
+        quint64 retries = 0;
+        quint64 lastTraceId = 0;
+        quint64 lastLatencyNs = 0;
+    };
+    static HttpMetrics httpMetrics();
+    static quint64 nextTraceId();
+    static void recordLatencyNs(quint64 ns);
+    static void recordRetry();
+    static void resetHttpGuardForTesting();
+    static void setNowMsForTesting(qint64 ms);
 };
 
 #endif // GOAL_HTTP_JUDGE_H

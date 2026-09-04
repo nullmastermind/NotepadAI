@@ -30,7 +30,7 @@ struct ScheduledTaskGoalConfig
 {
     QStringList criteriaList;
     QString agentId;
-    int maxIterations = 10;
+    int maxIterations = 100;
     QString promptTemplateId;
 };
 
@@ -76,7 +76,7 @@ inline ScheduledTaskGoalConfig scheduledTaskGoalConfigFromJson(const QJsonObject
         cfg.criteriaList.append(v.toString());
     }
     cfg.agentId = obj.value(QStringLiteral("agentId")).toString();
-    cfg.maxIterations = obj.value(QStringLiteral("maxIterations")).toInt(10);
+    cfg.maxIterations = obj.value(QStringLiteral("maxIterations")).toInt(100);
     cfg.promptTemplateId = obj.value(QStringLiteral("promptTemplateId")).toString();
     return cfg;
 }

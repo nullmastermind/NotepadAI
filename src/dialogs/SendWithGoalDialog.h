@@ -15,7 +15,7 @@ struct SendWithGoalResult
 {
     QStringList successCriteriaList;
     QString agentId;
-    int maxIterations = 10;
+    int maxIterations = 100;
     QString promptTemplateId;
 };
 
