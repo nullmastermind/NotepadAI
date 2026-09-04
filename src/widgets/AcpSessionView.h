@@ -51,7 +51,6 @@ class QComboBox;
 class QDialog;
 class QFrame;
 class QLabel;
-class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
@@ -87,9 +86,6 @@ public:
     void setGoalActive(int criterionIndex, int totalCriteria, int iteration, int maxIterations);
     void setGoalTerminal(const QString &statusText);
     void clearGoalStatus();
-    void setCustomApiJudge(const QString &baseUrl, const QString &model);
-    void setCustomApiJudgeLoading(bool loading);
-    void setCustomApiJudgeError(const QString &message);
 
     // Detach from the current model + connection and re-attach to a new pair
     // (typically after AcpAgentManager::restartSession). Clears the
@@ -265,11 +261,6 @@ private:
     QFrame *m_goalStatusRow = nullptr;
     QLabel *m_goalStatusLabel = nullptr;
     QToolButton *m_goalStopBtn = nullptr;
-    QWidget *m_customApiFields = nullptr;
-    QLineEdit *m_customApiUrlEdit = nullptr;
-    QLineEdit *m_customApiKeyEdit = nullptr;
-    QLineEdit *m_customApiModelEdit = nullptr;
-    QLabel *m_customApiStatus = nullptr;
 
     // Input + buttons
     QPlainTextEdit *m_input = nullptr;

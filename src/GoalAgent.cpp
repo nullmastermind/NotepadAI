@@ -478,9 +478,15 @@ void GoalAgent::finalizeHandoff(const QString &verdict, const QString &authoredT
     m_criteria[m_currentCriterionIndex].status = CriterionActive;
     emit criterionAdvanced(m_currentCriterionIndex);
 
-    // Destroy old judge, spawn new one.
+    // HTTP custom-API judge has no ACP process — do not look it up in the registry.
     destroyJudgeConnection();
-    spawnJudgeForCriterion(m_currentCriterionIndex);
+    if (GoalHttpJudge::isCustomApiAgent(m_agentId)) {
+        ensureHttpJudge();
+    } else {
+        spawnJudgeForCriterion(m_currentCriterionIndex);
+        if (m_status != Active)
+            return;
+    }
 
     QString handoff;
     if (authoringSucceeded) {

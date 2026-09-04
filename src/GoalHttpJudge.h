@@ -49,7 +49,8 @@ public:
                                int maxIterations,
                                int criterionIndex,
                                int totalCriteria,
-                               const QString &originalUserMessage);
+                               const QString &originalUserMessage,
+                               const QString &templateContent = QString());
     static QByteArray buildRequestBody(const QString &model, const QString &userPrompt);
     static QByteArray buildRetryBody(const QString &model,
                                     const QString &originalUserPrompt,

@@ -61,7 +61,6 @@ void AnthropicMessagesClient::onFinished()
     const QByteArray body = r->readAll();
     Q_UNUSED(body)
     const QNetworkReply::NetworkError netErr = r->error();
-    const QString errStr = r->errorString();
     r->deleteLater();
 
     if (status >= 400 || netErr != QNetworkReply::NoError) {
@@ -69,11 +68,13 @@ void AnthropicMessagesClient::onFinished()
         if (status == 401 || status == 403)
             msg = QStringLiteral("Authentication failed. Check the API key.");
         else if (status == 0)
-            msg = errStr.isEmpty() ? QStringLiteral("Network error") : errStr;
+            msg = QStringLiteral("Network error");
         else
             msg = QStringLiteral("HTTP %1").arg(status);
         emit errorOccurred(status, msg);
-        qWarning("notepadai.goal.http: %s", qUtf8Printable(msg));
+        // Do not log errStr — QNetworkReply::errorString() embeds the request URL.
+        qWarning("notepadai.goal.http: %s status=%d netErr=%d",
+                 qUtf8Printable(msg), status, int(netErr));
         return;
     }
     emit finished(body);

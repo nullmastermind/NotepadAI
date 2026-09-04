@@ -81,7 +81,9 @@ void GoalHttpJudgeSession::finishBusy()
 void GoalHttpJudgeSession::fail(const QString &reason)
 {
     finishBusy();
-    const QString trace = GoalHttpJudge::formatFailureTrace(reason, m_url, m_model);
-    qWarning("notepadai.goal.http: %s", qUtf8Printable(trace));
-    emit failed(trace);
+    // Process log may include url/model for diagnosis; the failed() signal is
+    // user-facing (transcript + debug dialog) and must not.
+    qWarning("notepadai.goal.http: %s",
+             qUtf8Printable(GoalHttpJudge::formatFailureTrace(reason, m_url, m_model)));
+    emit failed(reason);
 }

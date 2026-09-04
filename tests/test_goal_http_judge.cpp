@@ -7,6 +7,7 @@
 #include "GoalAgentSettings.h"
 #include "GoalHttpJudge.h"
 #include "GoalHttpJudgeRunner.h"
+#include "GoalHttpJudgeSession.h"
 
 class TestGoalHttpJudge : public QObject
 {
@@ -18,6 +19,9 @@ private slots:
     void messagesUrl_stripsTrailingSlashBeforeAppend();
     void parseResponse_readsContinueToolUse();
     void parseResponse_readsCompleteToolUse();
+    void parseResponse_readsContinueFromXmlText();
+    void parseResponse_readsCompleteFromXmlText();
+    void parseResponse_prefersToolUseOverXml();
     void parseResponse_noToolCall();
     void parseResponse_emptyContent_failsClosed();
     void decide_emptyContent_failsClosed();
@@ -30,15 +34,18 @@ private slots:
     void decide_invalidJson_failsClosed();
     void runner_garbageBody_failsClosed();
     void runner_httpError_failsClosed();
+    void sessionFail_emitsReasonWithoutUrlModelOrKey();
     void isUsableEndpointUrl_rejectsNonHttp();
     void apiKeyPlaceholder_emptyVsStored();
     void correctionPrompt_namesTheVerdictTool();
-    void judgePrompt_namesTheToolAndCriterion_notXmlAction();
+    void judgePrompt_requiresToolCall_hidesXml();
+    void judgePrompt_usesProvidedTemplate();
     void buildRequestBody_includesModelToolAndUserPrompt();
     void settings_roundTripsCustomApiFields();
     void settings_oldJsonWithoutCustomApiFields_doesNotCrash();
     void isCustomApiAgent_matchesAgentId();
     void runner_continueTool_emitsVerdict();
+    void runner_xmlText_emitsVerdict();
     void runner_noToolThenComplete_retriesOnce();
     void runner_noToolTwice_assumesAchieved();
 };
@@ -85,6 +92,44 @@ void TestGoalHttpJudge::parseResponse_readsCompleteToolUse()
     QVERIFY(GoalHttpJudge::parseResponse(json, &action, nullptr));
     QCOMPARE(action.type, GoalAction::Complete);
     QCOMPARE(action.text, QStringLiteral("Tests passed."));
+}
+
+void TestGoalHttpJudge::parseResponse_readsContinueFromXmlText()
+{
+    const QByteArray json = QByteArrayLiteral(
+        R"({"content":[{"type":"text","text":"<action type=\"continue\">Please run the tests.</action>"}],)"
+        R"("stop_reason":"end_turn"})");
+    GoalAction action;
+    GoalHttpJudge::ParseError err = GoalHttpJudge::InvalidJson;
+    QVERIFY(GoalHttpJudge::parseResponse(json, &action, &err));
+    QCOMPARE(err, GoalHttpJudge::NoError);
+    QCOMPARE(action.type, GoalAction::Continue);
+    QCOMPARE(action.text, QStringLiteral("Please run the tests."));
+}
+
+void TestGoalHttpJudge::parseResponse_readsCompleteFromXmlText()
+{
+    const QByteArray json = QByteArrayLiteral(
+        R"({"content":[{"type":"text","text":"<action type=\"complete\">Tests passed.</action>"}],)"
+        R"("stop_reason":"end_turn"})");
+    GoalAction action;
+    QVERIFY(GoalHttpJudge::parseResponse(json, &action, nullptr));
+    QCOMPARE(action.type, GoalAction::Complete);
+    QCOMPARE(action.text, QStringLiteral("Tests passed."));
+}
+
+void TestGoalHttpJudge::parseResponse_prefersToolUseOverXml()
+{
+    const QByteArray json = QByteArrayLiteral(
+        R"({"content":[)"
+        R"({"type":"text","text":"<action type=\"complete\">Ignore me.</action>"},)"
+        R"({"type":"tool_use","id":"toolu_1","name":"submit_goal_verdict",)"
+        R"("input":{"status":"continue","text":"Please run the tests."}}],)"
+        R"("stop_reason":"tool_use"})");
+    GoalAction action;
+    QVERIFY(GoalHttpJudge::parseResponse(json, &action, nullptr));
+    QCOMPARE(action.type, GoalAction::Continue);
+    QCOMPARE(action.text, QStringLiteral("Please run the tests."));
 }
 
 void TestGoalHttpJudge::parseResponse_noToolCall()
@@ -166,19 +211,34 @@ void TestGoalHttpJudge::correctionPrompt_namesTheVerdictTool()
 {
     const QString prompt = GoalHttpJudge::correctionPrompt();
     QVERIFY(prompt.contains(QLatin1String("submit_goal_verdict")));
+    QVERIFY(prompt.contains(QLatin1String("MUST")));
+    QVERIFY(!prompt.contains(QLatin1String("<action")));
 }
 
-void TestGoalHttpJudge::judgePrompt_namesTheToolAndCriterion_notXmlAction()
+void TestGoalHttpJudge::judgePrompt_requiresToolCall_hidesXml()
 {
     const QString prompt = GoalHttpJudge::judgePrompt(
         QStringLiteral("All tests pass"),
         QStringLiteral("agent: I added a test"),
         1, 10, 1, 2,
         QStringLiteral("Fix the flaky test"));
-    QVERIFY(prompt.contains(QLatin1String("submit_goal_verdict")));
+    QVERIFY(prompt.contains(QLatin1String("You MUST call submit_goal_verdict")));
     QVERIFY(prompt.contains(QLatin1String("All tests pass")));
     QVERIFY(prompt.contains(QLatin1String("Fix the flaky test")));
     QVERIFY(!prompt.contains(QLatin1String("<action")));
+}
+
+void TestGoalHttpJudge::judgePrompt_usesProvidedTemplate()
+{
+    const QString prompt = GoalHttpJudge::judgePrompt(
+        QStringLiteral("All tests pass"),
+        QStringLiteral("agent: I added a test"),
+        1, 10, 1, 2,
+        QStringLiteral("Fix the flaky test"),
+        QStringLiteral("CUSTOM {{goal}} {{originalUserMessage}}"));
+    QVERIFY(prompt.contains(QLatin1String("CUSTOM All tests pass")));
+    QVERIFY(prompt.contains(QLatin1String("Fix the flaky test")));
+    QVERIFY(prompt.contains(QLatin1String("submit_goal_verdict")));
 }
 
 void TestGoalHttpJudge::buildRequestBody_includesModelToolAndUserPrompt()
@@ -197,6 +257,10 @@ void TestGoalHttpJudge::buildRequestBody_includesModelToolAndUserPrompt()
     QCOMPARE(tools.at(0).toObject().value(QLatin1String("name")).toString(),
              QStringLiteral("submit_goal_verdict"));
     QVERIFY(obj.value(QLatin1String("max_tokens")).toInt() > 0);
+    const QString system = obj.value(QLatin1String("system")).toString();
+    QVERIFY(system.contains(QLatin1String("MUST")));
+    QVERIFY(system.contains(QLatin1String("submit_goal_verdict")));
+    QVERIFY(system.contains(QLatin1String("<action")));
 }
 
 void TestGoalHttpJudge::settings_roundTripsCustomApiFields()
@@ -289,6 +353,34 @@ void TestGoalHttpJudge::runner_continueTool_emitsVerdict()
                     QStringLiteral("claude-opus-5"),
                     QStringLiteral("Evaluate criterion 1"));
     QCOMPARE(verdicts, 1);
+    QCOMPARE(fake.posts.size(), 1);
+    QCOMPARE(seen.type, GoalAction::Continue);
+    QCOMPARE(seen.text, QStringLiteral("Please run the tests."));
+}
+
+void TestGoalHttpJudge::runner_xmlText_emitsVerdict()
+{
+    FakeAnthropicClient fake;
+    fake.replies.append(QByteArrayLiteral(
+        R"({"content":[{"type":"text","text":"<action type=\"continue\">Please run the tests.</action>"}],)"
+        R"("stop_reason":"end_turn"})"));
+    GoalHttpJudgeRunner runner(&fake);
+    GoalAction seen;
+    int verdicts = 0;
+    int retries = 0;
+    QObject::connect(&runner, &GoalHttpJudgeRunner::verdict, [&](const GoalAction &a) {
+        seen = a;
+        ++verdicts;
+    });
+    QObject::connect(&runner, &GoalHttpJudgeRunner::assumedAchieved, [&](const QString &) {
+        ++retries;
+    });
+    runner.evaluate(QUrl(QStringLiteral("https://api.anthropic.com/v1/messages")),
+                    QStringLiteral("sk-test"),
+                    QStringLiteral("claude-opus-5"),
+                    QStringLiteral("Evaluate criterion 1"));
+    QCOMPARE(verdicts, 1);
+    QCOMPARE(retries, 0);
     QCOMPARE(fake.posts.size(), 1);
     QCOMPARE(seen.type, GoalAction::Continue);
     QCOMPARE(seen.text, QStringLiteral("Please run the tests."));
@@ -428,6 +520,26 @@ void TestGoalHttpJudge::runner_httpError_failsClosed()
     QCOMPARE(assumed, 0);
     QCOMPARE(failed, 1);
     QVERIFY(!failMsg.contains(QLatin1String("sk-test")));
+    QVERIFY(!failMsg.contains(QLatin1String("sk-"), Qt::CaseInsensitive));
+    QVERIFY(!failMsg.contains(QLatin1String("url=")));
+    QVERIFY(!failMsg.contains(QLatin1String("https://")));
+    QVERIFY(!failMsg.contains(QLatin1String("claude-opus-5")));
+}
+
+void TestGoalHttpJudge::sessionFail_emitsReasonWithoutUrlModelOrKey()
+{
+    GoalHttpJudgeSession session;
+    QString failMsg;
+    QObject::connect(&session, &GoalHttpJudgeSession::failed, [&](const QString &m) {
+        failMsg = m;
+    });
+    session.evaluate(nullptr, QStringLiteral("hi"));
+    QCOMPARE(failMsg, QStringLiteral("custom_api_not_configured"));
+    QVERIFY(!failMsg.contains(QLatin1String("url=")));
+    QVERIFY(!failMsg.contains(QLatin1String("model=")));
+    QVERIFY(!failMsg.contains(QLatin1String("http://")));
+    QVERIFY(!failMsg.contains(QLatin1String("https://")));
+    QVERIFY(!failMsg.contains(QLatin1String("sk-"), Qt::CaseInsensitive));
 }
 
 QTEST_MAIN(TestGoalHttpJudge)
