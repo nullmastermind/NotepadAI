@@ -124,7 +124,7 @@ QString GoalHttpJudge::judgePrompt(const QString &goal,
         "contains clear evidence the criterion is satisfied. If you are not sure, continue "
         "and nudge toward verification. Do not answer in prose.\n");
 
-    const QString core = GoalPromptRenderer::renderJudgePrompt(
+    QString core = GoalPromptRenderer::renderJudgePrompt(
         templateContent.isEmpty() ? kHttpTemplate : templateContent,
         goal,
         conversation,
