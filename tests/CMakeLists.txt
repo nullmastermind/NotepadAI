@@ -318,10 +318,14 @@ target_sources(test_send_with_goal_dialog PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.h
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.cpp
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.h
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
 )
 add_test(NAME SendWithGoalDialog COMMAND test_send_with_goal_dialog)
 
@@ -335,7 +339,7 @@ target_include_directories(test_acp_agent_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets
 )
 target_link_libraries(test_acp_agent_manager PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Test
     SingleApplication::SingleApplication
 )
 target_sources(test_acp_agent_manager PRIVATE
@@ -381,6 +385,19 @@ target_sources(test_acp_agent_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeSession.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeSession.h
+    ${CMAKE_SOURCE_DIR}/src/ai/IAnthropicMessagesClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/AnthropicMessagesClient.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/AnthropicMessagesClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
     ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.cpp
@@ -408,7 +425,7 @@ target_include_directories(test_acp_agent_exit_restart PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets
 )
 target_link_libraries(test_acp_agent_exit_restart PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Test
     SingleApplication::SingleApplication
 )
 target_sources(test_acp_agent_exit_restart PRIVATE
@@ -454,6 +471,19 @@ target_sources(test_acp_agent_exit_restart PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeSession.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeSession.h
+    ${CMAKE_SOURCE_DIR}/src/ai/IAnthropicMessagesClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/AnthropicMessagesClient.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/AnthropicMessagesClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
     ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.cpp
@@ -481,7 +511,7 @@ target_include_directories(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets
 )
 target_link_libraries(test_acp_dock_close_event PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Test
     SingleApplication::SingleApplication
 )
 target_sources(test_acp_dock_close_event PRIVATE
@@ -523,6 +553,19 @@ target_sources(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeSession.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeSession.h
+    ${CMAKE_SOURCE_DIR}/src/ai/IAnthropicMessagesClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/AnthropicMessagesClient.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/AnthropicMessagesClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
     ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.cpp
@@ -539,6 +582,26 @@ target_sources(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.h
 )
 add_test(NAME AcpDockCloseEvent COMMAND test_acp_dock_close_event)
+
+foreach(_goal_http_tgt
+        test_send_with_goal_dialog
+        test_acp_agent_manager
+        test_acp_agent_exit_restart
+        test_acp_dock_close_event)
+    if(WIN32)
+        target_sources(${_goal_http_tgt} PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Windows.cpp)
+        target_link_libraries(${_goal_http_tgt} PRIVATE crypt32)
+    elseif(APPLE)
+        target_sources(${_goal_http_tgt} PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Mac.mm)
+        target_link_libraries(${_goal_http_tgt} PRIVATE
+            "-framework Security" "-framework CoreFoundation")
+    else()
+        target_sources(${_goal_http_tgt} PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Linux.cpp)
+    endif()
+endforeach()
 
 # --- AcpImageAttachmentList: validation, queue, drag/drop ---
 qt_add_executable(test_acp_image_attachment_limits test_acp_image_attachment_limits.cpp)
@@ -1398,6 +1461,21 @@ target_sources(test_embedded_window_focus_router PRIVATE
     ${CMAKE_SOURCE_DIR}/src/EmbeddedWindowFocusRouter.h
 )
 add_test(NAME EmbeddedWindowFocusRouter COMMAND test_embedded_window_focus_router)
+
+# --- GoalHttpJudge: Anthropic /v1/messages URL, tool-verdict parse, weak-LLM retry ---
+qt_add_executable(test_goal_http_judge test_goal_http_judge.cpp)
+target_include_directories(test_goal_http_judge PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_goal_http_judge PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_goal_http_judge PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.h
+    ${CMAKE_SOURCE_DIR}/src/ai/IAnthropicMessagesClient.h
+    ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
+)
+add_test(NAME GoalHttpJudge COMMAND test_goal_http_judge)
 
 # --- Optional: real-localhost-sshd smoke test of Libssh2Transport end-to-end.
 #     Excluded from CI (needs a live sshd + libssh2 vendored). Enable with

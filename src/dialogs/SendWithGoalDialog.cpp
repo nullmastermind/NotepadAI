@@ -58,12 +58,19 @@ bool SendWithGoalDialog::validate(const GoalConfigResult &result)
         m_errorLabel->show();
         return false;
     }
+    const QString customErr = m_goalConfig->customApiValidationError();
+    if (!customErr.isEmpty()) {
+        m_errorLabel->setText(customErr);
+        m_errorLabel->show();
+        return false;
+    }
     m_errorLabel->hide();
     return true;
 }
 
 void SendWithGoalDialog::onStart()
 {
+    m_goalConfig->persistPendingCustomApi();
     const GoalConfigResult result = m_goalConfig->result();
     if (!validate(result))
         return;

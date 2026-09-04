@@ -48,7 +48,10 @@ GoalAgentConfigDialog::GoalAgentConfigDialog(const ScheduledTaskGoalConfig &conf
         m_goalConfig->setPromptTemplateId(config.promptTemplateId);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
+        m_goalConfig->persistPendingCustomApi();
+        accept();
+    });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
 }

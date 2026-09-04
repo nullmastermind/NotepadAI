@@ -161,6 +161,8 @@ QJsonObject GoalAgentSettings::toJson() const
         {QStringLiteral("defaultMaxIterations"), defaultMaxIterations},
         {QStringLiteral("promptTemplates"), tplArr},
         {QStringLiteral("criteriaPresets"), presetArr},
+        {QStringLiteral("customApiBaseUrl"), customApiBaseUrl},
+        {QStringLiteral("customApiModel"), customApiModel},
     };
 }
 
@@ -169,6 +171,10 @@ GoalAgentSettings GoalAgentSettings::fromJson(const QJsonObject &obj)
     GoalAgentSettings s;
     s.agentId = obj.value(QStringLiteral("agentId")).toString();
     s.defaultMaxIterations = obj.value(QStringLiteral("defaultMaxIterations")).toInt(kDefaultMaxIterations);
+    const QJsonValue urlVal = obj.value(QStringLiteral("customApiBaseUrl"));
+    s.customApiBaseUrl = urlVal.isString() ? urlVal.toString() : QString();
+    const QJsonValue modelVal = obj.value(QStringLiteral("customApiModel"));
+    s.customApiModel = modelVal.isString() ? modelVal.toString() : QString();
     if (s.defaultMaxIterations < kMaxIterationsMin)
         s.defaultMaxIterations = kMaxIterationsMin;
     if (s.defaultMaxIterations > kMaxIterationsMax)

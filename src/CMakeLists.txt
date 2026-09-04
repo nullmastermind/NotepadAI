@@ -15,6 +15,9 @@ qt_add_executable(NotepadAI
 	GoalActionParser.h
 	GoalAgent.h
 	GoalAgentSettings.h
+	GoalHttpJudge.h
+	GoalHttpJudgeRunner.h
+	GoalHttpJudgeSession.h
 	GoalConversationSummary.h
 	GoalDraftGenerator.h
 	GoalPromptRenderer.h
@@ -114,6 +117,9 @@ qt_add_executable(NotepadAI
 	GoalActionParser.cpp
 	GoalAgent.cpp
 	GoalAgentSettings.cpp
+	GoalHttpJudge.cpp
+	GoalHttpJudgeRunner.cpp
+	GoalHttpJudgeSession.cpp
 	GoalConversationSummary.cpp
 	GoalDraftGenerator.cpp
 	GoalPromptRenderer.cpp
@@ -494,6 +500,9 @@ qt_add_executable(NotepadAI
 	ai/SsePartialParser.cpp
 	ai/CredentialStore.h
 	ai/CredentialStore_Common.cpp
+	ai/IAnthropicMessagesClient.h
+	ai/AnthropicMessagesClient.h
+	ai/AnthropicMessagesClient.cpp
 	ai/ILlmHttpClient.h
 	ai/LlmHttpClient.h
 	ai/LlmHttpClient.cpp

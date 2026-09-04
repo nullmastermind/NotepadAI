@@ -10,6 +10,8 @@
 #include "GoalActionParser.h"
 #include "GoalAgentSettings.h"
 #include "GoalConversationSummary.h"
+#include "GoalHttpJudge.h"
+#include "GoalHttpJudgeSession.h"
 #include "GoalPromptRenderer.h"
 
 #include <QDir>
@@ -97,12 +99,14 @@ bool GoalAgent::start(const StartRequest &req)
     connect(m_targetConnection, &QObject::destroyed,
             this, &GoalAgent::onTargetDestroyed);
 
-    // Spawn the judge agent for criterion 0.
-    spawnJudgeForCriterion(0);
-
-    if (m_status != Idle) {
-        logDebug(QStringLiteral("start: spawnJudge failed (status=%1)").arg(m_status));
-        return false;
+    if (GoalHttpJudge::isCustomApiAgent(m_agentId)) {
+        ensureHttpJudge();
+    } else {
+        spawnJudgeForCriterion(0);
+        if (m_status != Idle) {
+            logDebug(QStringLiteral("start: spawnJudge failed (status=%1)").arg(m_status));
+            return false;
+        }
     }
 
     setStatus(Active);
@@ -124,6 +128,8 @@ void GoalAgent::stop()
         return;
     logDebug(QStringLiteral("stop: user requested"));
     destroyJudgeConnection();
+    if (m_httpSession)
+        m_httpSession->cancel();
     if (m_targetConnection) {
         disconnect(m_targetConnection, &AcpConnection::promptEnded,
                    this, &GoalAgent::onTargetPromptEnded);
@@ -220,6 +226,11 @@ void GoalAgent::onTargetDestroyed()
 
 void GoalAgent::evaluateCurrentCriterion()
 {
+    if (GoalHttpJudge::isCustomApiAgent(m_agentId)) {
+        evaluateViaHttp();
+        return;
+    }
+
     if (!m_judgeConnection) {
         logDebug(QStringLiteral("evaluateCurrentCriterion: no judge connection"));
         markTerminal(Failed, QStringLiteral("goal_agent_exited"));
@@ -320,6 +331,11 @@ void GoalAgent::processJudgeResponse()
         return;
     }
 
+    applyJudgeAction(action);
+}
+
+void GoalAgent::applyJudgeAction(const GoalAction &action)
+{
     m_lastActionText = action.text;
     logDebug(QStringLiteral("processJudgeResponse: action=%1, text=%2")
                  .arg(action.type == GoalAction::Complete
@@ -542,4 +558,69 @@ QString GoalAgent::buildConversationSummary()
     const QString xml = GoalConversationSummary::fromModel(m_targetModel, startIdx);
     m_lastSeenTargetMessageCount = msgs.size();
     return xml;
+}
+
+void GoalAgent::ensureHttpJudge()
+{
+    if (m_httpSession)
+        return;
+    m_httpSession = new GoalHttpJudgeSession(this);
+    connect(m_httpSession, &GoalHttpJudgeSession::busyChanged,
+            this, &GoalAgent::httpJudgeBusyChanged);
+    connect(m_httpSession, &GoalHttpJudgeSession::verdict,
+            this, &GoalAgent::onHttpVerdict);
+    connect(m_httpSession, &GoalHttpJudgeSession::assumedAchieved,
+            this, &GoalAgent::onHttpAssumedAchieved);
+    connect(m_httpSession, &GoalHttpJudgeSession::failed,
+            this, &GoalAgent::onHttpFailed);
+}
+
+void GoalAgent::evaluateViaHttp()
+{
+    ensureHttpJudge();
+
+    const auto &crit = m_criteria[m_currentCriterionIndex];
+    const QString conversation = buildConversationSummary();
+    const QString prompt = GoalHttpJudge::judgePrompt(
+        crit.text,
+        conversation,
+        crit.iteration + 1,
+        m_maxIterations,
+        m_currentCriterionIndex + 1,
+        m_criteria.size(),
+        m_originalUserMessage);
+
+    m_awaitingJudgeResponse = true;
+    logDebug(QStringLiteral("evaluateViaHttp: prompt=%1 chars").arg(prompt.size()));
+    m_httpSession->evaluate(m_appSettings, prompt);
+}
+
+void GoalAgent::onHttpVerdict(const GoalAction &action)
+{
+    if (m_status != Active)
+        return;
+    m_awaitingJudgeResponse = false;
+    applyJudgeAction(action);
+}
+
+void GoalAgent::onHttpAssumedAchieved(const QString &reason)
+{
+    if (m_status != Active)
+        return;
+    m_awaitingJudgeResponse = false;
+    logDebug(QStringLiteral("onHttpAssumedAchieved: %1").arg(reason.left(120)));
+    GoalAction action;
+    action.type = GoalAction::Complete;
+    action.text = reason;
+    applyJudgeAction(action);
+}
+
+void GoalAgent::onHttpFailed(const QString &message)
+{
+    if (m_status != Active)
+        return;
+    m_awaitingJudgeResponse = false;
+    m_lastActionText = message;
+    logDebug(QStringLiteral("onHttpFailed: %1").arg(message));
+    markTerminal(Failed, message);
 }

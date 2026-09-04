@@ -22,6 +22,8 @@
 #include "AcpAgentRegistry.h"
 #include "ApplicationSettings.h"
 #include "GoalAgentSettings.h"
+#include "GoalHttpJudge.h"
+#include "ai/CredentialStore.h"
 
 static constexpr int kMaxRows = GoalAgentSettings::kMaxCriteriaRows;
 
@@ -36,6 +38,7 @@ GoalConfigWidget::GoalConfigWidget(AcpAgentRegistry *registry,
     populateAgents();
     connect(m_agentCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
             [this](int) {
+                updateCustomApiVisibility();
                 const QString agentId = m_agentCombo->currentData().toString();
                 if (agentId.isEmpty() || !m_settings)
                     return;
@@ -124,6 +127,50 @@ void GoalConfigWidget::buildUi()
     mainLayout->addWidget(agentLabel);
     m_agentCombo = new QComboBox(this);
     mainLayout->addWidget(m_agentCombo);
+
+    m_customApiFields = new QWidget(this);
+    m_customApiFields->setObjectName(QStringLiteral("customApiFields"));
+    auto *apiLayout = new QVBoxLayout(m_customApiFields);
+    apiLayout->setContentsMargins(0, 0, 0, 0);
+    apiLayout->setSpacing(8);
+
+    auto *baseLabel = new QLabel(tr("Base URL"), m_customApiFields);
+    baseLabel->setStyleSheet(QStringLiteral("font-weight: 500; font-size: 12px;"));
+    apiLayout->addWidget(baseLabel);
+    m_baseUrlEdit = new QLineEdit(m_customApiFields);
+    m_baseUrlEdit->setPlaceholderText(QStringLiteral("https://api.anthropic.com"));
+    connect(m_baseUrlEdit, &QLineEdit::editingFinished, this, &GoalConfigWidget::persistCustomApiConfig);
+    apiLayout->addWidget(m_baseUrlEdit);
+
+    auto *keyLabel = new QLabel(tr("API key"), m_customApiFields);
+    keyLabel->setStyleSheet(QStringLiteral("font-weight: 500; font-size: 12px;"));
+    apiLayout->addWidget(keyLabel);
+    m_apiKeyEdit = new QLineEdit(m_customApiFields);
+    m_apiKeyEdit->setEchoMode(QLineEdit::Password);
+    m_apiKeyEdit->setPlaceholderText(GoalHttpJudge::apiKeyPlaceholder(false));
+    connect(m_apiKeyEdit, &QLineEdit::editingFinished, this, &GoalConfigWidget::persistCustomApiKey);
+    apiLayout->addWidget(m_apiKeyEdit);
+
+    auto *modelLabel = new QLabel(tr("Model"), m_customApiFields);
+    modelLabel->setStyleSheet(QStringLiteral("font-weight: 500; font-size: 12px;"));
+    apiLayout->addWidget(modelLabel);
+    m_modelEdit = new QLineEdit(m_customApiFields);
+    m_modelEdit->setPlaceholderText(QStringLiteral("claude-opus-5"));
+    connect(m_modelEdit, &QLineEdit::editingFinished, this, &GoalConfigWidget::persistCustomApiConfig);
+    apiLayout->addWidget(m_modelEdit);
+
+    m_customApiStatus = new QLabel(m_customApiFields);
+    m_customApiStatus->setObjectName(QStringLiteral("customApiStatus"));
+    m_customApiStatus->setWordWrap(true);
+    m_customApiStatus->setStyleSheet(QStringLiteral("font-size: 11px;"));
+    apiLayout->addWidget(m_customApiStatus);
+
+    connect(m_baseUrlEdit, &QLineEdit::textChanged, this, &GoalConfigWidget::updateCustomApiStatus);
+    connect(m_apiKeyEdit, &QLineEdit::textChanged, this, &GoalConfigWidget::updateCustomApiStatus);
+    connect(m_modelEdit, &QLineEdit::textChanged, this, &GoalConfigWidget::updateCustomApiStatus);
+
+    m_customApiFields->hide();
+    mainLayout->addWidget(m_customApiFields);
 
     // Prompt template
     auto *tplLabel = new QLabel(tr("Prompt template"), this);
@@ -228,6 +275,17 @@ void GoalConfigWidget::populateAgents()
         if (a.id == goalSettings.agentId)
             selectedIdx = i;
     }
+    const int customIdx = m_agentCombo->count();
+    m_agentCombo->addItem(tr("Custom API"), QLatin1String(GoalHttpJudge::kAgentId));
+    if (goalSettings.agentId == QLatin1String(GoalHttpJudge::kAgentId))
+        selectedIdx = customIdx;
+
+    m_baseUrlEdit->setText(goalSettings.customApiBaseUrl);
+    m_modelEdit->setText(goalSettings.customApiModel);
+    ai::CredentialStore store;
+    m_keyStored = !store.retrieveSecret(QLatin1String(GoalHttpJudge::kCredentialKey)).isEmpty();
+    m_apiKeyEdit->setPlaceholderText(GoalHttpJudge::apiKeyPlaceholder(m_keyStored));
+
     if (m_agentCombo->count() == 0)
         return;
 
@@ -239,6 +297,7 @@ void GoalConfigWidget::populateAgents()
             QStringLiteral("Ai/GoalAgentSettings"),
             QString::fromUtf8(QJsonDocument(goalSettings.toJson()).toJson(QJsonDocument::Compact)));
     }
+    updateCustomApiVisibility();
 }
 
 void GoalConfigWidget::populateTemplates()
@@ -565,4 +624,133 @@ void GoalConfigWidget::onTemplateDelete()
     m_settings->setValue(QStringLiteral("Ai/GoalAgentSettings"),
         QString::fromUtf8(QJsonDocument(goalSettings.toJson()).toJson(QJsonDocument::Compact)));
     populateTemplates();
+}
+
+void GoalConfigWidget::persistPendingCustomApi()
+{
+    persistCustomApiConfig();
+    persistCustomApiKey();
+}
+
+QString GoalConfigWidget::customApiValidationError() const
+{
+    if (!GoalHttpJudge::isCustomApiAgent(m_agentCombo->currentData().toString()))
+        return {};
+    if (m_baseUrlEdit->text().trimmed().isEmpty())
+        return tr("Enter a Base URL for Custom API.");
+    if (!GoalHttpJudge::isUsableEndpointUrl(m_baseUrlEdit->text()))
+        return tr("Enter a valid http(s) Base URL.");
+    if (m_modelEdit->text().trimmed().isEmpty())
+        return tr("Enter a model for Custom API.");
+    if (m_apiKeyEdit->text().trimmed().isEmpty() && !m_keyStored)
+        return tr("Enter an API key for Custom API.");
+    return {};
+}
+
+void GoalConfigWidget::persistCustomApiConfig()
+{
+    if (!m_settings)
+        return;
+    const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
+    GoalAgentSettings gs;
+    if (!settingsJson.isEmpty()) {
+        gs = GoalAgentSettings::fromJson(
+            QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+    }
+    gs.customApiBaseUrl = m_baseUrlEdit->text().trimmed();
+    gs.customApiModel = m_modelEdit->text().trimmed();
+    m_settings->setValue(
+        QStringLiteral("Ai/GoalAgentSettings"),
+        QString::fromUtf8(QJsonDocument(gs.toJson()).toJson(QJsonDocument::Compact)));
+}
+
+void GoalConfigWidget::persistCustomApiKey()
+{
+    const QString key = m_apiKeyEdit->text().trimmed();
+    if (key.isEmpty())
+        return;
+    ai::CredentialStore store;
+    if (store.storeSecret(QLatin1String(GoalHttpJudge::kCredentialKey), key)) {
+        m_apiKeyEdit->clear();
+        m_keyStored = true;
+        m_apiKeyEdit->setPlaceholderText(GoalHttpJudge::apiKeyPlaceholder(true));
+        updateCustomApiStatus();
+    } else {
+        m_customApiStatus->setText(tr("Could not store the API key in the keychain."));
+        m_customApiStatus->setStyleSheet(QStringLiteral("font-size: 11px; color: red;"));
+        m_customApiStatus->show();
+    }
+}
+
+void GoalConfigWidget::updateCustomApiVisibility()
+{
+    const bool custom = GoalHttpJudge::isCustomApiAgent(
+        m_agentCombo->currentData().toString());
+    m_customApiFields->setVisible(custom);
+    if (custom)
+        updateCustomApiStatus();
+}
+
+void GoalConfigWidget::updateCustomApiStatus()
+{
+    if (!m_customApiStatus)
+        return;
+    if (m_judgeLoading)
+        return;
+
+    const QString url = m_baseUrlEdit->text().trimmed();
+    const QString model = m_modelEdit->text().trimmed();
+    const bool hasKey = !m_apiKeyEdit->text().trimmed().isEmpty() || m_keyStored;
+
+    if (url.isEmpty() && model.isEmpty() && !hasKey) {
+        m_customApiStatus->setText(tr("Enter Base URL, API key, and model."));
+        m_customApiStatus->setStyleSheet(QStringLiteral(
+            "font-size: 11px; color: palette(placeholder-text);"));
+        m_customApiStatus->show();
+        return;
+    }
+    if (!url.isEmpty() && !GoalHttpJudge::isUsableEndpointUrl(url)) {
+        m_customApiStatus->setText(tr("Enter a valid http(s) Base URL."));
+        m_customApiStatus->setStyleSheet(QStringLiteral("font-size: 11px; color: red;"));
+        m_customApiStatus->show();
+        return;
+    }
+
+    QStringList missing;
+    if (url.isEmpty())
+        missing.append(tr("Base URL"));
+    if (!hasKey)
+        missing.append(tr("API key"));
+    if (model.isEmpty())
+        missing.append(tr("model"));
+    if (!missing.isEmpty()) {
+        m_customApiStatus->setText(tr("Enter %1.").arg(missing.join(QStringLiteral(", "))));
+        m_customApiStatus->setStyleSheet(QStringLiteral(
+            "font-size: 11px; color: palette(placeholder-text);"));
+        m_customApiStatus->show();
+        return;
+    }
+
+    m_customApiStatus->clear();
+    m_customApiStatus->hide();
+}
+
+void GoalConfigWidget::setJudgeLoading(bool loading)
+{
+    m_judgeLoading = loading;
+    const bool custom = GoalHttpJudge::isCustomApiAgent(
+        m_agentCombo->currentData().toString());
+    if (!custom)
+        return;
+    m_baseUrlEdit->setReadOnly(loading);
+    m_apiKeyEdit->setReadOnly(loading);
+    m_modelEdit->setReadOnly(loading);
+    if (loading) {
+        m_customApiStatus->setText(tr("Calling judge…"));
+        m_customApiStatus->setStyleSheet(QStringLiteral(
+            "font-size: 11px; color: palette(placeholder-text);"));
+        m_customApiStatus->show();
+    } else {
+        updateCustomApiStatus();
+    }
 }

@@ -52,6 +52,7 @@
 #include <QImage>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMimeData>
 #include <QPainter>
@@ -474,8 +475,11 @@ void AcpSessionView::buildUi()
     m_goalStatusRow->setFrameShape(QFrame::NoFrame);
     m_goalStatusRow->setStyleSheet(QStringLiteral(
         "QFrame { background: rgba(180, 140, 50, 32); border: 1px solid rgba(180, 140, 50, 60); border-radius: 4px; }"));
-    auto *goalRowLayout = new QHBoxLayout(m_goalStatusRow);
-    goalRowLayout->setContentsMargins(8, 4, 8, 4);
+    auto *goalCol = new QVBoxLayout(m_goalStatusRow);
+    goalCol->setContentsMargins(8, 8, 8, 8);
+    goalCol->setSpacing(8);
+    auto *goalRowLayout = new QHBoxLayout;
+    goalRowLayout->setContentsMargins(0, 0, 0, 0);
     goalRowLayout->setSpacing(6);
     m_goalStatusLabel = new QLabel(m_goalStatusRow);
     m_goalStatusLabel->setStyleSheet(QStringLiteral(
@@ -491,6 +495,48 @@ void AcpSessionView::buildUi()
     m_goalStopBtn->setToolTip(tr("Stop the running goal"));
     connect(m_goalStopBtn, &QToolButton::clicked, this, &AcpSessionView::goalStopRequested);
     goalRowLayout->addWidget(m_goalStopBtn);
+    goalCol->addLayout(goalRowLayout);
+
+    m_customApiFields = new QWidget(m_goalStatusRow);
+    m_customApiFields->setObjectName(QStringLiteral("customApiFields"));
+    auto *apiLayout = new QVBoxLayout(m_customApiFields);
+    apiLayout->setContentsMargins(0, 0, 0, 0);
+    apiLayout->setSpacing(8);
+    auto *urlLabel = new QLabel(tr("Base URL"), m_customApiFields);
+    urlLabel->setStyleSheet(QStringLiteral(
+        "QLabel { background: transparent; border: none; font-weight: 500; font-size: 12px; }"));
+    apiLayout->addWidget(urlLabel);
+    m_customApiUrlEdit = new QLineEdit(m_customApiFields);
+    m_customApiUrlEdit->setReadOnly(true);
+    m_customApiUrlEdit->setPlaceholderText(QStringLiteral("https://api.anthropic.com"));
+    apiLayout->addWidget(m_customApiUrlEdit);
+    auto *keyLabel = new QLabel(tr("API key"), m_customApiFields);
+    keyLabel->setStyleSheet(QStringLiteral(
+        "QLabel { background: transparent; border: none; font-weight: 500; font-size: 12px; }"));
+    apiLayout->addWidget(keyLabel);
+    m_customApiKeyEdit = new QLineEdit(m_customApiFields);
+    m_customApiKeyEdit->setReadOnly(true);
+    m_customApiKeyEdit->setEchoMode(QLineEdit::Password);
+    m_customApiKeyEdit->setPlaceholderText(tr("Stored in keychain"));
+    m_customApiKeyEdit->setText(QStringLiteral("********"));
+    apiLayout->addWidget(m_customApiKeyEdit);
+    auto *modelLabel = new QLabel(tr("Model"), m_customApiFields);
+    modelLabel->setStyleSheet(QStringLiteral(
+        "QLabel { background: transparent; border: none; font-weight: 500; font-size: 12px; }"));
+    apiLayout->addWidget(modelLabel);
+    m_customApiModelEdit = new QLineEdit(m_customApiFields);
+    m_customApiModelEdit->setReadOnly(true);
+    m_customApiModelEdit->setPlaceholderText(QStringLiteral("claude-opus-5"));
+    apiLayout->addWidget(m_customApiModelEdit);
+    m_customApiStatus = new QLabel(m_customApiFields);
+    m_customApiStatus->setObjectName(QStringLiteral("customApiStatus"));
+    m_customApiStatus->setWordWrap(true);
+    m_customApiStatus->setStyleSheet(QStringLiteral(
+        "QLabel { background: transparent; border: none; color: palette(placeholder-text); font-size: 11px; }"));
+    apiLayout->addWidget(m_customApiStatus);
+    m_customApiFields->hide();
+    goalCol->addWidget(m_customApiFields);
+
     m_goalStatusRow->hide();
     outer->addWidget(m_goalStatusRow);
 
@@ -1505,6 +1551,41 @@ void AcpSessionView::clearGoalStatus()
     m_goalStatusRow->hide();
     if (m_goalElapsedTimer) m_goalElapsedTimer->stop();
     if (m_goalElapsedLabel) m_goalElapsedLabel->hide();
+}
+
+void AcpSessionView::setCustomApiJudge(const QString &baseUrl, const QString &model)
+{
+    if (!m_customApiFields)
+        return;
+    m_customApiUrlEdit->setText(baseUrl);
+    m_customApiModelEdit->setText(model);
+    m_customApiKeyEdit->setText(QStringLiteral("********"));
+    m_customApiStatus->clear();
+    m_customApiFields->show();
+}
+
+void AcpSessionView::setCustomApiJudgeLoading(bool loading)
+{
+    if (!m_customApiFields)
+        return;
+    if (loading) {
+        m_customApiFields->show();
+        m_customApiStatus->setText(tr("Calling judge…"));
+        m_customApiStatus->show();
+    } else if (m_customApiStatus) {
+        m_customApiStatus->clear();
+    }
+}
+
+void AcpSessionView::setCustomApiJudgeError(const QString &message)
+{
+    if (!m_customApiFields)
+        return;
+    m_customApiFields->show();
+    m_customApiStatus->setText(message);
+    m_customApiStatus->setStyleSheet(QStringLiteral(
+        "QLabel { background: transparent; border: none; color: red; font-size: 11px; }"));
+    m_customApiStatus->show();
 }
 
 void AcpSessionView::onSendClicked()

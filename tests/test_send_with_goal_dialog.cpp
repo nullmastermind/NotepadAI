@@ -3,15 +3,19 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QJsonDocument>
+#include <QLabel>
+#include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
 #include <QTemporaryDir>
+#include <QWidget>
 
 #include "AcpAgentRegistry.h"
 #include "ApplicationSettings.h"
 #include "GoalAgentSettings.h"
 #include "GoalConfigWidget.h"
+#include "GoalHttpJudge.h"
 #include "SendWithGoalDialog.h"
 
 class TestSendWithGoalDialog : public QObject
@@ -26,6 +30,10 @@ private slots:
     void changedAgent_isRestoredAfterEscape();
     void changedAgent_isRestoredAfterAccept();
     void removedStoredAgent_fallsBackAndNormalizesSetting();
+    void customApi_isListedInCombo();
+    void customApi_showsFieldsWhenSelected();
+    void customApi_statusEmptyPartialInvalidIdeal();
+    void customApi_loadingDisablesFields();
 
 private:
     static QComboBox *agentCombo(SendWithGoalDialog &dialog);
@@ -151,6 +159,83 @@ void TestSendWithGoalDialog::removedStoredAgent_fallsBackAndNormalizesSetting()
     SendWithGoalDialog dialog(&registry, &settings);
     QCOMPARE(agentCombo(dialog)->currentData().toString(), AcpAgentRegistry::builtinClaudeCodeId());
     QCOMPARE(storedAgentId(settings), AcpAgentRegistry::builtinClaudeCodeId());
+}
+
+void TestSendWithGoalDialog::customApi_isListedInCombo()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    QComboBox *combo = agentCombo(dialog);
+    QVERIFY(combo);
+    QVERIFY(combo->findData(QLatin1String(GoalHttpJudge::kAgentId)) >= 0);
+}
+
+void TestSendWithGoalDialog::customApi_showsFieldsWhenSelected()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    QWidget *fields = dialog.findChild<QWidget *>(QStringLiteral("customApiFields"));
+    QVERIFY(fields);
+    QVERIFY(fields->isHidden());
+    QComboBox *combo = agentCombo(dialog);
+    QVERIFY(combo);
+    const int idx = combo->findData(QLatin1String(GoalHttpJudge::kAgentId));
+    QVERIFY(idx >= 0);
+    combo->setCurrentIndex(idx);
+    QVERIFY(!fields->isHidden());
+    QVERIFY(fields->findChild<QLineEdit *>());
+}
+
+void TestSendWithGoalDialog::customApi_statusEmptyPartialInvalidIdeal()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    QComboBox *combo = agentCombo(dialog);
+    QVERIFY(combo);
+    combo->setCurrentIndex(combo->findData(QLatin1String(GoalHttpJudge::kAgentId)));
+
+    QWidget *fields = dialog.findChild<QWidget *>(QStringLiteral("customApiFields"));
+    QVERIFY(fields);
+    QLabel *status = fields->findChild<QLabel *>(QStringLiteral("customApiStatus"));
+    QVERIFY(status);
+    QVERIFY(!status->isHidden());
+    QVERIFY(status->text().contains(QStringLiteral("Enter")));
+
+    const auto edits = fields->findChildren<QLineEdit *>();
+    QCOMPARE(edits.size(), 3);
+    edits.at(0)->setText(QStringLiteral("not-a-url"));
+    QVERIFY(status->text().contains(QLatin1String("http")));
+    edits.at(0)->setText(QStringLiteral("https://api.anthropic.com"));
+    edits.at(2)->clear();
+    QVERIFY(!status->isHidden());
+    QVERIFY(status->text().contains(QLatin1String("model"), Qt::CaseInsensitive));
+    edits.at(2)->setText(QStringLiteral("claude-opus-5"));
+    edits.at(1)->setText(QStringLiteral("sk-test-key"));
+    QVERIFY(status->isHidden());
+}
+
+void TestSendWithGoalDialog::customApi_loadingDisablesFields()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    QComboBox *combo = agentCombo(dialog);
+    combo->setCurrentIndex(combo->findData(QLatin1String(GoalHttpJudge::kAgentId)));
+    QWidget *fields = dialog.findChild<QWidget *>(QStringLiteral("customApiFields"));
+    QVERIFY(fields);
+    auto *cfg = dialog.findChild<GoalConfigWidget *>();
+    QVERIFY(cfg);
+    cfg->setJudgeLoading(true);
+    QLabel *status = fields->findChild<QLabel *>(QStringLiteral("customApiStatus"));
+    QVERIFY(status);
+    QCOMPARE(status->text(), QStringLiteral("Calling judge…"));
+    QVERIFY(!status->isHidden());
+    for (QLineEdit *edit : fields->findChildren<QLineEdit *>())
+        QVERIFY(edit->isReadOnly());
+    cfg->setJudgeLoading(false);
 }
 
 QTEST_MAIN(TestSendWithGoalDialog)

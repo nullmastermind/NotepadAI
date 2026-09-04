@@ -10,12 +10,14 @@
 
 #include <cstdint>
 
+#include "GoalActionParser.h"
 #include "GoalAgentSettings.h"
 
 class AcpAgentManager;
 class AcpConnection;
 class AcpSessionModel;
 class ApplicationSettings;
+class GoalHttpJudgeSession;
 
 class GoalAgent : public QObject
 {
@@ -65,6 +67,7 @@ signals:
     void actionEmitted(const QString &type, const QString &text);
     void iterationChanged(int criterionIndex, int iteration);
     void debugLogEntry(const QString &entry);
+    void httpJudgeBusyChanged(bool busy);
 
 private slots:
     void onTargetPromptEnded();
@@ -87,6 +90,12 @@ private:
     void markTerminal(Status s, const QString &reason);
     void destroyJudgeConnection();
     void spawnJudgeForCriterion(int index);
+    void evaluateViaHttp();
+    void ensureHttpJudge();
+    void applyJudgeAction(const GoalAction &action);
+    void onHttpVerdict(const GoalAction &action);
+    void onHttpAssumedAchieved(const QString &reason);
+    void onHttpFailed(const QString &message);
     QString buildConversationSummary();
     QString collectRecentUserMessages(int take, int perEntryCharCap);
 
@@ -106,6 +115,8 @@ private:
     QPointer<AcpConnection> m_targetConnection;
     QPointer<AcpSessionModel> m_targetModel;
     QPointer<AcpConnection> m_judgeConnection;
+
+    GoalHttpJudgeSession *m_httpSession = nullptr;
 
     QString m_judgeResponseBuffer;
     bool m_awaitingJudgeResponse = false;

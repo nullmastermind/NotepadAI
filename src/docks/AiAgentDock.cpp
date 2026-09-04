@@ -23,6 +23,8 @@
 #include "AcpSessionModel.h"
 #include "ApplicationSettings.h"
 #include "GoalAgent.h"
+#include "GoalAgentSettings.h"
+#include "GoalHttpJudge.h"
 #include "dialogs/GoalDraftDialog.h"
 #include "dialogs/SendWithGoalDialog.h"
 #include "widgets/AcpSessionView.h"
@@ -30,6 +32,7 @@
 #include <QCloseEvent>
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
@@ -353,6 +356,10 @@ bool AiAgentDock::attachGoalAgent(GoalAgent *goal)
         m_goalDebugLog.append(entry);
         emit goalDebugLogAppended(entry);
     });
+    connect(m_goalAgent, &GoalAgent::httpJudgeBusyChanged, this, [this](bool busy) {
+        if (m_view)
+            m_view->setCustomApiJudgeLoading(busy);
+    });
     connect(m_goalAgent, &GoalAgent::statusChanged, this, [this](GoalAgent::Status s) {
         // The view's goal-status update drives both the on-screen status row
         // AND the input's busy-placeholder clock (m_goalRunning), so it MUST
@@ -380,8 +387,18 @@ bool AiAgentDock::attachGoalAgent(GoalAgent *goal)
             if (m_model) m_model->appendSystemMessage(tr("⊘ Goal cancelled"));
             break;
         case GoalAgent::Failed:
-            if (m_view) m_view->setGoalTerminal(tr("Goal failed"));
-            if (m_model) m_model->appendSystemMessage(tr("✗ Goal failed"));
+            if (m_view) {
+                m_view->setGoalTerminal(tr("Goal failed"));
+                const QString reason = m_goalAgent ? m_goalAgent->lastActionText() : QString();
+                if (!reason.isEmpty())
+                    m_view->setCustomApiJudgeError(reason);
+            }
+            if (m_model) {
+                const QString reason = m_goalAgent ? m_goalAgent->lastActionText() : QString();
+                m_model->appendSystemMessage(reason.isEmpty()
+                    ? tr("✗ Goal failed")
+                    : tr("✗ Goal failed: %1").arg(reason));
+            }
             break;
         default:
             break;
@@ -466,6 +483,16 @@ void AiAgentDock::sendWithGoal()
             m_view->insertTextToInput(composerText);
         }
         return;
+    }
+
+    if (m_view && GoalHttpJudge::isCustomApiAgent(res.agentId) && m_appSettings) {
+        const QString settingsJson = m_appSettings->get("Ai/GoalAgentSettings", QString());
+        GoalAgentSettings gs;
+        if (!settingsJson.isEmpty()) {
+            gs = GoalAgentSettings::fromJson(
+                QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+        }
+        m_view->setCustomApiJudge(gs.customApiBaseUrl, gs.customApiModel);
     }
 
     // Goal started — now send the composer text to the target session.

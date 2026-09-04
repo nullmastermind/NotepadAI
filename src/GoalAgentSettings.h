@@ -45,6 +45,8 @@ public:
     QString handoffTemplate;
     QString handoffAuthoringTemplate;
     QList<GoalCriteriaPreset> criteriaPresets;
+    QString customApiBaseUrl;
+    QString customApiModel;
 
     const GoalPromptTemplate *findTemplate(const QString &id) const;
     const GoalPromptTemplate &defaultTemplate() const;
