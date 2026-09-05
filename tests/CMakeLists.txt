@@ -55,6 +55,7 @@ target_link_libraries(test_terminal_cwd_resolver PRIVATE Qt6::Core Qt6::Test)
 target_sources(test_terminal_cwd_resolver PRIVATE
     ${CMAKE_SOURCE_DIR}/src/TerminalCwdResolver.cpp
     ${CMAKE_SOURCE_DIR}/src/TerminalCwdResolver.h
+    ${CMAKE_SOURCE_DIR}/src/remote/ExecutionContext.h
 )
 add_test(NAME TerminalCwdResolver COMMAND test_terminal_cwd_resolver)
 
@@ -1069,6 +1070,24 @@ target_sources(test_docked_editor_current_area PRIVATE
     ${CMAKE_SOURCE_DIR}/src/DockAreaSanitizer.h
 )
 add_test(NAME DockedEditorCurrentArea COMMAND test_docked_editor_current_area)
+
+# --- DockTabContextMenu: tab-order resolution for Qt's internal dock tab bar
+#     plus the per-scope close-target decision (close / others / left / right /
+#     all, with non-closable docks dropped). Real QMainWindow + QDockWidget are
+#     constructed so the tab-order test reads the actual QMainWindowTabBar that
+#     Qt builds when docks are tabified — hence Qt6::Widgets and QTEST_MAIN. ---
+qt_add_executable(test_dock_tab_context_menu test_dock_tab_context_menu.cpp)
+target_include_directories(test_dock_tab_context_menu PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/widgets
+)
+target_link_libraries(test_dock_tab_context_menu PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_dock_tab_context_menu PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/widgets/DockTabContextMenu.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/DockTabContextMenu.h
+)
+add_test(NAME DockTabContextMenu COMMAND test_dock_tab_context_menu)
 
 # --- FolderAsWorkspaceProxyModel: synthetic-root proxy over the workspace
 #     QFileSystemModel. Pure proxy unit test against a QTemporaryDir tree — no

@@ -428,6 +428,8 @@ qt_add_executable(NotepadAI
 	widgets/AcpUsageIndicator.h
     widgets/DockMiddleClickCloser.cpp
 	widgets/DockMiddleClickCloser.h
+    widgets/DockTabContextMenu.cpp
+	widgets/DockTabContextMenu.h
     widgets/EditorInfoStatusBar.cpp
 	widgets/EditorInfoStatusBar.h
 	widgets/EditorMinimap.cpp

@@ -18,6 +18,9 @@
 
 #include "DockMiddleClickCloser.h"
 
+#include "DockTabContextMenu.h"
+
+#include <QContextMenuEvent>
 #include <QCoreApplication>
 #include <QDockWidget>
 #include <QEvent>
@@ -131,12 +134,22 @@ public:
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override
     {
-        if (event->type() != QEvent::MouseButtonRelease)
+        const QEvent::Type type = event->type();
+        if (type != QEvent::MouseButtonRelease && type != QEvent::ContextMenu)
             return QObject::eventFilter(watched, event);
 
         auto *tabBar = qobject_cast<QTabBar *>(watched);
         if (!tabBar)
             return QObject::eventFilter(watched, event);
+
+        // Right-click / Menu-key: the close menu. showMenu() returns false
+        // only for QTabBars that are not dock tab bars (Files/Git, Find/Replace)
+        // so those events fall through. A miss on a real dock tab bar is
+        // swallowed so QMainWindow does not pop the toggle-docks menu.
+        if (type == QEvent::ContextMenu) {
+            auto *ce = static_cast<QContextMenuEvent *>(event);
+            return DockTabContextMenu::showMenu(tabBar, ce->pos());
+        }
 
         auto *me = static_cast<QMouseEvent *>(event);
         if (me->button() != Qt::MiddleButton)
@@ -176,10 +189,14 @@ void install(QDockWidget *dock)
 void installTabBarFilter(QMainWindow *mainWindow)
 {
     Q_UNUSED(mainWindow);
-    // Install on qApp so we catch middle-clicks on any QTabBar in the process.
-    // The dockForTab() lookup ensures we only act when the tab bar actually
-    // belongs to a tabified dock group — other QTabBars (dialogs, etc.) are
-    // left alone because no sibling QDockWidget will match.
+    // Install on qApp so we catch middle-clicks and right-clicks on any QTabBar
+    // in the process. The dockForTab() / DockTabContextMenu::tabOrder() lookups
+    // ensure we only act when the tab bar actually belongs to a tabified dock
+    // group — other QTabBars (dialogs, the workspace dock's own Files/Git
+    // strip) are left alone because their tabs carry no dock pointer.
+    //
+    // One filter for both gestures rather than two: this sits on qApp, so every
+    // extra filter costs a dispatch on every event in the process.
     QCoreApplication::instance()->installEventFilter(sharedTabBarFilter());
 }
 
