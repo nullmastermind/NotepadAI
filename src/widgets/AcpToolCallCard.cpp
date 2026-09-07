@@ -728,7 +728,9 @@ QString AcpToolCallCard::computeEnrichedTitle() const
         QStringLiteral("write"), QStringLiteral("write file")
     };
     if (writeTitles.contains(tLower)) {
-        const QString path = m_rawInput.value(QStringLiteral("file_path")).toString();
+        QString path = m_rawInput.value(QStringLiteral("file_path")).toString();
+        if (path.isEmpty())
+            path = m_rawInput.value(QStringLiteral("path")).toString();
         if (!path.isEmpty())
             return QStringLiteral("Write: %1").arg(path);
         return t;
@@ -738,7 +740,9 @@ QString AcpToolCallCard::computeEnrichedTitle() const
         QStringLiteral("edit"), QStringLiteral("edit file")
     };
     if (editTitles.contains(tLower)) {
-        const QString path = m_rawInput.value(QStringLiteral("file_path")).toString();
+        QString path = m_rawInput.value(QStringLiteral("file_path")).toString();
+        if (path.isEmpty())
+            path = m_rawInput.value(QStringLiteral("path")).toString();
         if (!path.isEmpty())
             return QStringLiteral("Edit: %1").arg(path);
         return t;
@@ -900,6 +904,10 @@ void AcpToolCallCard::rerenderBody()
             } else if (type == QLatin1String("diff")) {
                 html += renderDiffBlock(obj, dpal);
                 decodedSomething = true;
+            } else if (type == QLatin1String("terminal")) {
+                // Zed/PI execute-tool PTY placeholder. Output is folded into a
+                // text block by AcpSessionModel; don't JSON-dump the stub.
+                decodedSomething = true;
             } else if (type == QLatin1String("content")) {
                 // Wrapped content block — agent nests {type:text|image, ...}
                 // under a `content` field. Surface the inner payload only,
@@ -958,6 +966,8 @@ void AcpToolCallCard::rerenderBody()
             }
         } else if (type == QLatin1String("image")) {
             text += QStringLiteral("[image]\n");
+            decodedSomething = true;
+        } else if (type == QLatin1String("terminal")) {
             decodedSomething = true;
         } else if (type == QLatin1String("content")) {
             const QJsonObject inner = obj.value(QStringLiteral("content")).toObject();

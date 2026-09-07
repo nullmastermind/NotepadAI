@@ -11,6 +11,7 @@
 #include <QtTest>
 #include <QByteArray>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
 #include <QPair>
@@ -33,6 +34,8 @@ private slots:
     void promptEndedClosesStreaming();
     void thoughtStreamAutoClosesOnAssistantChunk();
     void toolCallMerge();
+    void terminalPlaceholderStrippedOnReceive();
+    void terminalOutputDeltasAccumulate();
     void groupIdIncrementsPerTurn();
     void loadRoundTrip();
     void imageBlocksSurviveRoundTrip();
@@ -132,6 +135,53 @@ void TestAcpSessionModel::toolCallMerge()
     QCOMPARE(spy.count(), 2);
     QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("call-1"));
     QCOMPARE(spy.at(1).at(0).toString(), QStringLiteral("call-1"));
+}
+
+void TestAcpSessionModel::terminalPlaceholderStrippedOnReceive()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("proj"), tmp.path());
+
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("bash-1");
+    tc.title = QStringLiteral("ls");
+    tc.kind = QStringLiteral("execute");
+    QJsonObject term;
+    term.insert(QStringLiteral("type"), QStringLiteral("terminal"));
+    term.insert(QStringLiteral("terminalId"), QStringLiteral("bash-1"));
+    tc.content.append(term);
+    model.onToolCallReceived(tc);
+
+    QCOMPARE(model.toolCalls().value(QStringLiteral("bash-1")).content.size(), 0);
+}
+
+void TestAcpSessionModel::terminalOutputDeltasAccumulate()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("proj"), tmp.path());
+
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("bash-1");
+    tc.title = QStringLiteral("ls");
+    model.onToolCallReceived(tc);
+
+    AcpProtocol::AcpToolCallUpdate u1;
+    u1.id = QStringLiteral("bash-1");
+    u1.status = QStringLiteral("in_progress");
+    u1.terminalOutputDelta = QStringLiteral("foo");
+    model.onToolCallUpdated(u1);
+
+    AcpProtocol::AcpToolCallUpdate u2;
+    u2.id = QStringLiteral("bash-1");
+    u2.terminalOutputDelta = QStringLiteral("bar");
+    model.onToolCallUpdated(u2);
+
+    const QJsonArray content = model.toolCalls().value(QStringLiteral("bash-1")).content;
+    QCOMPARE(content.size(), 1);
+    QCOMPARE(content.at(0).toObject().value(QStringLiteral("type")).toString(),
+             QStringLiteral("text"));
+    QCOMPARE(content.at(0).toObject().value(QStringLiteral("text")).toString(),
+             QStringLiteral("foobar"));
 }
 
 void TestAcpSessionModel::groupIdIncrementsPerTurn()

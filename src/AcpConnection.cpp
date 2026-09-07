@@ -801,17 +801,13 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
 
     if (kind == QLatin1String("agent_message_chunk")) {
         m_promptProducedOutput = true;
-        const QString text = update.value(QStringLiteral("content"))
-                                 .toObject()
-                                 .value(QStringLiteral("text"))
-                                 .toString();
+        const QString text = AcpProtocol::contentBlockToChunkText(
+            update.value(QStringLiteral("content")).toObject());
         emit messageChunk(text);
     } else if (kind == QLatin1String("agent_thought_chunk")) {
         m_promptProducedOutput = true;
-        const QString text = update.value(QStringLiteral("content"))
-                                 .toObject()
-                                 .value(QStringLiteral("text"))
-                                 .toString();
+        const QString text = AcpProtocol::contentBlockToChunkText(
+            update.value(QStringLiteral("content")).toObject());
         emit thoughtChunk(text);
     } else if (kind == QLatin1String("tool_call")) {
         m_promptProducedOutput = true;
@@ -852,6 +848,11 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         const QJsonValue ro = update.value(QStringLiteral("rawOutput"));
         if (ro.isObject()) {
             u.rawOutput = ro.toObject();
+        }
+        const QString termDelta = AcpProtocol::terminalOutputDeltaFromMeta(
+            update.value(QStringLiteral("_meta")).toObject());
+        if (!termDelta.isEmpty()) {
+            u.terminalOutputDelta = termDelta;
         }
         emit toolCallUpdated(u);
     } else if (kind == QLatin1String("plan")) {

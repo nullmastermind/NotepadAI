@@ -63,6 +63,7 @@
 #include <QResizeEvent>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSet>
 #include <QShortcut>
 #include <QStyle>
 #include <QTimer>
@@ -129,6 +130,30 @@ const AcpProtocol::AcpConfigOption *findEffortConfigOption(
         if (isEffortConfigOption(opt)) return &opt;
     }
     return nullptr;
+}
+
+// Some agents (pi-acp) dual-advertise thinking as ACP `modes` *and* a
+// thought_level/effort config option with the same id set. Host would otherwise
+// render two identical "Thinking: high" combos. Hide modes when the catalogs
+// are the same; keep both when they differ (Claude Code permission modes +
+// separate effort, etc.).
+bool modesDuplicateEffortCatalog(
+    const QList<AcpProtocol::AcpModeInfo> &modes,
+    const AcpProtocol::AcpConfigOption *effortOpt)
+{
+    if (!effortOpt || modes.isEmpty() || effortOpt->options.isEmpty())
+        return false;
+    QSet<QString> modeIds;
+    for (const auto &m : modes) {
+        if (!m.id.isEmpty())
+            modeIds.insert(m.id);
+    }
+    QSet<QString> effortIds;
+    for (const auto &ch : effortOpt->options) {
+        if (!ch.value.isEmpty())
+            effortIds.insert(ch.value);
+    }
+    return !modeIds.isEmpty() && modeIds == effortIds;
 }
 
 // SVG icons that use stroke="currentColor" resolve to opaque black under Qt's
@@ -1232,7 +1257,8 @@ void AcpSessionView::onMetadataChanged()
         const int idx = m_modeCombo->findData(m_model->currentModeId());
         if (idx >= 0) m_modeCombo->setCurrentIndex(idx);
     }
-    m_modeCombo->setVisible(!modes.isEmpty());
+    m_modeCombo->setVisible(!modes.isEmpty()
+                            && !modesDuplicateEffortCatalog(modes, effortOpt));
 
     // Effort/reasoning combo (Claude Code, Codex reasoning_effort, etc).
     m_effortCombo->clear();

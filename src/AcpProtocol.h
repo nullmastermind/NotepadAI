@@ -106,6 +106,10 @@ struct AcpToolCallUpdate
     std::optional<QJsonArray> content;
     std::optional<QJsonObject> rawInput;
     std::optional<QJsonObject> rawOutput;
+    // Zed/PI execute-tool `_meta.terminal_output.data` — a stdout/stderr *delta*.
+    // The session model appends this onto a text content block; the card stays
+    // collapsed (title = command) until the user expands.
+    std::optional<QString> terminalOutputDelta;
 };
 
 struct AcpPlanEntry
@@ -227,6 +231,19 @@ SpawnArgv buildSpawnArgv(const QString &command,
 // to spin up an AcpConnection.
 QJsonObject contentBlockToJson(const AcpContentBlock &block);
 AcpContentBlock contentBlockFromJson(const QJsonObject &obj);
+
+// Inbound session/update content → transcript chunk text.
+// `text` blocks pass through `.text`. `resource_link` (e.g. PI `/export`) has
+// no `.text`; fold name+uri into a markdown link so assistant bubbles (which
+// already render markdown with open-external-links) show a clickable path.
+QString contentBlockToChunkText(const QJsonObject &content);
+
+// PI/Zed execute-tool `_meta.terminal_output.data` (empty if absent).
+QString terminalOutputDeltaFromMeta(const QJsonObject &meta);
+// Drop `{type:"terminal"}` placeholders so the card doesn't JSON-dump them.
+void stripTerminalContentBlocks(QJsonArray &content);
+// Append stdout/stderr onto the last text content block (creates one if needed).
+void appendToolCallTextDelta(QJsonArray &content, const QString &delta);
 
 QJsonObject permissionOptionToJson(const AcpPermissionOption &opt);
 AcpPermissionOption permissionOptionFromJson(const QJsonObject &obj);

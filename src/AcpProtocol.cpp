@@ -250,6 +250,72 @@ AcpContentBlock contentBlockFromJson(const QJsonObject &obj)
     return block;
 }
 
+QString contentBlockToChunkText(const QJsonObject &content)
+{
+    const QString type = content.value(QStringLiteral("type")).toString();
+    if (type == QLatin1String("resource_link")) {
+        const QString uri = content.value(QStringLiteral("uri")).toString();
+        QString label = content.value(QStringLiteral("name")).toString();
+        if (label.isEmpty()) {
+            label = content.value(QStringLiteral("title")).toString();
+        }
+        if (uri.isEmpty()) {
+            return label;
+        }
+        if (label.isEmpty() || label == uri) {
+            return uri;
+        }
+        return QLatin1Char('[') + label + QLatin1String("](") + uri + QLatin1Char(')');
+    }
+    return content.value(QStringLiteral("text")).toString();
+}
+
+QString terminalOutputDeltaFromMeta(const QJsonObject &meta)
+{
+    return meta.value(QStringLiteral("terminal_output"))
+        .toObject()
+        .value(QStringLiteral("data"))
+        .toString();
+}
+
+void stripTerminalContentBlocks(QJsonArray &content)
+{
+    bool stripped = false;
+    QJsonArray kept;
+    for (const auto &v : content) {
+        if (v.toObject().value(QStringLiteral("type")).toString() == QLatin1String("terminal")) {
+            stripped = true;
+            continue;
+        }
+        kept.append(v);
+    }
+    if (stripped) {
+        content = kept;
+    }
+}
+
+void appendToolCallTextDelta(QJsonArray &content, const QString &delta)
+{
+    if (delta.isEmpty()) {
+        return;
+    }
+    stripTerminalContentBlocks(content);
+    if (!content.isEmpty()) {
+        const int last = content.size() - 1;
+        QJsonObject block = content.at(last).toObject();
+        if (block.value(QStringLiteral("type")).toString() == QLatin1String("text")) {
+            block.insert(QStringLiteral("text"),
+                         block.value(QStringLiteral("text")).toString() + delta);
+            content.replace(last, block);
+            return;
+        }
+    }
+    QJsonObject block;
+    block.insert(QStringLiteral("type"), QStringLiteral("text"));
+    block.insert(QStringLiteral("text"), delta);
+    content.append(block);
+}
+
 QJsonObject permissionOptionToJson(const AcpPermissionOption &opt)
 {
     QJsonObject obj;

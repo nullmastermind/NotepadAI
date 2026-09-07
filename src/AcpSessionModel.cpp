@@ -596,6 +596,7 @@ void AcpSessionModel::onToolCallReceived(const AcpToolCall &tc)
 
     AcpToolCall copy = tc;
     copy.groupId = m_currentGroupId;
+    AcpProtocol::stripTerminalContentBlocks(copy.content);
     m_toolCalls.insert(copy.id, copy);
 
     AcpTimelineEntry entry;
@@ -632,12 +633,16 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         }
         if (update.content.has_value()) {
             tc.content = *update.content;
+            AcpProtocol::stripTerminalContentBlocks(tc.content);
         }
         if (update.rawInput.has_value()) {
             tc.rawInput = *update.rawInput;
         }
         if (update.rawOutput.has_value()) {
             tc.rawOutput = *update.rawOutput;
+        }
+        if (update.terminalOutputDelta.has_value()) {
+            AcpProtocol::appendToolCallTextDelta(tc.content, *update.terminalOutputDelta);
         }
         tc.groupId = m_currentGroupId;
         m_toolCalls.insert(update.id, tc);
@@ -659,12 +664,16 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         }
         if (update.content.has_value()) {
             it.value().content = *update.content;
+            AcpProtocol::stripTerminalContentBlocks(it.value().content);
         }
         if (update.rawInput.has_value()) {
             it.value().rawInput = *update.rawInput;
         }
         if (update.rawOutput.has_value()) {
             it.value().rawOutput = *update.rawOutput;
+        }
+        if (update.terminalOutputDelta.has_value()) {
+            AcpProtocol::appendToolCallTextDelta(it.value().content, *update.terminalOutputDelta);
         }
     }
     emit toolCallAddedOrUpdated(update.id);

@@ -9,6 +9,7 @@
  */
 
 #include <QtTest>
+#include <QJsonArray>
 #include <QJsonObject>
 
 #include "AcpProtocol.h"
@@ -26,6 +27,14 @@ private slots:
     void imageContentBlockRoundtrip();
     void permissionOptionRoundtrip();
     void permissionRequestRoundtrip();
+    void textContentBlockToChunkText();
+    void resourceLinkContentBlockToChunkText();
+    void resourceLinkFallsBackToUriWhenNameMissing();
+    void resourceLinkFallsBackToNameWhenUriMissing();
+    void resourceLinkFallsBackToTitleWhenNameMissing();
+    void terminalOutputDeltaFromMeta();
+    void stripTerminalContentBlocks();
+    void appendToolCallTextDeltaAccumulates();
 };
 
 void TestAcpProtocolSerialization::textContentBlockRoundtrip()
@@ -95,6 +104,96 @@ void TestAcpProtocolSerialization::permissionRequestRoundtrip()
     QCOMPARE(decoded.options.at(0).id, QStringLiteral("a"));
     QCOMPARE(decoded.options.at(0).kind, QStringLiteral("allow_once"));
     QCOMPARE(decoded.options.at(1).id, QStringLiteral("d"));
+}
+
+void TestAcpProtocolSerialization::textContentBlockToChunkText()
+{
+    QJsonObject o;
+    o.insert(QStringLiteral("type"), QStringLiteral("text"));
+    o.insert(QStringLiteral("text"), QStringLiteral("hello"));
+    QCOMPARE(AcpProtocol::contentBlockToChunkText(o), QStringLiteral("hello"));
+}
+
+void TestAcpProtocolSerialization::resourceLinkContentBlockToChunkText()
+{
+    QJsonObject o;
+    o.insert(QStringLiteral("type"), QStringLiteral("resource_link"));
+    o.insert(QStringLiteral("name"), QStringLiteral("pi-session-abc.html"));
+    o.insert(QStringLiteral("uri"), QStringLiteral("file:///tmp/pi-session-abc.html"));
+    o.insert(QStringLiteral("mimeType"), QStringLiteral("text/html"));
+    o.insert(QStringLiteral("title"), QStringLiteral("Session exported"));
+    QCOMPARE(AcpProtocol::contentBlockToChunkText(o),
+             QStringLiteral("[pi-session-abc.html](file:///tmp/pi-session-abc.html)"));
+}
+
+void TestAcpProtocolSerialization::resourceLinkFallsBackToUriWhenNameMissing()
+{
+    QJsonObject o;
+    o.insert(QStringLiteral("type"), QStringLiteral("resource_link"));
+    o.insert(QStringLiteral("uri"), QStringLiteral("file:///tmp/out.html"));
+    QCOMPARE(AcpProtocol::contentBlockToChunkText(o),
+             QStringLiteral("file:///tmp/out.html"));
+}
+
+void TestAcpProtocolSerialization::resourceLinkFallsBackToNameWhenUriMissing()
+{
+    QJsonObject o;
+    o.insert(QStringLiteral("type"), QStringLiteral("resource_link"));
+    o.insert(QStringLiteral("name"), QStringLiteral("out.html"));
+    QCOMPARE(AcpProtocol::contentBlockToChunkText(o), QStringLiteral("out.html"));
+}
+
+void TestAcpProtocolSerialization::resourceLinkFallsBackToTitleWhenNameMissing()
+{
+    QJsonObject o;
+    o.insert(QStringLiteral("type"), QStringLiteral("resource_link"));
+    o.insert(QStringLiteral("title"), QStringLiteral("Session exported"));
+    o.insert(QStringLiteral("uri"), QStringLiteral("file:///tmp/out.html"));
+    QCOMPARE(AcpProtocol::contentBlockToChunkText(o),
+             QStringLiteral("[Session exported](file:///tmp/out.html)"));
+}
+
+void TestAcpProtocolSerialization::terminalOutputDeltaFromMeta()
+{
+    QJsonObject meta;
+    QJsonObject output;
+    output.insert(QStringLiteral("terminal_id"), QStringLiteral("t1"));
+    output.insert(QStringLiteral("data"), QStringLiteral("hello"));
+    meta.insert(QStringLiteral("terminal_output"), output);
+    QCOMPARE(AcpProtocol::terminalOutputDeltaFromMeta(meta), QStringLiteral("hello"));
+    QCOMPARE(AcpProtocol::terminalOutputDeltaFromMeta(QJsonObject()), QString());
+}
+
+void TestAcpProtocolSerialization::stripTerminalContentBlocks()
+{
+    QJsonObject term;
+    term.insert(QStringLiteral("type"), QStringLiteral("terminal"));
+    term.insert(QStringLiteral("terminalId"), QStringLiteral("t1"));
+    QJsonObject text;
+    text.insert(QStringLiteral("type"), QStringLiteral("text"));
+    text.insert(QStringLiteral("text"), QStringLiteral("keep"));
+    QJsonArray content;
+    content.append(term);
+    content.append(text);
+    AcpProtocol::stripTerminalContentBlocks(content);
+    QCOMPARE(content.size(), 1);
+    QCOMPARE(content.at(0).toObject().value(QStringLiteral("text")).toString(),
+             QStringLiteral("keep"));
+}
+
+void TestAcpProtocolSerialization::appendToolCallTextDeltaAccumulates()
+{
+    QJsonArray content;
+    QJsonObject term;
+    term.insert(QStringLiteral("type"), QStringLiteral("terminal"));
+    content.append(term);
+    AcpProtocol::appendToolCallTextDelta(content, QStringLiteral("foo"));
+    AcpProtocol::appendToolCallTextDelta(content, QStringLiteral("bar"));
+    QCOMPARE(content.size(), 1);
+    QCOMPARE(content.at(0).toObject().value(QStringLiteral("type")).toString(),
+             QStringLiteral("text"));
+    QCOMPARE(content.at(0).toObject().value(QStringLiteral("text")).toString(),
+             QStringLiteral("foobar"));
 }
 
 QTEST_GUILESS_MAIN(TestAcpProtocolSerialization)
