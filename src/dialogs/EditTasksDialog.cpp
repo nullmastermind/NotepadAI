@@ -145,12 +145,15 @@ EditTasksDialog::EditTasksDialog(const QString &workspacePath,
     });
     connect(m_buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
-    // Populate list
+    // Populate list. Empty open would leave the form enabled with
+    // m_currentRow == -1, so typing looked real but OK discarded it.
     for (const TerminalTask &t : m_tasks) {
         m_listWidget->addItem(t.name.isEmpty() ? t.command : t.name);
     }
     if (!m_tasks.isEmpty()) {
         m_listWidget->setCurrentRow(0);
+    } else {
+        onAddClicked();
     }
     updateButtonStates();
 }
