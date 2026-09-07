@@ -264,6 +264,9 @@ private:
     void showSaveErrorMessage(ScintillaNext *editor, QFileDevice::FileError error);
     void showEditorZoomLevelIndicator();
     void attachAiAgentDock(AiAgentDock *dock, bool raise = true);
+    // Shared spawn chokepoint for AI-menu + tree-context "Open AI in Folder".
+    // No-ops on empty agentId/cwd or a missing manager; openAgent nullptr is ignored.
+    void openAiAgentAt(const QString &agentId, const QString &cwd, remote::ExecutionContext *ctx);
     void registerWorkspaceDock(FolderAsWorkspaceDock *dock);
     void openFolderAsWorkspacePath(const QString &dir, bool showGitTab = false);
     // Opens the fuzzy "Recent Workspace" popup over ALL recents (≤100); wired

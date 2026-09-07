@@ -178,6 +178,7 @@
 #include "DockWidget.h"
 
 #include <algorithm>
+#include <functional>
 
 namespace {
 
@@ -243,6 +244,59 @@ protected:
         return QObject::eventFilter(obj, ev);
     }
 };
+
+QList<AcpAgentDefinition> acpAgentsDefaultFirst(AcpAgentRegistry *registry, QString *defaultIdOut)
+{
+    QList<AcpAgentDefinition> agents = registry ? registry->agents() : QList<AcpAgentDefinition>();
+    const QString defaultId = registry ? registry->defaultAgentId() : QString();
+    if (defaultIdOut)
+        *defaultIdOut = defaultId;
+    std::stable_partition(agents.begin(), agents.end(),
+        [&defaultId](const AcpAgentDefinition &a) { return a.id == defaultId; });
+    return agents;
+}
+
+void fillAcpAgentPickerMenu(QMenu *menu,
+                            const QList<AcpAgentDefinition> &agents,
+                            const QString &defaultId,
+                            bool enabled,
+                            QObject *receiver,
+                            const std::function<void(const QString &)> &onPicked)
+{
+    if (!menu)
+        return;
+    menu->clear();
+    const bool hasAgents = !agents.isEmpty();
+    menu->setEnabled(enabled && hasAgents);
+    if (!enabled || !hasAgents || !onPicked)
+        return;
+    for (const AcpAgentDefinition &agent : agents) {
+        QAction *action = menu->addAction(agent.name);
+        if (agent.id == defaultId) {
+            QFont f = action->font();
+            f.setBold(true);
+            action->setFont(f);
+        }
+        const QString agentId = agent.id;
+        QObject::connect(action, &QAction::triggered, receiver, [onPicked, agentId]() {
+            if (!agentId.isEmpty())
+                onPicked(agentId);
+        });
+    }
+}
+
+remote::ExecutionContext *executionContextForRoot(NotepadNextApplication *app, const QString &rootPath)
+{
+    remote::ExecutionContextRegistry *registry =
+        app ? app->getExecutionContextRegistry() : nullptr;
+    if (!registry)
+        return nullptr;
+    if (remote::isSshUri(rootPath)) {
+        const remote::SshUri uri = remote::parseSshUri(rootPath);
+        return uri.valid ? registry->remoteContext(uri.profileId) : nullptr;
+    }
+    return registry->localContext();
+}
 
 bool isEditorFocused()
 {
@@ -2029,28 +2083,12 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
 
         AcpAgentManager *manager = this->app->getAiAgentManager();
         AcpAgentRegistry *registry = manager ? manager->registry() : nullptr;
-        QList<AcpAgentDefinition> agents = registry ? registry->agents() : QList<AcpAgentDefinition>();
-        const QString defaultId = registry ? registry->defaultAgentId() : QString();
-        // Surface the default agent first so a single keystroke (Enter) picks it.
-        std::stable_partition(agents.begin(), agents.end(),
-            [&defaultId](const AcpAgentDefinition &a) { return a.id == defaultId; });
+        QString defaultId;
+        const QList<AcpAgentDefinition> agents = acpAgentsDefaultFirst(registry, &defaultId);
 
         auto rebuildSubmenu = [this, &agents, &defaultId](QMenu *submenu, bool enabled, bool isWorkspaceVariant) {
-            submenu->clear();
-            const bool hasAgents = !agents.isEmpty();
-            submenu->setEnabled(enabled && hasAgents);
-            if (!enabled || !hasAgents) {
-                return;
-            }
-            for (const AcpAgentDefinition &agent : agents) {
-                QAction *action = submenu->addAction(agent.name);
-                if (agent.id == defaultId) {
-                    QFont f = action->font();
-                    f.setBold(true);
-                    action->setFont(f);
-                }
-                const QString agentId = agent.id;
-                connect(action, &QAction::triggered, this, [this, agentId, isWorkspaceVariant]() {
+            fillAcpAgentPickerMenu(submenu, agents, defaultId, enabled, this,
+                [this, isWorkspaceVariant](const QString &agentId) {
                     remote::ExecutionContext *ctx = activeExecutionContext();
                     QString cwd;
                     if (isWorkspaceVariant) {
@@ -2065,18 +2103,11 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
                                 activeIsFile = true;
                             }
                         }
-                        cwd = TerminalCwdResolver::resolveFolderForContext(ctx, activeFilePath, activeIsFile, workspaceRoot);
+                        cwd = TerminalCwdResolver::resolveFolderForContext(
+                            ctx, activeFilePath, activeIsFile, workspaceRoot);
                     }
-                    if (cwd.isEmpty()) return;
-
-                    AcpAgentManager *m = this->app->getAiAgentManager();
-                    if (!m) return;
-                    AiAgentDock *dock = m->openAgent(agentId, cwd, /*recordAsLastUsed=*/true, ctx);
-                    if (dock) {
-                        attachAiAgentDock(dock);
-                    }
+                    openAiAgentAt(agentId, cwd, ctx);
                 });
-            }
         };
 
         rebuildSubmenu(ui->menuOpenAiAgentInWorkspace, workspaceOk, /*isWorkspaceVariant=*/true);
@@ -2121,10 +2152,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
             return;
         }
 
-        AiAgentDock *dock = manager->openAgent(agentId, cwd, /*recordAsLastUsed=*/true, ctx);
-        if (dock) {
-            attachAiAgentDock(dock);
-        }
+        openAiAgentAt(agentId, cwd, ctx);
     });
 
     } // MainWindow::ctor.terminalManager
@@ -3255,6 +3283,41 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 });
             }
             menu->addAction(openTerminal);
+
+            // --- Open AI in Folder (ACP agent picker) ---
+            // Folders only (this block). Clicked folder is cwd — not workspace
+            // root. Multi-select is ignored: one right-click target, one session.
+            // Picker + spawn are the same helpers as the AI menu.
+            QString defaultId;
+            AcpAgentManager *aiManager = this->app->getAiAgentManager();
+            AcpAgentRegistry *aiRegistry = aiManager ? aiManager->registry() : nullptr;
+            const QList<AcpAgentDefinition> agents = acpAgentsDefaultFirst(aiRegistry, &defaultId);
+
+            remote::ExecutionContext *folderCtx = executionContextForRoot(app, dockRoot);
+            const bool remoteReady = !isSshDock
+                || (folderCtx && folderCtx->isRemote()
+                    && folderCtx->state() == remote::ExecutionContext::State::Connected);
+            const bool canOpenAi = !absPath.isEmpty() && remoteReady;
+
+            auto *openAiMenu = new QMenu(tr("Open AI in Folder"), menu);
+            fillAcpAgentPickerMenu(openAiMenu, agents, defaultId, canOpenAi, this,
+                [this, absPath, isSshDock, dockRoot](const QString &agentId) {
+                    if (absPath.isEmpty())
+                        return;
+                    remote::ExecutionContext *ctx = executionContextForRoot(app, dockRoot);
+                    if (isSshDock && (!ctx || !ctx->isRemote()
+                            || ctx->state() != remote::ExecutionContext::State::Connected)) {
+                        return;
+                    }
+                    const QString requested = isSshDock
+                        ? remote::parseSshUri(absPath).remotePath
+                        : absPath;
+                    if (requested.isEmpty())
+                        return;
+                    const QString cwd = TerminalCwdResolver::resolveForContext(ctx, requested);
+                    openAiAgentAt(agentId, cwd, ctx);
+                });
+            menu->addMenu(openAiMenu);
         }
 
         // --- Find in Folder (local directories only) ---
@@ -5411,6 +5474,17 @@ QMenu *MainWindow::buildMenu(const QStringList &actionNames)
     ActionUtils::populateActionContainer(menu, this, actionNames);
 
     return menu;
+}
+
+void MainWindow::openAiAgentAt(const QString &agentId, const QString &cwd, remote::ExecutionContext *ctx)
+{
+    if (agentId.isEmpty() || cwd.isEmpty())
+        return;
+    AcpAgentManager *manager = app ? app->getAiAgentManager() : nullptr;
+    if (!manager)
+        return;
+    if (AiAgentDock *dock = manager->openAgent(agentId, cwd, /*recordAsLastUsed=*/true, ctx))
+        attachAiAgentDock(dock);
 }
 
 void MainWindow::attachAiAgentDock(AiAgentDock *dock, bool raise)
