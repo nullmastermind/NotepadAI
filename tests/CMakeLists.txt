@@ -702,7 +702,7 @@ target_sources(test_acp_usage_indicator PRIVATE
 )
 add_test(NAME AcpUsageIndicator COMMAND test_acp_usage_indicator)
 
-# --- AcpMessageWidget: streaming markdown + thought collapse ---
+# --- AcpMessageWidget: streaming markdown, thought collapse, raw thought text ---
 qt_add_executable(test_acp_message_widget_streaming test_acp_message_widget_streaming.cpp)
 target_include_directories(test_acp_message_widget_streaming PRIVATE
     ${CMAKE_SOURCE_DIR}/src

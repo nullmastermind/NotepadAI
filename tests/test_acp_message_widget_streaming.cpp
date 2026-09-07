@@ -6,6 +6,7 @@
  */
 
 #include <QtTest>
+#include <QTextBrowser>
 
 #include "AcpMessageWidget.h"
 
@@ -16,6 +17,7 @@ class TestAcpMessageWidgetStreaming : public QObject
 private slots:
     void assistant_streaming_buffers_chunks();
     void thought_collapse_after_streaming_done();
+    void thought_renders_markdown_as_raw_text();
 };
 
 void TestAcpMessageWidgetStreaming::assistant_streaming_buffers_chunks()
@@ -33,6 +35,18 @@ void TestAcpMessageWidgetStreaming::thought_collapse_after_streaming_done()
     QVERIFY(!w.isCollapsed());
     w.markStreamingDone();
     QVERIFY(w.isCollapsed());
+}
+
+void TestAcpMessageWidgetStreaming::thought_renders_markdown_as_raw_text()
+{
+    AcpMessageWidget w(QStringLiteral("thought"));
+    const QString raw = QStringLiteral("**bold** and `code`");
+    w.setText(raw);
+
+    auto *browser = w.findChild<QTextBrowser *>();
+    QVERIFY(browser);
+    // Markdown would consume ** and backticks, leaving "bold and code".
+    QCOMPARE(browser->toPlainText().trimmed(), raw);
 }
 
 QTEST_MAIN(TestAcpMessageWidgetStreaming)

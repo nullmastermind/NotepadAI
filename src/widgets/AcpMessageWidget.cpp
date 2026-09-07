@@ -222,9 +222,9 @@ AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
         }
     }
 
-    // Debounce assistant/thought re-renders so streamed chunks don't drown the
-    // UI thread in markdown parsing — especially severe for table-heavy
-    // replies where every chunk re-parses the whole payload.
+    // Debounce streamed re-renders so chunks don't drown the UI thread —
+    // especially severe for assistant markdown tables, where every chunk
+    // re-parses the whole payload.
     m_rerenderTimer = new QTimer(this);
     m_rerenderTimer->setSingleShot(true);
     m_rerenderTimer->setInterval(80);
@@ -430,28 +430,10 @@ void AcpMessageWidget::rerender()
         normalizeBlockMargins(m_browser->document());
         // Map fenced-code regions so the hover copy button can target them.
         scanCodeRegions();
-    } else if (m_role == QLatin1String("thought")) {
-        // Thoughts are model reasoning streams that contain markdown
-        // (headings, lists, code spans). setPlainText leaves "##", "###",
-        // "- " as raw characters; render through setMarkdown so the bubble
-        // reads as formatted text. The italic stylesheet on the QTextBrowser
-        // still cascades to all rendered blocks.
-        QString text = m_text;
-        while (!text.isEmpty() && (text.endsWith(QLatin1Char('\n'))
-                                   || text.endsWith(QLatin1Char('\r'))
-                                   || text.endsWith(QLatin1Char(' '))
-                                   || text.endsWith(QLatin1Char('\t')))) {
-            text.chop(1);
-        }
-        // MarkdownNoHTML: see the assistant branch above — a bare "<tag>" in
-        // reasoning text (e.g. "one Surreal<Db> per repo") would otherwise be
-        // eaten as inline HTML, blanking the rest of the thought.
-        m_browser->document()->setMarkdown(ensureHardBreaks(text),
-                                           QTextDocument::MarkdownFeatures(
-                                               QTextDocument::MarkdownDialectGitHub
-                                               | QTextDocument::MarkdownNoHTML));
-        normalizeBlockMargins(m_browser->document());
     } else {
+        // thought + system + other: raw text (thought italic comes from the
+        // QTextBrowser stylesheet). Do not setMarkdown — reasoning streams
+        // contain ** / ` / ## that must stay visible as typed.
         // Streamed chunks often end with "\n", which QTextDocument turns into
         // an empty trailing block that adds a full line-height of phantom
         // whitespace below the visible text. Strip trailing whitespace so the
