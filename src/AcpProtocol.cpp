@@ -254,7 +254,7 @@ QString contentBlockToChunkText(const QJsonObject &content)
 {
     const QString type = content.value(QStringLiteral("type")).toString();
     if (type == QLatin1String("resource_link")) {
-        const QString uri = content.value(QStringLiteral("uri")).toString();
+        QString uri = content.value(QStringLiteral("uri")).toString();
         QString label = content.value(QStringLiteral("name")).toString();
         if (label.isEmpty()) {
             label = content.value(QStringLiteral("title")).toString();
