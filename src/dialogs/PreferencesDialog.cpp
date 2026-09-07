@@ -27,12 +27,14 @@
 #include "ScintillaNext.h"
 
 #include <QButtonGroup>
+#include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QFont>
 #include <QFontDatabase>
 #include <QFontDialog>
 #include <QKeySequenceEdit>
+#include <QLabel>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QSpinBox>
@@ -393,14 +395,54 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
     // Add a note explaining which features use this configuration.
     {
         auto *noteLabel = new QLabel(
-            tr("Used by: AI Commit Message, Prompt Improver. "
-               "More features will use this provider in the future."),
+            tr("Used by: AI Commit Message, Prompt Improver, Mini App copilot. "
+               "Goal Agent Custom API is a separate Anthropic /v1/messages config."),
             this);
         noteLabel->setWordWrap(true);
         noteLabel->setStyleSheet(QStringLiteral(
             "color: palette(placeholder-text); font-size: 11px; margin-bottom: 4px;"));
         ui->formLayoutAi->insertRow(0, noteLabel);
     }
+
+    ui->comboBoxAiApiFormat->addItem(tr("OpenAI-compatible"),
+                                     static_cast<int>(ApplicationSettings::OpenAiCompatible));
+    ui->comboBoxAiApiFormat->addItem(tr("Anthropic"),
+                                     static_cast<int>(ApplicationSettings::Anthropic));
+    {
+        const int idx = ui->comboBoxAiApiFormat->findData(
+            static_cast<int>(settings->commitMessageApiFormat()));
+        ui->comboBoxAiApiFormat->setCurrentIndex(idx == -1 ? 0 : idx);
+    }
+    auto refreshAiEndpointChrome = [=]() {
+        const bool anthropic = settings->commitMessageApiFormat() == ApplicationSettings::Anthropic;
+        if (anthropic) {
+            ui->labelAiUrl->setText(tr("Anthropic endpoint"));
+            ui->lineEditAiUrl->setPlaceholderText(QStringLiteral("https://api.anthropic.com"));
+            ui->lineEditAiUrl->setToolTip(tr(
+                "Base URL of an Anthropic Messages API (e.g. https://api.anthropic.com). "
+                "The /v1/messages path is appended automatically."));
+            ui->lineEditAiModel->setPlaceholderText(QStringLiteral("claude-opus-5"));
+        } else {
+            ui->labelAiUrl->setText(tr("OpenAI-compatible endpoint"));
+            ui->lineEditAiUrl->setPlaceholderText(QStringLiteral("https://api.openai.com/v1"));
+            ui->lineEditAiUrl->setToolTip(tr(
+                "Base URL of any OpenAI-compatible Chat Completions API (e.g. https://api.openai.com/v1). "
+                "The /chat/completions path is appended automatically."));
+            ui->lineEditAiModel->setPlaceholderText(QStringLiteral("gpt-4o-mini"));
+        }
+    };
+    connect(ui->comboBoxAiApiFormat, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int index) {
+        settings->setCommitMessageApiFormat(static_cast<ApplicationSettings::AiApiFormatEnum>(
+            ui->comboBoxAiApiFormat->itemData(index).toInt()));
+        refreshAiEndpointChrome();
+    });
+    connect(settings, &ApplicationSettings::commitMessageApiFormatChanged, this,
+            [=](ApplicationSettings::AiApiFormatEnum f) {
+        const int idx = ui->comboBoxAiApiFormat->findData(static_cast<int>(f));
+        if (idx != -1) ui->comboBoxAiApiFormat->setCurrentIndex(idx);
+        refreshAiEndpointChrome();
+    });
+    refreshAiEndpointChrome();
 
     ui->lineEditAiUrl->setText(settings->commitMessageProviderUrl());
     connect(ui->lineEditAiUrl, &QLineEdit::editingFinished, this, [=]() {

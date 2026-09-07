@@ -12,6 +12,7 @@
 #include "MiniAppInstance.h"
 #include "MiniAppRegistry.h"
 #include "NotepadNextApplication.h"
+#include "ApplicationSettings.h"
 #include "WebViewWidget.h"
 #include "ai/CredentialStore.h"
 
@@ -301,7 +302,9 @@ void MiniAppManager::onInstanceStateChanged(MiniAppInstance *instance)
                     return;
                 }
 
-                webView->executeCopilotCommand(command, providerUrl, model, apiKey);
+                webView->executeCopilotCommand(
+                    command, providerUrl, model, apiKey,
+                    settings->commitMessageApiFormat() == ApplicationSettings::Anthropic);
             });
 
             webView->initialize();
@@ -515,7 +518,9 @@ void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
             return;
         }
 
-        webView->executeCopilotCommand(command, providerUrl, model, apiKey);
+        webView->executeCopilotCommand(
+            command, providerUrl, model, apiKey,
+            settings->commitMessageApiFormat() == ApplicationSettings::Anthropic);
     });
 
     dw->tabWidget()->setContextMenuPolicy(Qt::CustomContextMenu);

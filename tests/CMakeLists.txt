@@ -35,6 +35,16 @@ target_sources(test_preferences_theme_binding PRIVATE
 )
 add_test(NAME PreferencesThemeBinding COMMAND test_preferences_theme_binding)
 
+# --- PreferencesDialog AI format-combo binding (replicates the dialog's binding) ---
+qt_add_executable(test_preferences_ai_format_binding test_preferences_ai_format_binding.cpp)
+target_include_directories(test_preferences_ai_format_binding PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_preferences_ai_format_binding PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_preferences_ai_format_binding PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
+)
+add_test(NAME PreferencesAiFormatBinding COMMAND test_preferences_ai_format_binding)
+
 # --- chooseStylesheetResource: pure picker, only depends on QString ---
 qt_add_executable(test_stylesheet_resource test_stylesheet_resource.cpp)
 target_include_directories(test_stylesheet_resource PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -1524,6 +1534,44 @@ target_sources(test_embedded_window_focus_router PRIVATE
     ${CMAKE_SOURCE_DIR}/src/EmbeddedWindowFocusRouter.h
 )
 add_test(NAME EmbeddedWindowFocusRouter COMMAND test_embedded_window_focus_router)
+
+# --- LlmHttpClient: OpenAI vs Anthropic payload / URL encoding ---
+qt_add_executable(test_llm_http_client test_llm_http_client.cpp)
+target_include_directories(test_llm_http_client PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_llm_http_client PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+target_sources(test_llm_http_client PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ai/LlmHttpClient.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/LlmHttpClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/ILlmHttpClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/SsePartialParser.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/SsePartialParser.h
+)
+add_test(NAME LlmHttpClient COMMAND test_llm_http_client)
+
+# --- OpenaiAnthropicBridge: Mini App page-agent chat-completions ↔ /v1/messages ---
+qt_add_executable(test_openai_anthropic_bridge test_openai_anthropic_bridge.cpp)
+target_include_directories(test_openai_anthropic_bridge PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_openai_anthropic_bridge PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+target_sources(test_openai_anthropic_bridge PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ai/OpenaiAnthropicBridge.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/OpenaiAnthropicBridge.h
+    ${CMAKE_SOURCE_DIR}/src/ai/LlmHttpClient.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/LlmHttpClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/ILlmHttpClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/SsePartialParser.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/SsePartialParser.h
+)
+add_test(NAME OpenaiAnthropicBridge COMMAND test_openai_anthropic_bridge)
+
+# --- SsePartialParser: OpenAI chat-completions + Anthropic /v1/messages SSE ---
+qt_add_executable(test_sse_partial_parser test_sse_partial_parser.cpp)
+target_include_directories(test_sse_partial_parser PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_sse_partial_parser PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_sse_partial_parser PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ai/SsePartialParser.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/SsePartialParser.h
+)
+add_test(NAME SsePartialParser COMMAND test_sse_partial_parser)
 
 # --- GoalHttpJudge: Anthropic /v1/messages URL, tool-verdict parse, weak-LLM retry ---
 qt_add_executable(test_goal_http_judge test_goal_http_judge.cpp)

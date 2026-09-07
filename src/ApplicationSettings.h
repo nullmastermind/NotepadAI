@@ -84,6 +84,12 @@ public:
     };
     Q_ENUM(ThemeEnum)
 
+    enum AiApiFormatEnum : std::uint8_t {
+        OpenAiCompatible,
+        Anthropic
+    };
+    Q_ENUM(AiApiFormatEnum)
+
     template <typename T>
     T get(const char *key, const T &defaultValue) const
     { return value(QLatin1String(key), defaultValue).template value<T>(); }
@@ -203,6 +209,7 @@ signals:
     // tracking whether the OS keychain holds one. See ai/CredentialStore.h.
     DEFINE_SETTING(CommitMessageProviderUrl,        commitMessageProviderUrl,        QString)
     DEFINE_SETTING(CommitMessageModel,              commitMessageModel,              QString)
+    DEFINE_SETTING(CommitMessageApiFormat,          commitMessageApiFormat,          AiApiFormatEnum)
     DEFINE_SETTING(CommitMessageApiKeyConfigured,   commitMessageApiKeyConfigured,   bool)
     DEFINE_SETTING(CommitMessagePromptTemplate,     commitMessagePromptTemplate,     QString)
     DEFINE_SETTING(CommitMessageDiffByteBudget,     commitMessageDiffByteBudget,     int)

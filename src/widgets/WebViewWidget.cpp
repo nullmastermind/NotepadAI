@@ -7,6 +7,8 @@
 
 #include "WebViewWidget.h"
 
+#include "ai/OpenaiAnthropicBridge.h"
+
 #include <QApplication>
 #include <QClipboard>
 #include <QDialogButtonBox>
@@ -17,6 +19,8 @@
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPair>
+#include <QVector>
 #include <QPainter>
 #include <QPalette>
 #include <QPushButton>
@@ -80,7 +84,8 @@ WebViewWidget::WebViewWidget(const QString &appId, const QUrl &url, QWidget *par
     connect(m_copilotRetryTimer, &QTimer::timeout, this, [this]() {
         if (!m_copilotExecuting || m_copilotLastCmd.isEmpty()) return;
         m_copilotExecuting = false;
-        executeCopilotCommand(m_copilotLastCmd, m_copilotProviderUrl, m_copilotModel, m_copilotApiKey);
+        executeCopilotCommand(m_copilotLastCmd, m_copilotProviderUrl, m_copilotModel, m_copilotApiKey,
+                              m_copilotAnthropic);
     });
 
     connect(this, &WebViewWidget::navigationCompleted, this, [this](bool success, const QString &) {
@@ -398,7 +403,8 @@ void WebViewWidget::showCopilotResultDialog(bool success, const QString &data)
 }
 
 void WebViewWidget::executeCopilotCommand(const QString &command, const QString &providerUrl,
-                                          const QString &model, const QString &apiKey)
+                                          const QString &model, const QString &apiKey,
+                                          bool anthropicMessages)
 {
     if (m_copilotExecuting) return;
     m_copilotExecuting = true;
@@ -414,6 +420,7 @@ void WebViewWidget::executeCopilotCommand(const QString &command, const QString 
     m_copilotProviderUrl = providerUrl;
     m_copilotModel = model;
     m_copilotApiKey = apiKey;
+    m_copilotAnthropic = anthropicMessages;
 
     copilotLog(QStringLiteral("[executeCopilotCommand] command='%1' model='%2' baseURL='%3' retry=%4")
                    .arg(command, model, providerUrl).arg(m_copilotNavRetries));
@@ -620,15 +627,50 @@ void WebViewWidget::handleNativeFetch(const QString &json)
     if (!m_fetchNam)
         m_fetchNam = new QNetworkAccessManager(this);
 
-    QNetworkRequest req{QUrl(url)};
-    for (auto it = headers.begin(); it != headers.end(); ++it) {
-        req.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
+    QUrl requestUrl(url);
+    QByteArray requestBody = body.toUtf8();
+    QVector<QPair<QByteArray, QByteArray>> extraHeaders;
+    if (m_copilotAnthropic) {
+        const ai::BridgedRequest bridged = ai::OpenaiAnthropicBridge::translateRequest(
+            QUrl(url), m_copilotApiKey, requestBody);
+        if (!bridged.error.isEmpty()) {
+            const QByteArray errBody = ai::OpenaiAnthropicBridge::translateError(
+                401, QJsonDocument(QJsonObject{
+                    {QStringLiteral("error"),
+                     QJsonObject{{QStringLiteral("message"), bridged.error}}}
+                }).toJson(QJsonDocument::Compact));
+            const QString b64 = QString::fromLatin1(errBody.toBase64());
+            const QString js = QStringLiteral(
+                "if(window.__nai_fetch_cbs && window.__nai_fetch_cbs['%1']){"
+                "  var _b=atob('%3');"
+                "  var _u=new Uint8Array(_b.length);"
+                "  for(var _i=0;_i<_b.length;_i++) _u[_i]=_b.charCodeAt(_i);"
+                "  var _t=new TextDecoder('utf-8').decode(_u);"
+                "  window.__nai_fetch_cbs['%1'](%2, _t);"
+                "  delete window.__nai_fetch_cbs['%1'];"
+                "}").arg(id).arg(401).arg(b64);
+            executeScript(js, nullptr);
+            return;
+        }
+        requestUrl = bridged.url;
+        requestBody = bridged.body;
+        extraHeaders = bridged.headers;
+    }
+
+    QNetworkRequest req{requestUrl};
+    if (extraHeaders.isEmpty()) {
+        for (auto it = headers.begin(); it != headers.end(); ++it) {
+            req.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
+        }
+    } else {
+        for (const auto &h : extraHeaders)
+            req.setRawHeader(h.first, h.second);
     }
     req.setTransferTimeout(300000);
 
     QNetworkReply *reply = nullptr;
     if (method == QStringLiteral("POST"))
-        reply = m_fetchNam->post(req, body.toUtf8());
+        reply = m_fetchNam->post(req, requestBody);
     else if (method == QStringLiteral("PUT"))
         reply = m_fetchNam->put(req, body.toUtf8());
     else if (method == QStringLiteral("DELETE"))
@@ -638,8 +680,15 @@ void WebViewWidget::handleNativeFetch(const QString &json)
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, id]() {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QByteArray responseBody = reply->readAll();
+        QByteArray responseBody = reply->readAll();
         reply->deleteLater();
+
+        if (m_copilotAnthropic) {
+            if (status >= 400 || status == 0)
+                responseBody = ai::OpenaiAnthropicBridge::translateError(status == 0 ? 0 : status, responseBody);
+            else
+                responseBody = ai::OpenaiAnthropicBridge::translateResponse(responseBody);
+        }
 
         copilotLog(QStringLiteral("[nativeFetch] id=%1 done, status=%2 bodyLen=%3")
                        .arg(id).arg(status).arg(responseBody.size()));

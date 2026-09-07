@@ -311,6 +311,7 @@ void EditScheduledTaskDialog::onCronHelperClicked()
     req.prompt = input;
     req.maxTokens = 50;
     req.idleTimeoutSec = 30;
+    req.apiFormat = ai::LlmHttpClient::apiFormatFromStored(m_settings->commitMessageApiFormat());
 
     m_cronHelperBtn->setEnabled(false);
     m_cronHelperBtn->setText(tr("..."));

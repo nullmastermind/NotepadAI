@@ -53,11 +53,31 @@ QString extractToken(const QJsonDocument &doc)
         }
     }
 
-    // 2. content (some Anthropic-via-proxy passthroughs).
+    // 2. Anthropic streaming: type=content_block_delta, delta.text.
+    const QJsonValue typeV = root.value(QLatin1String("type"));
+    if (typeV.isString() && typeV.toString() == QLatin1String("content_block_delta")) {
+        const QJsonValue deltaV = root.value(QLatin1String("delta"));
+        if (deltaV.isObject()) {
+            const QJsonValue textV = deltaV.toObject().value(QLatin1String("text"));
+            if (textV.isString()) return textV.toString();
+        }
+    }
+
+    // 3. content (string passthrough, or Anthropic non-stream content[].text).
     const QJsonValue contentV = root.value(QLatin1String("content"));
     if (contentV.isString()) return contentV.toString();
+    if (contentV.isArray()) {
+        QString acc;
+        const QJsonArray arr = contentV.toArray();
+        for (const auto &v : arr) {
+            const QJsonObject block = v.toObject();
+            if (block.value(QLatin1String("type")).toString() == QLatin1String("text"))
+                acc += block.value(QLatin1String("text")).toString();
+        }
+        if (!acc.isEmpty()) return acc;
+    }
 
-    // 3. response (Ollama native fallback).
+    // 4. response (Ollama native fallback).
     const QJsonValue respV = root.value(QLatin1String("response"));
     if (respV.isString()) return respV.toString();
 
@@ -81,6 +101,16 @@ bool hasFinishSignal(const QJsonDocument &doc)
     // Ollama native: done == true.
     const QJsonValue doneV = root.value(QLatin1String("done"));
     if (doneV.isBool() && doneV.toBool()) return true;
+
+    // Anthropic streaming: type == message_stop.
+    if (root.value(QLatin1String("type")).toString() == QLatin1String("message_stop"))
+        return true;
+
+    // Anthropic non-stream: type == message with stop_reason set.
+    if (root.value(QLatin1String("type")).toString() == QLatin1String("message")) {
+        const QJsonValue fr = root.value(QLatin1String("stop_reason"));
+        if (!fr.isUndefined() && !fr.isNull()) return true;
+    }
 
     return false;
 }

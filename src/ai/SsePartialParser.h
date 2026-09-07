@@ -26,19 +26,21 @@
 
 namespace ai {
 
-// Tolerant, bytewise Server-Sent Events parser tailored for OpenAI-compatible
-// /v1/chat/completions streams. Buffers raw bytes at the byte level and emits
-// events at the SSE event boundary (\n\n or \r\n\r\n), so UTF-8 multi-byte
-// chars never split across emitted tokens.
+// Tolerant, bytewise Server-Sent Events parser for OpenAI-compatible
+// /v1/chat/completions streams and Anthropic /v1/messages streams. Buffers raw
+// bytes at the byte level and emits events at the SSE event boundary (\n\n or
+// \r\n\r\n), so UTF-8 multi-byte chars never split across emitted tokens.
 //
 // Recognized payload shapes (in priority order, first hit wins per event):
 //   - data: "[DONE]"                                        → Done
 //   - JSON with "choices"[0]."delta"."content"              → Token
 //   - JSON with "choices"[0]."message"."content"            → Token (fallback)
+//   - JSON with type=content_block_delta, delta.text        → Token (Anthropic)
 //   - JSON with "content" (string)                          → Token (fallback)
 //   - JSON with "response" (string)                         → Token (Ollama-native)
 //   - JSON with "error"                                     → Error
 //   - JSON with finish_reason != null OR done == true       → Done
+//   - JSON with type=message_stop                           → Done (Anthropic)
 //
 // Comment lines (": ...") and unknown event fields are ignored. Malformed JSON
 // triggers no event but does NOT abort parsing of subsequent events.

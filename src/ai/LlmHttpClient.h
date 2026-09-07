@@ -30,11 +30,11 @@ class QNetworkReply;
 
 namespace ai {
 
-// Production HTTP streaming client targeting OpenAI-compatible chat-completions
-// endpoints. POSTs JSON { model, messages: [{role:user, content: prompt}],
-// stream: true } and parses the SSE response with SsePartialParser. Watches an
-// idle timeout: if no bytes arrive within `idleTimeoutSec`, aborts the request
-// and emits errorOccurred.
+// Production HTTP streaming client. OpenAI-compatible chat-completions and
+// Anthropic /v1/messages are selected by Request::apiFormat. POSTs JSON and
+// parses the SSE response with SsePartialParser. Watches an idle timeout: if
+// no bytes arrive within `idleTimeoutSec`, aborts the request and emits
+// errorOccurred.
 class LlmHttpClient : public ILlmHttpClient
 {
     Q_OBJECT
@@ -44,6 +44,13 @@ public:
 
     void openStream(const Request &req) override;
     void cancel() override;
+
+    static QByteArray buildPayload(const Request &req);
+    static QUrl normalizeUrl(const Request &req);
+    static QVector<QPair<QByteArray, QByteArray>> authHeaders(const Request &req);
+    static QString httpErrorText(int status, const QByteArray &body);
+    static ApiFormat apiFormatFromStored(int stored);
+    static QString rejectReason(const Request &req);
 
 private slots:
     void onReadyRead();
@@ -60,7 +67,6 @@ private:
     bool m_endedCleanly = false;
 
     static QUrl normalizeChatCompletionsUrl(const QUrl &base);
-    static QByteArray buildPayload(const Request &req);
 };
 
 } // namespace ai

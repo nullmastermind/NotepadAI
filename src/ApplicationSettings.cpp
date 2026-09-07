@@ -176,6 +176,7 @@ static QString defaultCommitMessagePromptTemplate()
 // NOLINTBEGIN(performance-unnecessary-value-param)
 CREATE_SETTING(Ai, CommitMessageProviderUrl, commitMessageProviderUrl, QString, QStringLiteral(""))
 CREATE_SETTING(Ai, CommitMessageModel, commitMessageModel, QString, QStringLiteral(""))
+CREATE_SETTING(Ai, CommitMessageApiFormat, commitMessageApiFormat, ApplicationSettings::AiApiFormatEnum, ApplicationSettings::OpenAiCompatible)
 CREATE_SETTING(Ai, CommitMessageApiKeyConfigured, commitMessageApiKeyConfigured, bool, false)
 CREATE_SETTING(Ai, CommitMessagePromptTemplate, commitMessagePromptTemplate, QString, []() {
     return defaultCommitMessagePromptTemplate();

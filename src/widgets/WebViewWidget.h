@@ -81,7 +81,8 @@ public:
     void updateUrlBar(const QString &url);
 
     void executeCopilotCommand(const QString &command, const QString &providerUrl,
-                               const QString &model, const QString &apiKey);
+                               const QString &model, const QString &apiKey,
+                               bool anthropicMessages = false);
     void handleCopilotMessage(const QString &json);
     void handleNativeFetch(const QString &json);
     void copilotLog(const QString &msg);
@@ -128,6 +129,7 @@ private:
     QString m_copilotProviderUrl;
     QString m_copilotModel;
     QString m_copilotApiKey;
+    bool m_copilotAnthropic = false;
     int m_copilotNavRetries = 0;
     static constexpr int kMaxNavRetries = 20;
 

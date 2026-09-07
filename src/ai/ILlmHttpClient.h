@@ -19,6 +19,8 @@
 #ifndef AI_I_LLM_HTTP_CLIENT_H
 #define AI_I_LLM_HTTP_CLIENT_H
 
+#include <cstdint>
+
 #include <QObject>
 #include <QPair>
 #include <QString>
@@ -34,15 +36,18 @@ class ILlmHttpClient : public QObject
 {
     Q_OBJECT
 public:
+    enum class ApiFormat : std::uint8_t { OpenAiCompatible, Anthropic };
+
     struct Request {
-        QUrl    url;             // base URL of OpenAI-compatible endpoint (e.g. https://api.openai.com/v1)
+        QUrl    url;             // base URL of the provider (e.g. https://api.openai.com/v1)
         QString model;
-        QString apiKey;          // resolved at call time; passed in Authorization header
-        QString systemPrompt;    // optional; sent as a system-role message before the user message
+        QString apiKey;          // resolved at call time; OpenAI Bearer / Anthropic x-api-key
+        QString systemPrompt;    // optional; OpenAI: system-role message; Anthropic: top-level system
         QString prompt;          // already-assembled full prompt (user role)
-        int     maxTokens = 0;   // 0 = omit from payload (provider default)
+        int     maxTokens = 0;   // 0 = omit (OpenAI) or default 16000 (Anthropic)
         int     idleTimeoutSec = 60;
         QVector<QPair<QByteArray, QString>> images;
+        ApiFormat apiFormat = ApiFormat::OpenAiCompatible;
     };
 
     explicit ILlmHttpClient(QObject *parent = nullptr) : QObject(parent) {}

@@ -138,6 +138,7 @@ void PromptImprover::trigger(const QString &userDraft,
     req.maxTokens = 4096;
     req.idleTimeoutSec = m_settings->commitMessageStreamIdleTimeoutSec();
     req.images = budgetedImages;
+    req.apiFormat = LlmHttpClient::apiFormatFromStored(m_settings->commitMessageApiFormat());
 
     setState(State::Streaming);
     m_http->openStream(req);

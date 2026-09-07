@@ -46,8 +46,102 @@ QUrl LlmHttpClient::normalizeChatCompletionsUrl(const QUrl &base)
     return QUrl(s + QLatin1String("/chat/completions"));
 }
 
+QUrl LlmHttpClient::normalizeUrl(const Request &req)
+{
+    if (req.apiFormat == ILlmHttpClient::ApiFormat::Anthropic) {
+        QString s = req.url.toString().trimmed();
+        if (s.isEmpty()) return req.url;
+        while (s.endsWith(QLatin1Char('/'))) s.chop(1);
+        if (s.endsWith(QLatin1String("/v1/messages"))) return QUrl(s);
+        if (s.endsWith(QLatin1String("/v1"))) return QUrl(s + QLatin1String("/messages"));
+        return QUrl(s + QLatin1String("/v1/messages"));
+    }
+    return normalizeChatCompletionsUrl(req.url);
+}
+
+QVector<QPair<QByteArray, QByteArray>> LlmHttpClient::authHeaders(const Request &req)
+{
+    QVector<QPair<QByteArray, QByteArray>> out;
+    if (req.apiFormat == ILlmHttpClient::ApiFormat::Anthropic) {
+        if (!req.apiKey.isEmpty())
+            out.append({QByteArray("x-api-key"), req.apiKey.toUtf8()});
+        out.append({QByteArray("anthropic-version"), QByteArray("2023-06-01")});
+        return out;
+    }
+    if (!req.apiKey.isEmpty())
+        out.append({QByteArray("Authorization"), ("Bearer " + req.apiKey).toUtf8()});
+    return out;
+}
+
+QString LlmHttpClient::httpErrorText(int status, const QByteArray &body)
+{
+    QJsonParseError jerr{};
+    const QJsonDocument doc = QJsonDocument::fromJson(body, &jerr);
+    if (jerr.error == QJsonParseError::NoError && doc.isObject()) {
+        const QJsonValue errV = doc.object().value(QLatin1String("error"));
+        if (errV.isString() && !errV.toString().isEmpty())
+            return errV.toString();
+        if (errV.isObject()) {
+            const QJsonValue msgV = errV.toObject().value(QLatin1String("message"));
+            if (msgV.isString() && !msgV.toString().isEmpty())
+                return msgV.toString();
+        }
+    }
+    return QStringLiteral("HTTP %1").arg(status);
+}
+
+ILlmHttpClient::ApiFormat LlmHttpClient::apiFormatFromStored(int stored)
+{
+    return stored == static_cast<int>(ILlmHttpClient::ApiFormat::Anthropic)
+        ? ILlmHttpClient::ApiFormat::Anthropic
+        : ILlmHttpClient::ApiFormat::OpenAiCompatible;
+}
+
+QString LlmHttpClient::rejectReason(const Request &req)
+{
+    if (req.apiKey.trimmed().isEmpty())
+        return QStringLiteral("API key is empty");
+    return {};
+}
+
 QByteArray LlmHttpClient::buildPayload(const Request &req)
 {
+    if (req.apiFormat == ILlmHttpClient::ApiFormat::Anthropic) {
+        QJsonArray messages;
+        QJsonObject userMsg;
+        userMsg.insert(QLatin1String("role"), QLatin1String("user"));
+        if (req.images.isEmpty()) {
+            userMsg.insert(QLatin1String("content"), req.prompt);
+        } else {
+            QJsonArray contentArr;
+            QJsonObject textPart;
+            textPart.insert(QLatin1String("type"), QLatin1String("text"));
+            textPart.insert(QLatin1String("text"), req.prompt);
+            contentArr.append(textPart);
+            for (const auto &img : req.images) {
+                QJsonObject source;
+                source.insert(QLatin1String("type"), QLatin1String("base64"));
+                source.insert(QLatin1String("media_type"), img.second);
+                source.insert(QLatin1String("data"), QString::fromLatin1(img.first.toBase64()));
+                QJsonObject imgPart;
+                imgPart.insert(QLatin1String("type"), QLatin1String("image"));
+                imgPart.insert(QLatin1String("source"), source);
+                contentArr.append(imgPart);
+            }
+            userMsg.insert(QLatin1String("content"), contentArr);
+        }
+        messages.append(userMsg);
+
+        QJsonObject body;
+        body.insert(QLatin1String("model"), req.model);
+        body.insert(QLatin1String("messages"), messages);
+        body.insert(QLatin1String("stream"), true);
+        body.insert(QLatin1String("max_tokens"), req.maxTokens > 0 ? req.maxTokens : 16000);
+        if (!req.systemPrompt.isEmpty())
+            body.insert(QLatin1String("system"), req.systemPrompt);
+        return QJsonDocument(body).toJson(QJsonDocument::Compact);
+    }
+
     QJsonArray messages;
 
     if (!req.systemPrompt.isEmpty()) {
@@ -98,17 +192,21 @@ void LlmHttpClient::openStream(const Request &req)
         // Caller error — but be defensive: cancel previous, then proceed.
         cancel();
     }
+    const QString reject = rejectReason(req);
+    if (!reject.isEmpty()) {
+        emit errorOccurred(0, reject);
+        return;
+    }
     m_firstByteEmitted = false;
     m_anyTokenSeen = false;
     m_endedCleanly = false;
     m_parser.reset();
 
-    QNetworkRequest httpReq(normalizeChatCompletionsUrl(req.url));
+    QNetworkRequest httpReq(normalizeUrl(req));
     httpReq.setHeader(QNetworkRequest::ContentTypeHeader, QLatin1String("application/json"));
     httpReq.setRawHeader("Accept", "text/event-stream");
-    if (!req.apiKey.isEmpty()) {
-        httpReq.setRawHeader("Authorization", ("Bearer " + req.apiKey).toUtf8());
-    }
+    for (const auto &h : authHeaders(req))
+        httpReq.setRawHeader(h.first, h.second);
     httpReq.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
 
     const QByteArray body = buildPayload(req);
@@ -145,9 +243,7 @@ void LlmHttpClient::onReadyRead()
         const int status = m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status >= 400) {
             const QByteArray body = m_reply->readAll();
-            const QString msg = QString::fromUtf8(body.left(512));
-            emit errorOccurred(status, msg.isEmpty()
-                ? QStringLiteral("HTTP %1").arg(status) : msg);
+            emit errorOccurred(status, httpErrorText(status, body));
             cancel();
             return;
         }

@@ -145,6 +145,7 @@ void CommitMessageGenerator::trigger(const QString &workspaceRoot,
     req.apiKey = apiKey;
     req.prompt = prompt;
     req.idleTimeoutSec = m_settings->commitMessageStreamIdleTimeoutSec();
+    req.apiFormat = LlmHttpClient::apiFormatFromStored(m_settings->commitMessageApiFormat());
 
     setState(State::Authenticating);
     m_http->openStream(req);

@@ -39,6 +39,11 @@ private slots:
     void theme_emitsChangedSignal();
     void theme_persistsAcrossInstances();
 
+    void commitMessageApiFormat_defaultIsOpenAiCompatible();
+    void commitMessageApiFormat_setAndGetRoundTrip();
+    void commitMessageApiFormat_persistsAcrossInstances();
+    void commitMessageApiFormat_changingFormatLeavesUrlAndModel();
+
 private:
     QTemporaryDir tempDir;
 };
@@ -105,6 +110,43 @@ void TestApplicationSettings::theme_persistsAcrossInstances()
 
     ApplicationSettings s2;
     QCOMPARE(s2.theme(), ApplicationSettings::Dark);
+}
+
+void TestApplicationSettings::commitMessageApiFormat_defaultIsOpenAiCompatible()
+{
+    ApplicationSettings s;
+    QCOMPARE(s.commitMessageApiFormat(), ApplicationSettings::OpenAiCompatible);
+}
+
+void TestApplicationSettings::commitMessageApiFormat_setAndGetRoundTrip()
+{
+    ApplicationSettings s;
+    s.setCommitMessageApiFormat(ApplicationSettings::Anthropic);
+    QCOMPARE(s.commitMessageApiFormat(), ApplicationSettings::Anthropic);
+}
+
+void TestApplicationSettings::commitMessageApiFormat_persistsAcrossInstances()
+{
+    {
+        ApplicationSettings s;
+        s.setCommitMessageApiFormat(ApplicationSettings::Anthropic);
+        s.sync();
+    }
+    ApplicationSettings s2;
+    QCOMPARE(s2.commitMessageApiFormat(), ApplicationSettings::Anthropic);
+}
+
+void TestApplicationSettings::commitMessageApiFormat_changingFormatLeavesUrlAndModel()
+{
+    ApplicationSettings s;
+    s.setCommitMessageProviderUrl(QStringLiteral("https://keep.example/v1"));
+    s.setCommitMessageModel(QStringLiteral("keep-model"));
+    s.setCommitMessageApiFormat(ApplicationSettings::Anthropic);
+    QCOMPARE(s.commitMessageProviderUrl(), QStringLiteral("https://keep.example/v1"));
+    QCOMPARE(s.commitMessageModel(), QStringLiteral("keep-model"));
+    s.setCommitMessageApiFormat(ApplicationSettings::OpenAiCompatible);
+    QCOMPARE(s.commitMessageProviderUrl(), QStringLiteral("https://keep.example/v1"));
+    QCOMPARE(s.commitMessageModel(), QStringLiteral("keep-model"));
 }
 
 QTEST_MAIN(TestApplicationSettings)

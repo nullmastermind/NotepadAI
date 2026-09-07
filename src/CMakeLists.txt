@@ -510,6 +510,8 @@ qt_add_executable(NotepadAI
 	ai/ILlmHttpClient.h
 	ai/LlmHttpClient.h
 	ai/LlmHttpClient.cpp
+	ai/OpenaiAnthropicBridge.h
+	ai/OpenaiAnthropicBridge.cpp
 	ai/CommitMessageGenerator.h
 	ai/CommitMessageGenerator.cpp
 	ai/PromptImprover.h

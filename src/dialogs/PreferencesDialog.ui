@@ -447,13 +447,23 @@
          </property>
          <layout class="QFormLayout" name="formLayoutAi">
           <item row="0" column="0">
+           <widget class="QLabel" name="labelAiApiFormat">
+            <property name="text">
+             <string>API format</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QComboBox" name="comboBoxAiApiFormat"/>
+          </item>
+          <item row="1" column="0">
            <widget class="QLabel" name="labelAiUrl">
             <property name="text">
              <string>OpenAI-compatible endpoint</string>
             </property>
            </widget>
           </item>
-          <item row="0" column="1">
+          <item row="1" column="1">
            <widget class="QLineEdit" name="lineEditAiUrl">
             <property name="placeholderText">
              <string>https://api.openai.com/v1</string>
@@ -463,28 +473,28 @@
             </property>
            </widget>
           </item>
-          <item row="1" column="0">
+          <item row="2" column="0">
            <widget class="QLabel" name="labelAiModel">
             <property name="text">
              <string>Model</string>
             </property>
            </widget>
           </item>
-          <item row="1" column="1">
+          <item row="2" column="1">
            <widget class="QLineEdit" name="lineEditAiModel">
             <property name="placeholderText">
              <string>gpt-4o-mini</string>
             </property>
            </widget>
           </item>
-          <item row="2" column="0">
+          <item row="3" column="0">
            <widget class="QLabel" name="labelAiApiKey">
             <property name="text">
              <string>API key</string>
             </property>
            </widget>
           </item>
-          <item row="2" column="1">
+          <item row="3" column="1">
            <layout class="QHBoxLayout" name="layoutAiApiKey">
             <item>
              <widget class="QLineEdit" name="lineEditAiApiKey">
@@ -518,7 +528,7 @@
             </item>
            </layout>
           </item>
-          <item row="3" column="1">
+          <item row="4" column="1">
            <widget class="QLabel" name="labelAiApiKeyStatus">
             <property name="text">
              <string/>
@@ -528,7 +538,7 @@
             </property>
            </widget>
           </item>
-          <item row="4" column="0">
+          <item row="5" column="0">
            <widget class="QLabel" name="labelAiPromptTemplate">
             <property name="text">
              <string>Prompt template</string>
@@ -538,7 +548,7 @@
             </property>
            </widget>
           </item>
-          <item row="4" column="1">
+          <item row="5" column="1">
            <layout class="QVBoxLayout" name="layoutAiPromptTemplate">
             <item>
              <widget class="QPlainTextEdit" name="plainTextEditAiPromptTemplate">
@@ -573,14 +583,14 @@
             </item>
            </layout>
           </item>
-          <item row="5" column="0">
+          <item row="6" column="0">
            <widget class="QLabel" name="labelAiDiffBudget">
             <property name="text">
              <string>Diff budget (bytes)</string>
             </property>
            </widget>
           </item>
-          <item row="5" column="1">
+          <item row="6" column="1">
            <widget class="QSpinBox" name="spinBoxAiDiffBudget">
             <property name="minimum">
              <number>1000</number>
@@ -593,14 +603,14 @@
             </property>
            </widget>
           </item>
-          <item row="6" column="0">
+          <item row="7" column="0">
            <widget class="QLabel" name="labelAiRulesBudget">
             <property name="text">
              <string>Rules budget (bytes)</string>
             </property>
            </widget>
           </item>
-          <item row="6" column="1">
+          <item row="7" column="1">
            <widget class="QSpinBox" name="spinBoxAiRulesBudget">
             <property name="minimum">
              <number>0</number>
@@ -613,14 +623,14 @@
             </property>
            </widget>
           </item>
-          <item row="7" column="0">
+          <item row="8" column="0">
            <widget class="QLabel" name="labelAiIdleTimeout">
             <property name="text">
              <string>Stream idle timeout (s)</string>
             </property>
            </widget>
           </item>
-          <item row="7" column="1">
+          <item row="8" column="1">
            <widget class="QSpinBox" name="spinBoxAiIdleTimeout">
             <property name="minimum">
              <number>5</number>
@@ -630,14 +640,14 @@
             </property>
            </widget>
           </item>
-          <item row="8" column="0">
+          <item row="9" column="0">
            <widget class="QLabel" name="labelAiShortcut">
             <property name="text">
              <string>Generate shortcut</string>
             </property>
            </widget>
           </item>
-          <item row="8" column="1">
+          <item row="9" column="1">
            <widget class="QKeySequenceEdit" name="keySequenceEditAiShortcut"/>
           </item>
          </layout>
