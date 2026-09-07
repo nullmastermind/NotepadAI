@@ -42,6 +42,11 @@ ApplicationSettings::ApplicationSettings(QObject *parent)
 {
 }
 
+// File-scope ApplicationSetting<T> objects and by-value QString setters are the
+// established CREATE_SETTING shape. QString's constructor is not noexcept, and
+// the setter copies — neither is a hot path (settings load once / write on
+// change). NOLINT covers the whole expansion rather than rewriting the macro.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,performance-unnecessary-value-param)
 CREATE_SETTING(Gui, ShowMenuBar, showMenuBar, bool, true)
 CREATE_SETTING(Gui, ShowToolBar, showToolBar, bool, true)
 CREATE_SETTING(Gui, ShowTabBar, showTabBar, bool, true)
@@ -169,11 +174,6 @@ static QString defaultCommitMessagePromptTemplate()
         "```\n");
 }
 
-// CREATE_SETTING expands to a by-value QString setter, matching the existing
-// project idiom used by every other QString setting above. Suppressed here so
-// we don't drift from the established macro pattern (changing the macro is
-// out of scope and would noisily diff every preexisting QString setting).
-// NOLINTBEGIN(performance-unnecessary-value-param)
 CREATE_SETTING(Ai, CommitMessageProviderUrl, commitMessageProviderUrl, QString, QStringLiteral(""))
 CREATE_SETTING(Ai, CommitMessageModel, commitMessageModel, QString, QStringLiteral(""))
 CREATE_SETTING(Ai, CommitMessageApiFormat, commitMessageApiFormat, ApplicationSettings::AiApiFormatEnum, ApplicationSettings::OpenAiCompatible)
@@ -185,9 +185,9 @@ CREATE_SETTING(Ai, CommitMessageDiffByteBudget, commitMessageDiffByteBudget, int
 CREATE_SETTING(Ai, CommitMessageRulesByteBudget, commitMessageRulesByteBudget, int, 4000)
 CREATE_SETTING(Ai, CommitMessageStreamIdleTimeoutSec, commitMessageStreamIdleTimeoutSec, int, 60)
 CREATE_SETTING(Ai, CommitMessageGenerateShortcut, commitMessageGenerateShortcut, QString, QStringLiteral("Ctrl+Alt+G"))
-// NOLINTEND(performance-unnecessary-value-param)
 
 CREATE_SETTING(Ai, SyncWorkspaceOnAiSwitch, syncWorkspaceOnAiSwitch, bool, true)
+// NOLINTEND(bugprone-throwing-static-initialization,performance-unnecessary-value-param)
 
 // --- AI / ACP agent settings ---------------------------------------------------
 //

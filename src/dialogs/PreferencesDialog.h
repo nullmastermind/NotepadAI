@@ -38,8 +38,8 @@ class PreferencesDialog : public QDialog
     Q_OBJECT
 
 public:
-    PreferencesDialog(ApplicationSettings *settings, QWidget *parent = 0);
-    ~PreferencesDialog();
+    PreferencesDialog(ApplicationSettings *settings, QWidget *parent = nullptr);
+    ~PreferencesDialog() override;
 
     void showApplicationRestartRequired() const;
 

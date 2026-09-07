@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include <QList>
 #include <QString>
 #include <QtGlobal>
@@ -56,7 +58,7 @@ struct NativeWindowState {
 };
 
 // Result of re-syncing the foreign child's geometry to its host client area.
-enum class SyncResult {
+enum class SyncResult : std::uint8_t {
     Ok,             // reparented (if asked) and resized successfully
     TransientError, // a Win32 call failed but the window still looks alive
     WindowLost,     // the window is gone or the token no longer matches

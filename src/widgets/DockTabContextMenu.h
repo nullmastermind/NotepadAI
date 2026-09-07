@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include <QList>
 
 class QDockWidget;
@@ -33,7 +35,7 @@ class QTabBar;
 // does this scope close" decision is testable without a shown window.
 namespace DockTabContextMenu {
 
-enum class Scope {
+enum class Scope : std::uint8_t {
     Close,
     CloseOthers,
     CloseToLeft,

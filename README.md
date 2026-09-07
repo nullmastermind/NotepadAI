@@ -8,9 +8,9 @@ You shouldn't have to leave your editor to talk to an AI, run git, or open a she
 
 ### AI agents
 
-NotepadAI speaks the Agent Client Protocol (ACP) over stdio. Claude Code and Codex are built in. Add any other ACP-compatible agent — Gemini, Auggie, or your own command — from Settings. Agents read and write files, run terminal commands, and see your workspace context, so they work on the same code you do.
+NotepadAI speaks the Agent Client Protocol (ACP) over stdio. Claude Code and Codex are built in. Add any other ACP-compatible agent — Gemini, Auggie, or your own command — from Settings. Agents read and write files, run terminal commands, and see your workspace context, so they work on the same code you do. Start a session from the AI menu or by right-clicking a folder in the file tree.
 
-There's also a Goal Agent: pick an ACP judge (Claude Code, Codex, Opencode) or a Custom API endpoint that speaks Anthropic's Messages API. You set success criteria and it drives the working agent until they hold. And when you commit, AI can write the commit message from your staged diff. The protocol details and how to wire up a custom ACP agent are in [doc/AcpAgents.md](doc/AcpAgents.md).
+There's also a Goal Agent: pick an ACP judge (Claude Code, Codex, Opencode) or a Custom API endpoint that speaks Anthropic's Messages API. You set success criteria and it drives the working agent until they hold. And when you commit, AI can write the commit message from your staged diff — that generator (and other LLM calls) can talk to an OpenAI-compatible endpoint or Anthropic's Messages API. The protocol details and how to wire up a custom ACP agent are in [doc/AcpAgents.md](doc/AcpAgents.md).
 
 ### Git, built in
 
@@ -22,7 +22,7 @@ A full PTY terminal built on libvterm and libptyqt, with mouse reporting and a s
 
 ### The editor itself
 
-It's still Notepad++ at heart: a tabbed, splittable interface (Qt Advanced Docking System) with syntax highlighting for 80+ languages through vendored Scintilla and Lexilla. Macro recording and playback, session management, and an embedded Lua scripting layer are all here. If you're coming from Notepad++, it imports your config and sessions. There's also an editor minimap, live preview for Markdown and HTML, and a find-in-folder search that scans workspace directories with regex support.
+It's still Notepad++ at heart: a tabbed, splittable interface (Qt Advanced Docking System) with syntax highlighting for 80+ languages through vendored Scintilla and Lexilla. Right-click a panel tab to close it or its neighbors. Macro recording and playback, session management, and an embedded Lua scripting layer are all here. If you're coming from Notepad++, it imports your config and sessions. There's also an editor minimap, live preview for Markdown and HTML, and a find-in-folder search that scans workspace directories with regex support.
 
 ### Extras worth knowing
 

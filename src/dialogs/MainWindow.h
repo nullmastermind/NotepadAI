@@ -20,6 +20,8 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include <cstdint>
+
 #include <QMainWindow>
 #include <QLabel>
 #include <QActionGroup>
@@ -301,7 +303,7 @@ private:
     // Persist a single snapshot (mid-session dock close path).
     void persistOneWorkspaceState(const WorkspaceStateSnapshot &snapshot) const;
 
-    enum class UserSaveAction { SaveAll, DiscardAll, Cancel };
+    enum class UserSaveAction : std::uint8_t { SaveAll, DiscardAll, Cancel };
     UserSaveAction promptForSave(const QVector<ScintillaNext *> &editors);
 
     void saveSettings() const;

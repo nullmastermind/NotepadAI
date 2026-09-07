@@ -23,7 +23,7 @@ bool setLong(HWND hwnd, int index, LONG_PTR value)
 bool setParent(HWND hwnd, HWND parent)
 {
     SetLastError(ERROR_SUCCESS);
-    const HWND previous = SetParent(hwnd, parent);
+    HWND previous = SetParent(hwnd, parent);
     return previous != nullptr || GetLastError() == ERROR_SUCCESS;
 }
 
@@ -174,7 +174,7 @@ bool restoreExact(const NativeWindowState &s, quintptr token)
         MapWindowPoints(HWND_DESKTOP, reinterpret_cast<HWND>(s.originalParent),
                         reinterpret_cast<POINT *>(&rect), 2);
     if (sameWindow(s, token)) {
-        const HWND z = (s.originalExStyle & WS_EX_TOPMOST) ? HWND_TOPMOST : HWND_NOTOPMOST;
+        HWND z = (s.originalExStyle & WS_EX_TOPMOST) ? HWND_TOPMOST : HWND_NOTOPMOST;
         SetWindowPos(hwnd, z, rect.left, rect.top, rect.right - rect.left,
                      rect.bottom - rect.top, SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
@@ -248,7 +248,7 @@ SyncResult syncGeometry(quintptr targetHandle, quintptr hostHandle, quintptr tok
 #ifdef Q_OS_WIN
     HWND target = reinterpret_cast<HWND>(targetHandle);
     HWND host = reinterpret_cast<HWND>(hostHandle);
-    const HANDLE mark = reinterpret_cast<HANDLE>(token);
+    HANDLE mark = reinterpret_cast<HANDLE>(token);
     const auto ownsTarget = [target, mark]() {
         return IsWindow(target) && GetPropW(target, EmbedPropertyName) == mark;
     };

@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include <QList>
 #include <QObject>
 #include <QString>
@@ -64,7 +66,7 @@ signals:
     void allEmbedsReleased();
 
 protected:
-    enum class ReleaseMode { RestoreExact, FailSafeDetach };
+    enum class ReleaseMode : std::uint8_t { RestoreExact, FailSafeDetach };
 
     struct Embed {
         quintptr token = 0;

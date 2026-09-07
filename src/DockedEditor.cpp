@@ -56,7 +56,7 @@ int centerTabMaxWidth(const QWidget *tab)
 class DockedEditorComponentsFactory : public ads::CDockComponentsFactory
 {
 public:
-    ads::CDockAreaTitleBar* createDockAreaTitleBar(ads::CDockAreaWidget* DockArea) const {
+    ads::CDockAreaTitleBar* createDockAreaTitleBar(ads::CDockAreaWidget* DockArea) const override {
         DockedEditorTitleBar *titleBar = new DockedEditorTitleBar(DockArea);
 
         // Disable the built in context menu for the title bar since it has options we don't want

@@ -7,13 +7,15 @@
 
 #pragma once
 
+#include <cstdint>
+
 // Tiny, allocation-free state machine shared by MainWindow and unit tests.
 // It guarantees one outstanding close intent, at most one queued retry, and
 // exactly-once acceptance (notably exactly one restart process launch).
 class PendingCloseState
 {
 public:
-    enum class Intent { None, Exit, Restart };
+    enum class Intent : std::uint8_t { None, Exit, Restart };
 
     void begin(Intent intent)
     {

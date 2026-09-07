@@ -70,7 +70,7 @@ class ApplicationSettings : public QSettings
 public:
     explicit ApplicationSettings(QObject *parent = nullptr);
 
-    enum DefaultDirectoryBehaviorEnum {
+    enum DefaultDirectoryBehaviorEnum : std::uint8_t {
         FollowCurrentDocument,
         RememberLastUsed,
         HardCoded
