@@ -22,6 +22,7 @@
 #include "DataPaths.h"
 #include "NotepadNextApplication.h"
 #include "TranslationManager.h"
+#include "UnfocusedWheelFilter.h"
 #include "ai/CredentialStore.h"
 #include "ui_PreferencesDialog.h"
 #include "ScintillaNext.h"
@@ -35,8 +36,10 @@
 #include <QFontDialog>
 #include <QKeySequenceEdit>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStandardPaths>
 
@@ -44,7 +47,8 @@
 PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *parent) :
     QDialog(parent, Qt::Tool),
     ui(new Ui::PreferencesDialog),
-    settings(settings)
+    settings(settings),
+    m_pending(settings)
 {
     ui->setupUi(this);
 
@@ -76,9 +80,18 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
     MapSettingToCheckBox(ui->checkBoxCombineSearchResults, &ApplicationSettings::combineSearchResults, &ApplicationSettings::setCombineSearchResults, &ApplicationSettings::combineSearchResultsChanged);
 
     populateTranslationComboBox();
-    connect(ui->comboBoxTranslation, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int index) {
-        settings->setTranslation(ui->comboBoxTranslation->itemData(index).toString());
+    connect(ui->comboBoxTranslation, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int) {
+        m_pending.markDirty();
         showApplicationRestartRequired();
+    });
+    m_pending.addApply([=]() {
+        settings->setTranslation(ui->comboBoxTranslation->currentData().toString());
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->comboBoxTranslation);
+        const int index = ui->comboBoxTranslation->findData(settings->translation());
+        ui->comboBoxTranslation->setCurrentIndex(index != -1 ? index : 0);
+        hideApplicationRestartRequired();
     });
 
     ui->comboBoxTheme->addItem(tr("Follow System"), static_cast<int>(ApplicationSettings::System));
@@ -88,28 +101,44 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
         int themeIndex = ui->comboBoxTheme->findData(static_cast<int>(settings->theme()));
         ui->comboBoxTheme->setCurrentIndex(themeIndex == -1 ? 0 : themeIndex);
     }
-    connect(ui->comboBoxTheme, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int index) {
-        settings->setTheme(static_cast<ApplicationSettings::ThemeEnum>(
-            ui->comboBoxTheme->itemData(index).toInt()));
+    connect(ui->comboBoxTheme, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int) {
+        m_pending.markDirty();
     });
-    connect(settings, &ApplicationSettings::themeChanged, this, [=](ApplicationSettings::ThemeEnum t) {
-        int idx = ui->comboBoxTheme->findData(static_cast<int>(t));
-        if (idx != -1) ui->comboBoxTheme->setCurrentIndex(idx);
+    m_pending.addApply([=]() {
+        settings->setTheme(static_cast<ApplicationSettings::ThemeEnum>(
+            ui->comboBoxTheme->currentData().toInt()));
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->comboBoxTheme);
+        int idx = ui->comboBoxTheme->findData(static_cast<int>(settings->theme()));
+        ui->comboBoxTheme->setCurrentIndex(idx == -1 ? 0 : idx);
     });
 
     MapSettingToCheckBox(ui->checkBoxExitOnLastTabClosed, &ApplicationSettings::exitOnLastTabClosed, &ApplicationSettings::setExitOnLastTabClosed, &ApplicationSettings::exitOnLastTabClosedChanged);
 
     ui->fcbDefaultFont->setCurrentFont(QFont(settings->fontName()));
-    connect(ui->fcbDefaultFont, &QFontComboBox::currentFontChanged, this, [=](const QFont &f) {
-        settings->setFontName(f.family());
+    connect(ui->fcbDefaultFont, &QFontComboBox::currentFontChanged, this, [=](const QFont &) {
+        m_pending.markDirty();
     });
-    connect(settings, &ApplicationSettings::fontNameChanged, this, [=](const QString &fontName){
-        ui->fcbDefaultFont->setCurrentFont(QFont(fontName));
+    m_pending.addApply([=]() {
+        settings->setFontName(ui->fcbDefaultFont->currentFont().family());
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->fcbDefaultFont);
+        ui->fcbDefaultFont->setCurrentFont(QFont(settings->fontName()));
     });
 
     ui->spbDefaultFontSize->setValue(settings->fontSize());
-    connect(ui->spbDefaultFontSize, QOverload<int>::of(&QSpinBox::valueChanged), settings, &ApplicationSettings::setFontSize);
-    connect(settings, &ApplicationSettings::fontSizeChanged, ui->spbDefaultFontSize, &QSpinBox::setValue);
+    connect(ui->spbDefaultFontSize, QOverload<int>::of(&QSpinBox::valueChanged), this, [=](int) {
+        m_pending.markDirty();
+    });
+    m_pending.addApply([=]() {
+        settings->setFontSize(ui->spbDefaultFontSize->value());
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->spbDefaultFontSize);
+        ui->spbDefaultFontSize->setValue(settings->fontSize());
+    });
 
     ui->comboBoxLineEndings->addItem(tr("System Default"), QString(""));
     ui->comboBoxLineEndings->addItem(tr("Windows (CR LF)"), ScintillaNext::eolModeToString(SC_EOL_CRLF));
@@ -120,11 +149,15 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
     int index = ui->comboBoxLineEndings->findData(settings->defaultEOLMode());
     ui->comboBoxLineEndings->setCurrentIndex(index == -1 ? 0 : index);
 
-    connect(ui->comboBoxLineEndings, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int index) {
-        settings->setDefaultEOLMode(ui->comboBoxLineEndings->itemData(index).toString());
+    connect(ui->comboBoxLineEndings, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int) {
+        m_pending.markDirty();
     });
-    connect(settings, &ApplicationSettings::defaultEOLModeChanged, this, [=](const QString &defaultEOLMode) {
-        int index = ui->comboBoxLineEndings->findData(defaultEOLMode);
+    m_pending.addApply([=]() {
+        settings->setDefaultEOLMode(ui->comboBoxLineEndings->currentData().toString());
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->comboBoxLineEndings);
+        int index = ui->comboBoxLineEndings->findData(settings->defaultEOLMode());
         ui->comboBoxLineEndings->setCurrentIndex(index == -1 ? 0 : index);
     });
 
@@ -140,16 +173,28 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
     MapSettingToCheckBox(ui->checkBoxChatUseDefaultFont, &ApplicationSettings::chatFontUseDefault, &ApplicationSettings::setChatFontUseDefault, &ApplicationSettings::chatFontUseDefaultChanged);
 
     ui->fcbChatFont->setCurrentFont(QFont(settings->chatFontFamily()));
-    connect(ui->fcbChatFont, &QFontComboBox::currentFontChanged, this, [=](const QFont &f) {
-        settings->setChatFontFamily(f.family());
+    connect(ui->fcbChatFont, &QFontComboBox::currentFontChanged, this, [=](const QFont &) {
+        m_pending.markDirty();
     });
-    connect(settings, &ApplicationSettings::chatFontFamilyChanged, this, [=](const QString &name) {
-        ui->fcbChatFont->setCurrentFont(QFont(name));
+    m_pending.addApply([=]() {
+        settings->setChatFontFamily(ui->fcbChatFont->currentFont().family());
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->fcbChatFont);
+        ui->fcbChatFont->setCurrentFont(QFont(settings->chatFontFamily()));
     });
 
     ui->spbChatFontSize->setValue(settings->chatFontSizePt());
-    connect(ui->spbChatFontSize, QOverload<int>::of(&QSpinBox::valueChanged), settings, &ApplicationSettings::setChatFontSizePt);
-    connect(settings, &ApplicationSettings::chatFontSizePtChanged, ui->spbChatFontSize, &QSpinBox::setValue);
+    connect(ui->spbChatFontSize, QOverload<int>::of(&QSpinBox::valueChanged), this, [=](int) {
+        m_pending.markDirty();
+    });
+    m_pending.addApply([=]() {
+        settings->setChatFontSizePt(ui->spbChatFontSize->value());
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->spbChatFontSize);
+        ui->spbChatFontSize->setValue(settings->chatFontSizePt());
+    });
 
     MapSettingToCheckBox(ui->checkBoxChatFontHinting, &ApplicationSettings::chatFontSharpen, &ApplicationSettings::setChatFontSharpen, &ApplicationSettings::chatFontSharpenChanged);
 
@@ -166,16 +211,14 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
     };
     syncChatFontEnabled();
     connect(ui->checkBoxChatUseDefaultFont, &QCheckBox::toggled, this, syncChatFontEnabled);
-    connect(settings, &ApplicationSettings::chatFontUseDefaultChanged, this, syncChatFontEnabled);
 
     QButtonGroup *buttonGroup = new QButtonGroup(this);
     buttonGroup->addButton(ui->radioFollowCurrentDirectory, ApplicationSettings::FollowCurrentDocument);
     buttonGroup->addButton(ui->radioLastUsedDirectory, ApplicationSettings::RememberLastUsed);
     buttonGroup->addButton(ui->radioHardCoded, ApplicationSettings::HardCoded);
 
-    connect(buttonGroup, &QButtonGroup::idClicked, this, [=](int id) {
-        ApplicationSettings::DefaultDirectoryBehaviorEnum e = static_cast<ApplicationSettings::DefaultDirectoryBehaviorEnum>(id);
-        settings->setDefaultDirectoryBehavior(e);
+    connect(buttonGroup, &QButtonGroup::idClicked, this, [=](int) {
+        m_pending.markDirty();
     });
 
     connect(ui->radioHardCoded, &QRadioButton::toggled, this, [=](bool checked){
@@ -187,14 +230,14 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
         QString dir = QFileDialog::getExistingDirectory(this, tr("Default Directory"));
         if (dir.isEmpty()) return; // user cancelled
 
-        settings->setDefaultDirectory(QDir::fromNativeSeparators(dir));
         ui->txtHardCodedPath->setText(QDir::toNativeSeparators(dir));
+        m_pending.markDirty();
     });
 
     connect(ui->txtHardCodedPath, &QLineEdit::editingFinished, this, [=]() {
-        QString dir = ui->txtHardCodedPath->text();
-        settings->setDefaultDirectory(QDir::fromNativeSeparators(dir));
-        ui->txtHardCodedPath->setText(QDir::toNativeSeparators(dir));
+        ui->txtHardCodedPath->setText(QDir::toNativeSeparators(
+            QDir::fromNativeSeparators(ui->txtHardCodedPath->text())));
+        m_pending.markDirty();
     });
 
     if (auto b = buttonGroup->button(settings->defaultDirectoryBehavior())) {
@@ -207,6 +250,26 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
     else {
         ui->txtHardCodedPath->setText(QString());
     }
+
+    m_pending.addApply([=]() {
+        settings->setDefaultDirectoryBehavior(
+            static_cast<ApplicationSettings::DefaultDirectoryBehaviorEnum>(buttonGroup->checkedId()));
+        settings->setDefaultDirectory(QDir::fromNativeSeparators(ui->txtHardCodedPath->text()));
+    });
+    m_pending.addRevert([=]() {
+        if (auto b = buttonGroup->button(settings->defaultDirectoryBehavior())) {
+            QSignalBlocker blocker(b);
+            b->setChecked(true);
+        }
+        QSignalBlocker pathBlocker(ui->txtHardCodedPath);
+        if (settings->defaultDirectoryBehavior() == ApplicationSettings::HardCoded) {
+            ui->txtHardCodedPath->setText(QDir::toNativeSeparators(settings->defaultDirectory()));
+        } else {
+            ui->txtHardCodedPath->setText(QString());
+        }
+        ui->btnSelectHardCodedPath->setEnabled(ui->radioHardCoded->isChecked());
+        ui->txtHardCodedPath->setEnabled(ui->radioHardCoded->isChecked());
+    });
 
     // --- Shell setting UI ---
 #ifdef Q_OS_WIN
@@ -241,37 +304,41 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
     syncCustomRowVisibility();
 
     connect(ui->comboBoxShell, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int) {
-        const QString data = ui->comboBoxShell->currentData().toString();
         syncCustomRowVisibility();
-        if (data != QLatin1String("__custom__")) {
-            settings->setShellCommand(data);
-        }
+        m_pending.markDirty();
     });
 
     connect(ui->lineEditShellCommand, &QLineEdit::editingFinished, this, [=]() {
-        if (ui->comboBoxShell->currentData().toString() == QLatin1String("__custom__")) {
+        m_pending.markDirty();
+    });
+    m_pending.addApply([=]() {
+        const QString data = ui->comboBoxShell->currentData().toString();
+        if (data == QLatin1String("__custom__")) {
             settings->setShellCommand(ui->lineEditShellCommand->text());
+        } else {
+            settings->setShellCommand(data);
         }
     });
-    connect(settings, &ApplicationSettings::shellCommandChanged, this, [=](const QString &s) {
-        int i = ui->comboBoxShell->findData(s);
+    m_pending.addRevert([=]() {
+        QSignalBlocker comboBlocker(ui->comboBoxShell);
+        QSignalBlocker lineBlocker(ui->lineEditShellCommand);
+        const QString currentShell = settings->shellCommand();
+        int i = ui->comboBoxShell->findData(currentShell);
         if (i != -1) {
             ui->comboBoxShell->setCurrentIndex(i);
         } else {
             ui->comboBoxShell->setCurrentIndex(ui->comboBoxShell->findData(QStringLiteral("__custom__")));
-            if (ui->lineEditShellCommand->text() != s) {
-                ui->lineEditShellCommand->setText(s);
-            }
+            ui->lineEditShellCommand->setText(currentShell);
         }
+        syncCustomRowVisibility();
     });
 
     connect(ui->btnBrowseShell, &QToolButton::clicked, this, [=]() {
         const QString filter = tr("Executables (*.exe);;All files (*)");
         const QString path = QFileDialog::getOpenFileName(this, tr("Choose Shell"), ui->lineEditShellCommand->text(), filter);
         if (!path.isEmpty()) {
-            const QString native = QDir::toNativeSeparators(path);
-            ui->lineEditShellCommand->setText(native);
-            settings->setShellCommand(native);
+            ui->lineEditShellCommand->setText(QDir::toNativeSeparators(path));
+            m_pending.markDirty();
         }
     });
 #else
@@ -282,36 +349,45 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
 
     ui->lineEditShellCommand->setText(settings->shellCommand());
     connect(ui->lineEditShellCommand, &QLineEdit::editingFinished, this, [=]() {
+        m_pending.markDirty();
+    });
+    m_pending.addApply([=]() {
         settings->setShellCommand(ui->lineEditShellCommand->text());
     });
-    connect(settings, &ApplicationSettings::shellCommandChanged, this, [=](const QString &s) {
-        if (ui->lineEditShellCommand->text() != s) {
-            ui->lineEditShellCommand->setText(s);
-        }
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->lineEditShellCommand);
+        ui->lineEditShellCommand->setText(settings->shellCommand());
     });
 
     connect(ui->btnBrowseShell, &QToolButton::clicked, this, [=]() {
         const QString filter = tr("All files (*)");
         const QString path = QFileDialog::getOpenFileName(this, tr("Choose Shell"), ui->lineEditShellCommand->text(), filter);
         if (!path.isEmpty()) {
-            const QString native = QDir::toNativeSeparators(path);
-            ui->lineEditShellCommand->setText(native);
-            settings->setShellCommand(native);
+            ui->lineEditShellCommand->setText(QDir::toNativeSeparators(path));
+            m_pending.markDirty();
         }
     });
 #endif
 
+    m_pendingTerminalFont = settings->terminalFont();
     connect(ui->btnChooseTerminalFont, &QPushButton::clicked, this, [=]() {
         QFont current;
-        const QString stored = settings->terminalFont();
+        const QString stored = m_pendingTerminalFont.isEmpty() ? settings->terminalFont() : m_pendingTerminalFont;
         if (stored.isEmpty() || !current.fromString(stored)) {
             current = QFontDatabase::systemFont(QFontDatabase::FixedFont);
         }
         bool ok = false;
         const QFont chosen = QFontDialog::getFont(&ok, current, this, tr("Terminal Font"));
         if (ok) {
-            settings->setTerminalFont(chosen.toString());
+            m_pendingTerminalFont = chosen.toString();
+            m_pending.markDirty();
         }
+    });
+    m_pending.addApply([=]() {
+        settings->setTerminalFont(m_pendingTerminalFont);
+    });
+    m_pending.addRevert([=]() {
+        m_pendingTerminalFont = settings->terminalFont();
     });
 
     // --- Data Directory section ------------------------------------------------
@@ -414,7 +490,8 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
         ui->comboBoxAiApiFormat->setCurrentIndex(idx == -1 ? 0 : idx);
     }
     auto refreshAiEndpointChrome = [=]() {
-        const bool anthropic = settings->commitMessageApiFormat() == ApplicationSettings::Anthropic;
+        const bool anthropic = ui->comboBoxAiApiFormat->currentData().toInt()
+            == static_cast<int>(ApplicationSettings::Anthropic);
         if (anthropic) {
             ui->labelAiUrl->setText(tr("Anthropic endpoint"));
             ui->lineEditAiUrl->setPlaceholderText(QStringLiteral("https://api.anthropic.com"));
@@ -431,33 +508,45 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
             ui->lineEditAiModel->setPlaceholderText(QStringLiteral("gpt-4o-mini"));
         }
     };
-    connect(ui->comboBoxAiApiFormat, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int index) {
-        settings->setCommitMessageApiFormat(static_cast<ApplicationSettings::AiApiFormatEnum>(
-            ui->comboBoxAiApiFormat->itemData(index).toInt()));
+    connect(ui->comboBoxAiApiFormat, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [=](int) {
+        m_pending.markDirty();
         refreshAiEndpointChrome();
     });
-    connect(settings, &ApplicationSettings::commitMessageApiFormatChanged, this,
-            [=](ApplicationSettings::AiApiFormatEnum f) {
-        const int idx = ui->comboBoxAiApiFormat->findData(static_cast<int>(f));
-        if (idx != -1) ui->comboBoxAiApiFormat->setCurrentIndex(idx);
+    m_pending.addApply([=]() {
+        settings->setCommitMessageApiFormat(static_cast<ApplicationSettings::AiApiFormatEnum>(
+            ui->comboBoxAiApiFormat->currentData().toInt()));
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->comboBoxAiApiFormat);
+        const int idx = ui->comboBoxAiApiFormat->findData(
+            static_cast<int>(settings->commitMessageApiFormat()));
+        ui->comboBoxAiApiFormat->setCurrentIndex(idx == -1 ? 0 : idx);
         refreshAiEndpointChrome();
     });
     refreshAiEndpointChrome();
 
     ui->lineEditAiUrl->setText(settings->commitMessageProviderUrl());
-    connect(ui->lineEditAiUrl, &QLineEdit::editingFinished, this, [=]() {
+    connect(ui->lineEditAiUrl, &QLineEdit::textEdited, this, [=](const QString &) {
+        m_pending.markDirty();
+    });
+    m_pending.addApply([=]() {
         settings->setCommitMessageProviderUrl(ui->lineEditAiUrl->text().trimmed());
     });
-    connect(settings, &ApplicationSettings::commitMessageProviderUrlChanged, this, [=](const QString &s) {
-        if (ui->lineEditAiUrl->text() != s) ui->lineEditAiUrl->setText(s);
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->lineEditAiUrl);
+        ui->lineEditAiUrl->setText(settings->commitMessageProviderUrl());
     });
 
     ui->lineEditAiModel->setText(settings->commitMessageModel());
-    connect(ui->lineEditAiModel, &QLineEdit::editingFinished, this, [=]() {
+    connect(ui->lineEditAiModel, &QLineEdit::textEdited, this, [=](const QString &) {
+        m_pending.markDirty();
+    });
+    m_pending.addApply([=]() {
         settings->setCommitMessageModel(ui->lineEditAiModel->text().trimmed());
     });
-    connect(settings, &ApplicationSettings::commitMessageModelChanged, this, [=](const QString &s) {
-        if (ui->lineEditAiModel->text() != s) ui->lineEditAiModel->setText(s);
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->lineEditAiModel);
+        ui->lineEditAiModel->setText(settings->commitMessageModel());
     });
 
     // API key — the value itself never round-trips through the UI. The line
@@ -532,51 +621,77 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
 
     ui->plainTextEditAiPromptTemplate->setPlainText(settings->commitMessagePromptTemplate());
     connect(ui->plainTextEditAiPromptTemplate, &QPlainTextEdit::textChanged, this, [=]() {
-        const QString cur = ui->plainTextEditAiPromptTemplate->toPlainText();
-        if (cur != settings->commitMessagePromptTemplate()) {
-            settings->setCommitMessagePromptTemplate(cur);
-        }
+        m_pending.markDirty();
     });
-    connect(settings, &ApplicationSettings::commitMessagePromptTemplateChanged, this, [=](const QString &s) {
-        if (ui->plainTextEditAiPromptTemplate->toPlainText() != s) {
-            ui->plainTextEditAiPromptTemplate->setPlainText(s);
-        }
+    m_pending.addApply([=]() {
+        settings->setCommitMessagePromptTemplate(ui->plainTextEditAiPromptTemplate->toPlainText());
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->plainTextEditAiPromptTemplate);
+        ui->plainTextEditAiPromptTemplate->setPlainText(settings->commitMessagePromptTemplate());
     });
     connect(ui->btnAiResetPromptTemplate, &QPushButton::clicked, this, [=]() {
         // setCommitMessagePromptTemplate("") then re-read the default —
         // ApplicationSettings substitutes the built-in default for empty values.
+        const QString previous = settings->commitMessagePromptTemplate();
         settings->remove(QStringLiteral("Ai/CommitMessagePromptTemplate"));
-        ui->plainTextEditAiPromptTemplate->setPlainText(settings->commitMessagePromptTemplate());
+        const QString def = settings->commitMessagePromptTemplate();
+        settings->setCommitMessagePromptTemplate(previous);
+        ui->plainTextEditAiPromptTemplate->setPlainText(def);
+        m_pending.markDirty();
     });
 
     ui->spinBoxAiDiffBudget->setValue(settings->commitMessageDiffByteBudget());
-    connect(ui->spinBoxAiDiffBudget, QOverload<int>::of(&QSpinBox::valueChanged),
-            settings, &ApplicationSettings::setCommitMessageDiffByteBudget);
-    connect(settings, &ApplicationSettings::commitMessageDiffByteBudgetChanged,
-            ui->spinBoxAiDiffBudget, &QSpinBox::setValue);
+    connect(ui->spinBoxAiDiffBudget, QOverload<int>::of(&QSpinBox::valueChanged), this, [=](int) {
+        m_pending.markDirty();
+    });
+    m_pending.addApply([=]() {
+        settings->setCommitMessageDiffByteBudget(ui->spinBoxAiDiffBudget->value());
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->spinBoxAiDiffBudget);
+        ui->spinBoxAiDiffBudget->setValue(settings->commitMessageDiffByteBudget());
+    });
 
     ui->spinBoxAiRulesBudget->setValue(settings->commitMessageRulesByteBudget());
-    connect(ui->spinBoxAiRulesBudget, QOverload<int>::of(&QSpinBox::valueChanged),
-            settings, &ApplicationSettings::setCommitMessageRulesByteBudget);
-    connect(settings, &ApplicationSettings::commitMessageRulesByteBudgetChanged,
-            ui->spinBoxAiRulesBudget, &QSpinBox::setValue);
+    connect(ui->spinBoxAiRulesBudget, QOverload<int>::of(&QSpinBox::valueChanged), this, [=](int) {
+        m_pending.markDirty();
+    });
+    m_pending.addApply([=]() {
+        settings->setCommitMessageRulesByteBudget(ui->spinBoxAiRulesBudget->value());
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->spinBoxAiRulesBudget);
+        ui->spinBoxAiRulesBudget->setValue(settings->commitMessageRulesByteBudget());
+    });
 
     ui->spinBoxAiIdleTimeout->setValue(settings->commitMessageStreamIdleTimeoutSec());
-    connect(ui->spinBoxAiIdleTimeout, QOverload<int>::of(&QSpinBox::valueChanged),
-            settings, &ApplicationSettings::setCommitMessageStreamIdleTimeoutSec);
-    connect(settings, &ApplicationSettings::commitMessageStreamIdleTimeoutSecChanged,
-            ui->spinBoxAiIdleTimeout, &QSpinBox::setValue);
+    connect(ui->spinBoxAiIdleTimeout, QOverload<int>::of(&QSpinBox::valueChanged), this, [=](int) {
+        m_pending.markDirty();
+    });
+    m_pending.addApply([=]() {
+        settings->setCommitMessageStreamIdleTimeoutSec(ui->spinBoxAiIdleTimeout->value());
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->spinBoxAiIdleTimeout);
+        ui->spinBoxAiIdleTimeout->setValue(settings->commitMessageStreamIdleTimeoutSec());
+    });
 
     ui->keySequenceEditAiShortcut->setKeySequence(QKeySequence(settings->commitMessageGenerateShortcut()));
-    connect(ui->keySequenceEditAiShortcut, &QKeySequenceEdit::keySequenceChanged, this, [=](const QKeySequence &ks) {
-        settings->setCommitMessageGenerateShortcut(ks.toString(QKeySequence::PortableText));
+    connect(ui->keySequenceEditAiShortcut, &QKeySequenceEdit::keySequenceChanged, this, [=](const QKeySequence &) {
+        m_pending.markDirty();
     });
-    connect(settings, &ApplicationSettings::commitMessageGenerateShortcutChanged, this, [=](const QString &s) {
-        const QKeySequence ks(s);
-        if (ui->keySequenceEditAiShortcut->keySequence() != ks) {
-            ui->keySequenceEditAiShortcut->setKeySequence(ks);
-        }
+    m_pending.addApply([=]() {
+        settings->setCommitMessageGenerateShortcut(
+            ui->keySequenceEditAiShortcut->keySequence().toString(QKeySequence::PortableText));
     });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->keySequenceEditAiShortcut);
+        ui->keySequenceEditAiShortcut->setKeySequence(QKeySequence(settings->commitMessageGenerateShortcut()));
+    });
+
+    UnfocusedWheelFilter::installOnInputs(this);
+    m_pending.clearDirty();
 }
 
 PreferencesDialog::~PreferencesDialog()
@@ -590,26 +705,45 @@ void PreferencesDialog::showApplicationRestartRequired() const
     ui->labelAppRestart->show();
 }
 
-template<typename Func1, typename Func2, typename Func3>
-void PreferencesDialog::MapSettingToCheckBox(QCheckBox *checkBox, Func1 getter, Func2 setter, Func3 notifier) const
+void PreferencesDialog::hideApplicationRestartRequired() const
 {
-    // Get the value and set the checkbox state
-    checkBox->setChecked(std::bind(getter, settings)());
+    ui->labelAppRestartIcon->hide();
+    ui->labelAppRestart->hide();
+}
 
-    // Set up two way connection
-    connect(settings, notifier, checkBox, &QCheckBox::setChecked);
-    connect(checkBox, &QCheckBox::toggled, settings, setter);
+void PreferencesDialog::accept()
+{
+    if (m_pending.isDirty())
+        m_pending.apply();
+    QDialog::accept();
+}
+
+void PreferencesDialog::reject()
+{
+    if (m_pending.isDirty()) {
+        const auto result = QMessageBox::question(
+            this,
+            tr("Unsaved Changes"),
+            tr("Discard unsaved changes?"),
+            QMessageBox::Discard | QMessageBox::Cancel,
+            QMessageBox::Cancel);
+        if (result != QMessageBox::Discard)
+            return;
+        m_pending.revert();
+    }
+    QDialog::reject();
 }
 
 template<typename Func1, typename Func2, typename Func3>
-void PreferencesDialog::MapSettingToGroupBox(QGroupBox *groupBox, Func1 getter, Func2 setter, Func3 notifier) const
+void PreferencesDialog::MapSettingToCheckBox(QCheckBox *checkBox, Func1 getter, Func2 setter, Func3)
 {
-    // Get the value and set the checkbox state
-    groupBox->setChecked(std::bind(getter, settings)());
+    m_pending.mapCheckBox(checkBox, getter, setter);
+}
 
-    // Set up two way connection
-    connect(settings, notifier, groupBox, &QGroupBox::setChecked);
-    connect(groupBox, &QGroupBox::toggled, settings, setter);
+template<typename Func1, typename Func2, typename Func3>
+void PreferencesDialog::MapSettingToGroupBox(QGroupBox *groupBox, Func1 getter, Func2 setter, Func3)
+{
+    m_pending.mapGroupBox(groupBox, getter, setter);
 }
 
 void PreferencesDialog::populateTranslationComboBox()

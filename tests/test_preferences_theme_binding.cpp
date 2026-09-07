@@ -17,11 +17,8 @@
  */
 
 
-// Exercises the exact Theme combo <-> ApplicationSettings binding code from
-// PreferencesDialog.cpp. We don't construct the full dialog because it pulls in
-// Scintilla and SingleApplication via includes; instead we replicate the four
-// statements verbatim against a freestanding QComboBox + ApplicationSettings.
-// If this passes, the in-dialog binding passes (the code is identical).
+// Exercises the Theme combo <-> ApplicationSettings binding used by
+// PreferencesDialog.cpp: populate immediately, write only on apply().
 
 
 #include <QtTest>
@@ -32,11 +29,10 @@
 #include <QTemporaryDir>
 
 #include "ApplicationSettings.h"
+#include "dialogs/PreferencesPendingEdits.h"
 
 
-// Mirror of the lambdas in PreferencesDialog.cpp — kept literal so they drift
-// together if either is edited.
-static void bindThemeCombo(QComboBox *combo, ApplicationSettings *settings)
+static void bindThemeCombo(QComboBox *combo, ApplicationSettings *settings, PreferencesPendingEdits *pending)
 {
     combo->addItem(QStringLiteral("Follow System"), static_cast<int>(ApplicationSettings::System));
     combo->addItem(QStringLiteral("Light"),         static_cast<int>(ApplicationSettings::Light));
@@ -46,14 +42,12 @@ static void bindThemeCombo(QComboBox *combo, ApplicationSettings *settings)
         combo->setCurrentIndex(themeIndex == -1 ? 0 : themeIndex);
     }
     QObject::connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                     combo, [=](int index) {
-        settings->setTheme(static_cast<ApplicationSettings::ThemeEnum>(
-            combo->itemData(index).toInt()));
+                     combo, [=](int) {
+        pending->markDirty();
     });
-    QObject::connect(settings, &ApplicationSettings::themeChanged,
-                     combo, [=](ApplicationSettings::ThemeEnum t) {
-        int idx = combo->findData(static_cast<int>(t));
-        if (idx != -1) combo->setCurrentIndex(idx);
+    pending->addApply([=]() {
+        settings->setTheme(static_cast<ApplicationSettings::ThemeEnum>(
+            combo->itemData(combo->currentIndex()).toInt()));
     });
 }
 
@@ -68,8 +62,8 @@ private slots:
 
     void combo_hasThreeOptionsInExpectedOrder();
     void combo_initialSelectionMatchesSetting();
-    void combo_changingComboUpdatesSetting();
-    void combo_changingSettingUpdatesCombo();
+    void combo_changingComboDoesNotWriteUntilApply();
+    void combo_applyWritesSetting();
     void combo_initialFallsBackToFirstWhenSettingMissing();
 
 private:
@@ -95,8 +89,9 @@ void TestPreferencesThemeBinding::init()
 void TestPreferencesThemeBinding::combo_hasThreeOptionsInExpectedOrder()
 {
     ApplicationSettings s;
+    PreferencesPendingEdits pending(&s);
     QComboBox combo;
-    bindThemeCombo(&combo, &s);
+    bindThemeCombo(&combo, &s, &pending);
 
     QCOMPARE(combo.count(), 3);
     QCOMPARE(combo.itemData(0).toInt(), static_cast<int>(ApplicationSettings::System));
@@ -109,53 +104,49 @@ void TestPreferencesThemeBinding::combo_initialSelectionMatchesSetting()
     ApplicationSettings s;
     s.setTheme(ApplicationSettings::Dark);
 
+    PreferencesPendingEdits pending(&s);
     QComboBox combo;
-    bindThemeCombo(&combo, &s);
+    bindThemeCombo(&combo, &s, &pending);
 
     QCOMPARE(combo.currentData().toInt(), static_cast<int>(ApplicationSettings::Dark));
 }
 
-void TestPreferencesThemeBinding::combo_changingComboUpdatesSetting()
+void TestPreferencesThemeBinding::combo_changingComboDoesNotWriteUntilApply()
 {
     ApplicationSettings s;
+    PreferencesPendingEdits pending(&s);
     QComboBox combo;
-    bindThemeCombo(&combo, &s);
+    bindThemeCombo(&combo, &s, &pending);
 
-    // Select Dark (index 2).
+    const auto before = s.theme();
     combo.setCurrentIndex(2);
+    QCOMPARE(s.theme(), before);
+    QVERIFY(pending.isDirty());
+}
+
+void TestPreferencesThemeBinding::combo_applyWritesSetting()
+{
+    ApplicationSettings s;
+    PreferencesPendingEdits pending(&s);
+    QComboBox combo;
+    bindThemeCombo(&combo, &s, &pending);
+
+    combo.setCurrentIndex(2);
+    pending.apply();
     QCOMPARE(s.theme(), ApplicationSettings::Dark);
 
-    // Select Light (index 1).
     combo.setCurrentIndex(1);
+    pending.apply();
     QCOMPARE(s.theme(), ApplicationSettings::Light);
-}
-
-void TestPreferencesThemeBinding::combo_changingSettingUpdatesCombo()
-{
-    ApplicationSettings s;
-    QComboBox combo;
-    bindThemeCombo(&combo, &s);
-
-    s.setTheme(ApplicationSettings::Dark);
-    QCOMPARE(combo.currentData().toInt(), static_cast<int>(ApplicationSettings::Dark));
-
-    s.setTheme(ApplicationSettings::Light);
-    QCOMPARE(combo.currentData().toInt(), static_cast<int>(ApplicationSettings::Light));
-
-    s.setTheme(ApplicationSettings::System);
-    QCOMPARE(combo.currentData().toInt(), static_cast<int>(ApplicationSettings::System));
 }
 
 void TestPreferencesThemeBinding::combo_initialFallsBackToFirstWhenSettingMissing()
 {
-    // Default ApplicationSettings (System).
     ApplicationSettings s;
+    PreferencesPendingEdits pending(&s);
     QComboBox combo;
-    bindThemeCombo(&combo, &s);
+    bindThemeCombo(&combo, &s, &pending);
 
-    // System maps to index 0; the fallback branch is exercised when findData() == -1,
-    // which can't happen for legal enum values — assert that the fallback path keeps
-    // index 0 by binding against a setting that resolves to System.
     QCOMPARE(combo.currentIndex(), 0);
 }
 

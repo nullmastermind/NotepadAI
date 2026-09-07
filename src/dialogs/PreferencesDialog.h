@@ -21,6 +21,7 @@
 #define PREFERENCESDIALOG_H
 
 #include "ApplicationSettings.h"
+#include "PreferencesPendingEdits.h"
 
 #include <QDialog>
 #include <QCheckBox>
@@ -42,20 +43,27 @@ public:
 
     void showApplicationRestartRequired() const;
 
+public slots:
+    void accept() override;
+    void reject() override;
+
 private:
     Ui::PreferencesDialog *ui;
     ApplicationSettings *settings;
+    PreferencesPendingEdits m_pending;
+    QString m_pendingTerminalFont;
 
     template <typename Func1, typename Func2, typename Func3>
-    void MapSettingToCheckBox(QCheckBox *checkBox, Func1 getter, Func2 setter, Func3 notifier) const;
+    void MapSettingToCheckBox(QCheckBox *checkBox, Func1 getter, Func2 setter, Func3 notifier);
 
     template <typename Func1, typename Func2, typename Func3>
-    void MapSettingToGroupBox(QGroupBox *groupBox, Func1 getter, Func2 setter, Func3 notifier) const;
+    void MapSettingToGroupBox(QGroupBox *groupBox, Func1 getter, Func2 setter, Func3 notifier);
 
     void populateTranslationComboBox();
 
     void writeBootstrapDataDir(const QString &baseDir);
     void offerRestart();
+    void hideApplicationRestartRequired() const;
 };
 
 #endif // PREFERENCESDIALOG_H

@@ -45,6 +45,22 @@ target_sources(test_preferences_ai_format_binding PRIVATE
 )
 add_test(NAME PreferencesAiFormatBinding COMMAND test_preferences_ai_format_binding)
 
+# --- PreferencesPendingEdits: widget edits stay local until apply() ---
+qt_add_executable(test_preferences_pending_edits test_preferences_pending_edits.cpp)
+target_include_directories(test_preferences_pending_edits PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_preferences_pending_edits PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_preferences_pending_edits PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
+)
+add_test(NAME PreferencesPendingEdits COMMAND test_preferences_pending_edits)
+
+# --- UnfocusedWheelFilter: combo/spin ignore wheel unless focused ---
+qt_add_executable(test_unfocused_wheel_filter test_unfocused_wheel_filter.cpp)
+target_include_directories(test_unfocused_wheel_filter PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_unfocused_wheel_filter PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+add_test(NAME UnfocusedWheelFilter COMMAND test_unfocused_wheel_filter)
+
 # --- chooseStylesheetResource: pure picker, only depends on QString ---
 qt_add_executable(test_stylesheet_resource test_stylesheet_resource.cpp)
 target_include_directories(test_stylesheet_resource PRIVATE ${CMAKE_SOURCE_DIR}/src)

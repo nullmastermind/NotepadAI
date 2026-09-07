@@ -272,6 +272,8 @@ qt_add_executable(NotepadAI
 	dialogs/PreferencesDialog.cpp
 	dialogs/PreferencesDialog.h
 	dialogs/PreferencesDialog.ui
+	dialogs/PreferencesPendingEdits.h
+	dialogs/UnfocusedWheelFilter.h
 	dialogs/SshConnectionManagerDialog.cpp
 	dialogs/SshConnectionManagerDialog.h
 	dialogs/SshConnectDialog.cpp
