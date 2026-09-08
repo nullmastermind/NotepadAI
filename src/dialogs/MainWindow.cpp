@@ -3270,7 +3270,9 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             zipMenu->addMenu(dlMenu);
             zipMenu->addMenu(ulMenu);
 
-            connect(zipSave, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
+            connect(zipSave, &QAction::triggered, this,
+                    [this, dock = QPointer<FolderAsWorkspaceDock>(dock), absPath, isSshDock,
+                     zip = QPointer<FolderZipTransfer>(zip)]() {
                 if (!zip || !dock) return;
                 QString folderPath;
                 QString folderName;
@@ -3292,14 +3294,16 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                     this, tr("Save ZIP"),
                     QDir::homePath() + QLatin1Char('/') + folderName + QStringLiteral(".zip"),
                     tr("ZIP archives (*.zip)"));
-                if (dest.isEmpty()) return;
+                if (dest.isEmpty() || !zip || !dock) return;
                 if (isSshDock)
                     zip->downloadRemote(workspaceRoot, folderPath, dest);
                 else
                     zip->downloadLocal(workspaceRoot, folderPath, dest);
             });
 
-            connect(zipShare, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
+            connect(zipShare, &QAction::triggered, this,
+                    [this, dock = QPointer<FolderAsWorkspaceDock>(dock), absPath, isSshDock,
+                     zip = QPointer<FolderZipTransfer>(zip)]() {
                 if (!zip || !dock) return;
                 QString folderPath;
                 QString folderName;
@@ -3321,11 +3325,13 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 flow->shareFolder(zip, workspaceRoot, folderPath, folderName, isSshDock);
             });
 
-            connect(zipFromFile, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
+            connect(zipFromFile, &QAction::triggered, this,
+                    [this, dock = QPointer<FolderAsWorkspaceDock>(dock), absPath, isSshDock,
+                     zip = QPointer<FolderZipTransfer>(zip)]() {
                 if (!zip || !dock) return;
                 const QString zipFile = QFileDialog::getOpenFileName(
                     this, tr("Open ZIP"), QDir::homePath(), tr("ZIP archives (*.zip)"));
-                if (zipFile.isEmpty()) return;
+                if (zipFile.isEmpty() || !zip || !dock) return;
                 if (isSshDock) {
                     const remote::SshUri uri = remote::parseSshUri(absPath);
                     if (!uri.valid) return;
@@ -3335,7 +3341,9 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 }
             });
 
-            connect(zipFromPhrase, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
+            connect(zipFromPhrase, &QAction::triggered, this,
+                    [this, dock = QPointer<FolderAsWorkspaceDock>(dock), absPath, isSshDock,
+                     zip = QPointer<FolderZipTransfer>(zip)]() {
                 if (!zip || !dock) return;
                 const QString folderPath = isSshDock
                     ? remote::parseSshUri(absPath).remotePath

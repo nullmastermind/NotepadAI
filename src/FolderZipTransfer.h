@@ -27,6 +27,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 
 #include "remote/GitignoreMatcher.h"
 
@@ -48,6 +49,7 @@ public:
 
     bool isBusy() const { return m_busy; }
     void setRemoteBackend(remote::RemoteFsBackend *backend);
+    void reportZipProgress(int current, int total, const QString &currentFile);
 
     void downloadLocal(const QString &workspaceRoot, const QString &selectedFolder,
                        const QString &destZip);
@@ -99,6 +101,8 @@ private:
 
     bool m_busy = false;
     std::atomic<bool> m_cancelled{false};
+    std::shared_ptr<std::atomic<bool>> m_cancelFlag;
+    std::shared_ptr<struct ZipProgressSink> m_progressSink;
     QPointer<remote::RemoteFsBackend> m_backend;
 
     QString m_partialPath;

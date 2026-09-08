@@ -142,6 +142,7 @@ QProgressDialog *CrocShareFlow::loading(const QString &text)
     dlg->show();
     connect(dlg, &QProgressDialog::canceled, this, [this]() {
         closeLoading();
+        m_croc->disconnect(this);
         m_croc->cancel();
         if (m_zip)
             m_zip->cancel();
@@ -153,8 +154,10 @@ QProgressDialog *CrocShareFlow::loading(const QString &text)
 
 void CrocShareFlow::ensureThen(const std::function<void()> &next)
 {
-    auto *load = loading(tr("Looking for croc…"));
+    QPointer<QProgressDialog> load = loading(tr("Looking for croc…"));
     connect(m_croc, &CrocTool::binaryReady, this, [this, next, load](const QString &) {
+        if (!load)
+            return;
         load->disconnect();
         load->hide();
         load->deleteLater();
@@ -176,7 +179,13 @@ void CrocShareFlow::shareFolder(FolderZipTransfer *zip, const QString &workspace
         return;
     }
     m_zipPath = QDir(m_tmp->path()).filePath(folderName + QStringLiteral(".zip"));
-    ensureThen([this, zip, workspaceRoot, folderPath, ssh]() {
+    ensureThen([this, workspaceRoot, folderPath, ssh]() {
+        FolderZipTransfer *zip = m_zip;
+        if (!zip) {
+            cleanupTemp();
+            deleteLater();
+            return;
+        }
         connect(zip, &FolderZipTransfer::transferCompleted, this, [this](int) {
             auto *load = loading(tr("Sharing with croc…"));
             Q_UNUSED(load);

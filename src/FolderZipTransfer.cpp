@@ -27,6 +27,7 @@
 
 #include <memory>
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -38,7 +39,24 @@
 #include <QTemporaryFile>
 #include <QtConcurrent>
 
+struct ZipProgressSink {
+    std::atomic<bool> alive{true};
+    FolderZipTransfer *target = nullptr;
+};
+
 namespace {
+
+void postZipProgress(const std::shared_ptr<ZipProgressSink> &sink, int n, int total, const QString &name)
+{
+    QCoreApplication *app = QCoreApplication::instance();
+    if (!app || !sink)
+        return;
+    QMetaObject::invokeMethod(app, [sink, n, total, name]() {
+        if (!sink->alive.load() || !sink->target)
+            return;
+        sink->target->reportZipProgress(n, total, name);
+    }, Qt::QueuedConnection);
+}
 
 ZipPath::DestOs destOs()
 {
@@ -91,6 +109,14 @@ FolderZipTransfer::FolderZipTransfer(QObject *parent)
 FolderZipTransfer::~FolderZipTransfer()
 {
     m_cancelled.store(true);
+    if (m_cancelFlag)
+        m_cancelFlag->store(true);
+    if (m_progressSink) {
+        m_progressSink->alive.store(false);
+        m_progressSink->target = nullptr;
+    }
+    if (!m_partialPath.isEmpty())
+        QFile::remove(m_partialPath);
     cleanupWriter();
 }
 
@@ -99,12 +125,20 @@ void FolderZipTransfer::setRemoteBackend(remote::RemoteFsBackend *backend)
     m_backend = backend;
 }
 
+void FolderZipTransfer::reportZipProgress(int current, int total, const QString &currentFile)
+{
+    emit progressUpdated(current, total, 0, 0, currentFile, 0);
+}
+
 bool FolderZipTransfer::beginBusy()
 {
     if (m_busy)
         return false;
     m_busy = true;
     m_cancelled.store(false);
+    m_cancelFlag = std::make_shared<std::atomic<bool>>(false);
+    m_progressSink = std::make_shared<ZipProgressSink>();
+    m_progressSink->target = this;
     m_walkFailed = false;
     m_pendingWalk = 0;
     m_remoteFiles.clear();
@@ -159,6 +193,8 @@ void FolderZipTransfer::cancel()
     if (!m_busy)
         return;
     m_cancelled.store(true);
+    if (m_cancelFlag)
+        m_cancelFlag->store(true);
     if (!m_partialPath.isEmpty())
         QFile::remove(m_partialPath);
     finishIdle();
@@ -170,19 +206,17 @@ void FolderZipTransfer::downloadLocal(const QString &workspaceRoot, const QStrin
 {
     if (!beginBusy())
         return;
-    const QString root = workspaceRoot;
-    const QString sel = selectedFolder;
-    const QString dest = destZip;
-    m_destZip = dest;
-    m_partialPath = dest + QStringLiteral(".partial");
+    m_destZip = destZip;
+    m_partialPath = destZip + QStringLiteral(".partial");
     const QString partial = m_partialPath;
     QFile::remove(partial);
     emit progressUpdated(0, 0, 0, 0, tr("Preparing zip…"), 0);
 
     auto *watcher = new QFutureWatcher<QString>(this);
-    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, dest, partial]() {
+    QPointer<FolderZipTransfer> guard(this);
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, guard, watcher, destZip, partial]() {
         watcher->deleteLater();
-        if (m_cancelled.load()) {
+        if (guard.isNull() || m_cancelled.load()) {
             QFile::remove(partial);
             return;
         }
@@ -202,19 +236,21 @@ void FolderZipTransfer::downloadLocal(const QString &workspaceRoot, const QStrin
             fail(err);
             return;
         }
-        QFile::remove(dest);
-        if (!QFile::rename(partial, dest)) {
+        QFile::remove(destZip);
+        if (!QFile::rename(partial, destZip)) {
             fail(tr("Could not write zip file"));
             return;
         }
         m_partialPath.clear();
         succeed(0);
     });
-    watcher->setFuture(QtConcurrent::run([this, root, sel, dest, partial]() -> QString {
-        const QList<ZipIgnoreWalk::File> files = ZipIgnoreWalk::walkLocalFolder(root, sel);
+    const auto cancelled = m_cancelFlag;
+    const auto progress = m_progressSink;
+    watcher->setFuture(QtConcurrent::run([cancelled, progress, workspaceRoot, selectedFolder, destZip, partial]() -> QString {
+        const QList<ZipIgnoreWalk::File> files = ZipIgnoreWalk::walkLocalFolder(workspaceRoot, selectedFolder);
         QList<ZipIgnoreWalk::File> kept;
         kept.reserve(files.size());
-        const QString destClean = QDir::cleanPath(dest);
+        const QString destClean = QDir::cleanPath(destZip);
         const QString partialClean = QDir::cleanPath(partial);
         for (const ZipIgnoreWalk::File &f : files) {
             const QString p = QDir::cleanPath(f.absPath);
@@ -224,7 +260,7 @@ void FolderZipTransfer::downloadLocal(const QString &workspaceRoot, const QStrin
         }
         if (kept.isEmpty())
             return QStringLiteral("empty");
-        if (m_cancelled.load())
+        if (cancelled && cancelled->load())
             return QStringLiteral("cancelled");
 
         ZipWriter writer;
@@ -233,18 +269,14 @@ void FolderZipTransfer::downloadLocal(const QString &workspaceRoot, const QStrin
         const int total = kept.size();
         for (int i = 0; i < total; ++i) {
             const ZipIgnoreWalk::File &f = kept.at(i);
-            if (m_cancelled.load()) {
+            if (cancelled && cancelled->load()) {
                 writer.abort();
                 QFile::remove(partial);
                 return QStringLiteral("cancelled");
             }
             const int n = i + 1;
-            const QString name = f.entryName;
-            if (shouldReportProgress(n, total)) {
-                QMetaObject::invokeMethod(this, [this, n, total, name]() {
-                    emit progressUpdated(n, total, 0, 0, name, 0);
-                }, Qt::QueuedConnection);
-            }
+            if (shouldReportProgress(n, total))
+                postZipProgress(progress, n, total, f.entryName);
             if (!writer.addFile(f.absPath, f.entryName)) {
                 writer.abort();
                 return writer.errorString();
@@ -351,8 +383,6 @@ void FolderZipTransfer::uploadLocal(const QString &zipPath, const QString &selec
         return;
     }
 
-    const QString zip = zipPath;
-    const QString sel = selectedFolder;
     QPointer<FolderZipTransfer> guard(this);
     auto *watcher = new QFutureWatcher<QString>(this);
     connect(watcher, &QFutureWatcher<QString>::finished, this, [this, guard, watcher]() {
@@ -371,27 +401,25 @@ void FolderZipTransfer::uploadLocal(const QString &zipPath, const QString &selec
         }
         succeed(0);
     });
-    watcher->setFuture(QtConcurrent::run([this, zip, sel, items]() -> QString {
+    const auto cancelled = m_cancelFlag;
+    const auto progress = m_progressSink;
+    watcher->setFuture(QtConcurrent::run([cancelled, progress, zipPath, selectedFolder, items]() -> QString {
         ZipReader reader;
-        if (!reader.open(zip))
+        if (!reader.open(zipPath))
             return reader.errorString();
         const int total = items.size();
         for (int i = 0; i < total; ++i) {
             const ExtractItem &it = items.at(i);
-            if (m_cancelled.load())
+            if (cancelled && cancelled->load())
                 return QStringLiteral("cancelled");
             const int n = i + 1;
-            const QString name = it.destRel;
-            if (shouldReportProgress(n, total)) {
-                QMetaObject::invokeMethod(this, [this, n, total, name]() {
-                    emit progressUpdated(n, total, 0, 0, name, 0);
-                }, Qt::QueuedConnection);
-            }
-            const QString dest = QDir::cleanPath(QDir(sel).filePath(it.destRel));
-            if (!ZipPath::isSafeExtractDest(sel, dest))
+            if (shouldReportProgress(n, total))
+                postZipProgress(progress, n, total, it.destRel);
+            const QString dest = QDir::cleanPath(QDir(selectedFolder).filePath(it.destRel));
+            if (!ZipPath::isSafeExtractDest(selectedFolder, dest))
                 continue;
             QDir().mkpath(QFileInfo(dest).absolutePath());
-            if (!ZipPath::isSafeExtractDest(sel, dest))
+            if (!ZipPath::isSafeExtractDest(selectedFolder, dest))
                 continue;
             if (!reader.extractToFile(it.zipEntry, dest))
                 return reader.errorString();

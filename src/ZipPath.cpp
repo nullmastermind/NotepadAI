@@ -40,7 +40,7 @@ QString detectCommonPrefix(const QStringList &entryNames)
     const int slash = first.indexOf(QLatin1Char('/'));
     if (slash <= 0)
         return {};
-    const QString candidate = first.left(slash + 1);
+    QString candidate = first.left(slash + 1);
     for (const QString &raw : entryNames) {
         if (!normalizeZipEntryName(raw).startsWith(candidate))
             return {};

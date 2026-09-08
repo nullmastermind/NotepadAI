@@ -261,10 +261,22 @@ void CrocTool::tryPackageManager()
         return;
     }
     m_busy = true;
-    auto *p = new QProcess(this);
-    connect(p, &QProcess::finished, this, [this, p](int code, QProcess::ExitStatus) {
-        p->deleteLater();
+    if (m_proc) {
+        m_proc->disconnect();
+        m_proc->kill();
+        m_proc->deleteLater();
+        m_proc = nullptr;
+    }
+    m_userCancelled = false;
+    m_proc = new QProcess(this);
+    connect(m_proc, &QProcess::finished, this, [this](int code, QProcess::ExitStatus) {
+        if (m_proc) {
+            m_proc->deleteLater();
+            m_proc = nullptr;
+        }
         m_busy = false;
+        if (m_userCancelled)
+            return;
         const QString onPath = QStandardPaths::findExecutable(QStringLiteral("croc"));
         if (code == 0 && !onPath.isEmpty()) {
             m_binary = onPath;
@@ -273,10 +285,18 @@ void CrocTool::tryPackageManager()
         }
         tryGitHub();
     });
-    p->start(prog, args);
-    if (!p->waitForStarted(5000)) {
-        p->deleteLater();
+    m_proc->start(prog, args);
+    if (!m_proc->waitForStarted(5000)) {
+        if (!m_proc) {
+            m_busy = false;
+            return;
+        }
+        m_proc->disconnect();
+        m_proc->deleteLater();
+        m_proc = nullptr;
         m_busy = false;
+        if (m_userCancelled)
+            return;
         tryGitHub();
     }
 }
@@ -528,13 +548,20 @@ void CrocTool::startProcess(const QStringList &args, const QString &workingDir, 
     m_proc->setProcessEnvironment(env);
     m_proc->start(m_binary, args);
     if (!m_proc->waitForStarted(8000)) {
+        if (!m_proc) {
+            m_busy = false;
+            return;
+        }
         const QString err = m_proc->errorString();
         m_proc->deleteLater();
         m_proc = nullptr;
         m_busy = false;
-        emit processFailed(tr("Could not start croc: %1").arg(err));
+        if (!m_userCancelled)
+            emit processFailed(tr("Could not start croc: %1").arg(err));
         return;
     }
+    if (!m_proc)
+        return;
     m_proc->closeWriteChannel();
     if (!m_sendMode)
         m_handshakeTimer->start();
