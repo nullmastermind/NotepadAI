@@ -19,7 +19,7 @@
 #ifndef TERMINALDOCK_H
 #define TERMINALDOCK_H
 
-#include <QDockWidget>
+#include <QWidget>
 #include <QPointer>
 #include <QString>
 #include <QStringList>
@@ -28,7 +28,7 @@ class QToolButton;
 class TerminalWidget;
 namespace remote { class ExecutionContext; }
 
-class TerminalDock : public QDockWidget
+class TerminalDock : public QWidget
 {
     Q_OBJECT
 
@@ -50,8 +50,10 @@ public:
     void setCwdWarning(const QString &warning) { m_cwdWarning = warning; }
     void restartTask();
 
-protected:
-    void closeEvent(QCloseEvent *event) override;
+    // Prompt if a process is still running. Returns false when the user cancels.
+    bool confirmClose();
+    // Raise the hosting ADS dock widget (this is no longer a QDockWidget).
+    void reveal();
 
 private:
     void init(const QString &shell, const QString &cwd);

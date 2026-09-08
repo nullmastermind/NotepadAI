@@ -19,6 +19,7 @@
 
 #include "DockedEditor.h"
 #include "DockAreaSanitizer.h"
+#include "DockBottomToolTab.h"
 #include "DockAreaTabBar.h"
 #include "DockAreaWidget.h"
 #include "DockWidgetTab.h"
@@ -157,8 +158,9 @@ int DockedEditor::count() const
 
     for (int i = 0; i < dockManager->dockAreaCount(); ++i) {
         for (const ads::CDockWidget *dw : dockManager->dockArea(i)->dockWidgets()) {
-            if (!dw->property("nn_previewTab").toBool())
-                ++total;
+            if (dw->property("nn_previewTab").toBool() || dw->property("nn_toolTab").toBool())
+                continue;
+            ++total;
         }
     }
 
@@ -167,32 +169,10 @@ int DockedEditor::count() const
 
 int DockedEditor::totalTabCount() const
 {
-    // Counts every tab of every kind — editors AND nn_previewTab tabs (preview,
-    // browser, mini-apps, future kinds) — so it answers "is the editor area
-    // empty?" with no per-type branching: a new tab kind is counted for free.
-    //
-    // We iterate dockContainers() (the main dock manager container PLUS every
-    // floating container), NOT just the main container's dockAreaCount(). Today
-    // all tab types clear DockWidgetFloatable so none can be torn out into a
-    // floating window — but counting only the main container would silently
-    // undercount the instant any future tab type is made floatable, reopening
-    // the spurious-"New 1" bug in a way that's painful to trace. Iterating all
-    // containers makes the count correct regardless of the floatable flag.
-    //
-    // dockWidgetsCount() (the raw layout count) is correct here rather than
-    // openDockWidgetsCount() (which filters !isClosed()): both our tab kinds set
-    // DockWidgetDeleteOnClose, so a closed tab is REMOVED from the layout, never
-    // left hidden-but-present. There is therefore no closed-but-undeleted
-    // phantom to overcount, and this avoids a per-widget isClosed() scan. Each
-    // dockWidgetsCount() is O(1) (a layout count), so this stays a cheap walk.
-    int total = 0;
-
-    for (const ads::CDockContainerWidget *container : dockManager->dockContainers()) {
-        for (int i = 0; i < container->dockAreaCount(); ++i)
-            total += container->dockArea(i)->dockWidgetsCount();
-    }
-
-    return total;
+    // Content tabs only: editors + nn_previewTab (preview/browser/mini-app).
+    // nn_toolTab (terminal) is a split pane, not a content tab — closing the
+    // last editor with a terminal open must still spawn "New X".
+    return nonToolTabCount(dockManager);
 }
 
 ScintillaNext *DockedEditor::initialEditor() const
@@ -259,7 +239,11 @@ void DockedEditor::dockWidgetCloseRequested()
 ads::CDockAreaWidget *DockedEditor::currentDockArea() const
 {
     ads::CDockWidget *focused = dockManager->focusedDockWidget();
-    ads::CDockAreaWidget *area = focused ? focused->dockAreaWidget() : latestDockArea.data();
+    ads::CDockAreaWidget *area = nullptr;
+    if (focused && !focused->property("nn_toolTab").toBool())
+        area = focused->dockAreaWidget();
+    else
+        area = latestDockArea.data();
 
     // Collapse a detached-but-not-yet-destroyed area to nullptr (see
     // sanitizeDockArea / DockAreaSanitizer.h for why this prevents the
@@ -328,7 +312,8 @@ void DockedEditor::addEditor(ScintillaNext *editor)
 
     connect(dockWidget, &ads::CDockWidget::closeRequested, this, &DockedEditor::dockWidgetCloseRequested);
 
-    latestDockArea = dockManager->addDockWidget(ads::CenterDockWidgetArea, dockWidget, currentDockArea());
+    latestDockArea = addDockWidgetAsContent(dockManager, dockWidget, currentDockArea(),
+                                            findToolDockArea(dockManager));
 
     emit editorAdded(editor);
 }
@@ -439,12 +424,34 @@ ads::CDockWidget *DockedEditor::addPreviewTab(QWidget *widget, const QString &ti
     return dockWidget;
 }
 
+ads::CDockWidget *DockedEditor::addBottomToolTab(QWidget *widget, const QString &title, const QIcon &icon)
+{
+    ads::CDockWidget *dockWidget = dockManager->createDockWidget(title);
+    dockWidget->setObjectName(QUuid::createUuid().toString());
+    dockWidget->setWidget(widget);
+    dockWidget->setProperty("nn_toolTab", true);
+    dockWidget->setFeature(ads::CDockWidget::DockWidgetFeature::DockWidgetDeleteOnClose, true);
+    dockWidget->setFeature(ads::CDockWidget::DockWidgetFeature::DockWidgetFloatable, false);
+
+    auto *tab = dockWidget->tabWidget();
+    tab->setElideMode(Qt::ElideRight);
+    tab->setToolTip(title);
+    connect(dockWidget, &QWidget::windowTitleChanged, tab, &QWidget::setToolTip);
+    if (!icon.isNull())
+        tab->setIcon(icon);
+
+    ads::CDockAreaWidget *existingTool = findToolDockArea(dockManager);
+
+    addDockWidgetAsBottomTool(dockManager, dockWidget, currentDockArea(), existingTool);
+    return dockWidget;
+}
+
 void DockedEditor::closeFocusedTab()
 {
     ads::CDockWidget *focused = dockManager->focusedDockWidget();
     if (!focused) return;
 
-    if (focused->property("nn_previewTab").toBool()) {
+    if (focused->property("nn_previewTab").toBool() || focused->property("nn_toolTab").toBool()) {
         focused->requestCloseDockWidget();
     } else {
         ScintillaNext *editor = qobject_cast<ScintillaNext *>(focused->widget());

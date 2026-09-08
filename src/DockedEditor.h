@@ -52,15 +52,13 @@ public:
 
     void switchToEditor(const ScintillaNext *editor);
 
-    // Number of real editors only (excludes preview/browser/mini-app tabs).
+    // Number of real editors only (excludes preview/browser/mini-app/tool tabs).
     int count() const;
 
-    // Number of tabs of EVERY kind currently in the center dock area —
-    // editors plus all `nn_previewTab` tabs (preview, browser, mini-apps, and
-    // any future tab type routed through the same dock manager). Use this, not
-    // count(), to decide whether the editor area is truly empty (e.g. whether
-    // to spawn a fresh "New X" buffer). New tab kinds are counted automatically
-    // as long as they are added through addEditor()/addPreviewTab().
+    // Number of content tabs: editors plus `nn_previewTab` (preview, browser,
+    // mini-apps). Excludes `nn_toolTab` (terminal) — a remaining terminal must
+    // not suppress spawning "New X" when the last editor closes. Use this, not
+    // count(), for empty-area decisions.
     int totalTabCount() const;
 
     // The single reusable "initial" editor — an unedited, pristine "New X"
@@ -84,6 +82,12 @@ public:
     void pinPreviewEditor();
 
     ads::CDockWidget *addPreviewTab(QWidget *widget, const QString &title, const QIcon &icon);
+
+    // VS Code-style bottom tool (terminal): splits below the current editor
+    // area inside this ADS manager. A second tool tabifies with the first.
+    // Does not steal latestDockArea, so the next editor stays in the editor strip.
+    ads::CDockWidget *addBottomToolTab(QWidget *widget, const QString &title, const QIcon &icon);
+
     void closeFocusedTab();
 
     void splitToRight(ScintillaNext *editor);
@@ -113,10 +117,8 @@ signals:
     void previewTabActivated(QWidget *widget);
     void previewEditorSet();
 
-    // Emitted after the LAST tab of ANY kind (editor or nn_previewTab) is
-    // removed from the dock manager, i.e. totalTabCount() just hit 0. The one
-    // type-agnostic signal callers use to react to "the editor area is now
-    // empty" — a new tab kind needs no new signal.
+    // Emitted after the last CONTENT tab (editor or nn_previewTab) is removed,
+    // i.e. totalTabCount() just hit 0. Tool tabs (terminal) do not count.
     void lastTabClosed();
 
     void contextMenuRequestedForEditor(ScintillaNext *editor);

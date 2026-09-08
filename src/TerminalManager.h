@@ -68,6 +68,7 @@ public slots:
 
 private:
     void wireContextMenu(TerminalDock *dock);
+    void placeInEditor(TerminalDock *dock);
 
     NotepadNextApplication *m_app;
     MainWindow *m_mainWindow;

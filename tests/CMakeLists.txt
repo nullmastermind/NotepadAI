@@ -85,6 +85,12 @@ target_sources(test_terminal_cwd_resolver PRIVATE
 )
 add_test(NAME TerminalCwdResolver COMMAND test_terminal_cwd_resolver)
 
+# --- terminalTabTitle: cwd as the ADS tab label, never the PTY process image ---
+qt_add_executable(test_terminal_tab_title test_terminal_tab_title.cpp)
+target_include_directories(test_terminal_tab_title PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_terminal_tab_title PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME TerminalTabTitle COMMAND test_terminal_tab_title)
+
 # --- TerminalColorScheme: light/dark palette validity ---
 qt_add_executable(test_terminal_color_scheme test_terminal_color_scheme.cpp)
 target_include_directories(test_terminal_color_scheme PRIVATE ${CMAKE_SOURCE_DIR}/src/widgets)
@@ -1096,6 +1102,19 @@ target_sources(test_docked_editor_current_area PRIVATE
     ${CMAKE_SOURCE_DIR}/src/DockAreaSanitizer.h
 )
 add_test(NAME DockedEditorCurrentArea COMMAND test_docked_editor_current_area)
+
+# --- addDockWidgetAsBottomTool: VS Code-style split of a tool tab (terminal)
+#     below the editor area inside the same ADS manager. Real CDockManager so
+#     the Center-vs-Bottom placement is the actual ADS layout, not a stub. ---
+qt_add_executable(test_dock_bottom_tool_tab test_dock_bottom_tool_tab.cpp)
+target_include_directories(test_dock_bottom_tool_tab PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_dock_bottom_tool_tab PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test qtadvanceddocking-qt6)
+target_sources(test_dock_bottom_tool_tab PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/DockBottomToolTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/DockBottomToolTab.h
+)
+add_test(NAME DockBottomToolTab COMMAND test_dock_bottom_tool_tab)
 
 # --- DockTabContextMenu: tab-order resolution for Qt's internal dock tab bar
 #     plus the per-scope close-target decision (close / others / left / right /

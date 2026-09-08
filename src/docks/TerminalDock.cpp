@@ -17,22 +17,23 @@
  */
 
 #include "TerminalDock.h"
+#include "TerminalTabTitle.h"
 #include "TerminalWidget.h"
 
 #include "remote/ExecutionContext.h"
 #include "remote/RemoteExecutionContext.h"
 
-#include <QCloseEvent>
-#include <QDir>
-#include <QFileInfo>
+#include "DockWidget.h"
+
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
 #include <QToolButton>
+#include <QVBoxLayout>
 #include <QWidget>
 
 TerminalDock::TerminalDock(const QString &shell, const QString &cwd, QWidget *parent)
-    : QDockWidget(parent)
+    : QWidget(parent)
     , m_initialCwd(cwd)
     , m_shell(shell)
 {
@@ -40,7 +41,7 @@ TerminalDock::TerminalDock(const QString &shell, const QString &cwd, QWidget *pa
 }
 
 TerminalDock::TerminalDock(const QString &shell, const QString &cwd, const QString &taskCommand, const QString &taskName, const QStringList &env, QWidget *parent)
-    : QDockWidget(parent)
+    : QWidget(parent)
     , m_initialCwd(cwd)
     , m_shell(shell)
     , m_taskCommand(taskCommand)
@@ -53,7 +54,7 @@ TerminalDock::TerminalDock(const QString &shell, const QString &cwd, const QStri
 }
 
 TerminalDock::TerminalDock(remote::ExecutionContext *ctx, const QString &shell, const QString &cwd, QWidget *parent)
-    : QDockWidget(parent)
+    : QWidget(parent)
     , m_initialCwd(cwd)
     , m_shell(shell)
     , m_context(ctx)
@@ -63,7 +64,7 @@ TerminalDock::TerminalDock(remote::ExecutionContext *ctx, const QString &shell, 
 
 TerminalDock::TerminalDock(remote::ExecutionContext *ctx, const QString &remoteCwd,
                            const QString &taskCommand, const QString &taskName, QWidget *parent)
-    : QDockWidget(parent)
+    : QWidget(parent)
     , m_initialCwd(remoteCwd)
     , m_shell(QString()) // remote default $SHELL
     , m_taskCommand(taskCommand)
@@ -77,11 +78,14 @@ TerminalDock::TerminalDock(remote::ExecutionContext *ctx, const QString &remoteC
 
 void TerminalDock::init(const QString &shell, const QString &cwd)
 {
-    setAttribute(Qt::WA_DeleteOnClose, true);
     setObjectName(QStringLiteral("TerminalDock_%1").arg(reinterpret_cast<qulonglong>(this), 0, 16));
 
+    auto *lay = new QVBoxLayout(this);
+    lay->setContentsMargins(0, 0, 0, 0);
+    lay->setSpacing(0);
+
     m_terminal = new TerminalWidget(this);
-    setWidget(m_terminal);
+    lay->addWidget(m_terminal);
 
     if (m_taskCommand.isEmpty()) {
         QString initialTitle;
@@ -90,18 +94,9 @@ void TerminalDock::init(const QString &shell, const QString &cwd)
             initialTitle = p.username.isEmpty() ? p.host
                                                 : (p.username + QLatin1Char('@') + p.host);
         }
-        if (initialTitle.isEmpty()) {
-            QString cwdBasename = QFileInfo(QDir::cleanPath(cwd)).fileName();
-            if (cwdBasename.isEmpty()) cwdBasename = cwd;
-            initialTitle = cwdBasename;
-        }
-        setWindowTitle(tr("Terminal — %1").arg(initialTitle));
-
-        connect(m_terminal, &TerminalWidget::titleChanged, this, [this](const QString &t) {
-            if (!t.isEmpty()) {
-                setWindowTitle(t);
-            }
-        });
+        if (initialTitle.isEmpty())
+            initialTitle = terminalTabTitle(cwd);
+        setWindowTitle(initialTitle);
     }
 
     connect(m_terminal, &TerminalWidget::spawnFailed, this, [this](const QString &msg) {
@@ -158,7 +153,8 @@ void TerminalDock::setupTaskTitleBar()
     connect(m_restartBtn, &QToolButton::clicked, this, &TerminalDock::restartTask);
     layout->addWidget(m_restartBtn);
 
-    setTitleBarWidget(titleBar);
+    auto *outer = qobject_cast<QVBoxLayout *>(this->layout());
+    outer->insertWidget(0, titleBar);
 }
 
 void TerminalDock::restartTask()
@@ -166,10 +162,12 @@ void TerminalDock::restartTask()
     if (!m_terminal) return;
 
     m_terminal->killProcess();
+    auto *lay = qobject_cast<QVBoxLayout *>(layout());
+    lay->removeWidget(m_terminal);
     delete m_terminal;
 
     m_terminal = new TerminalWidget(this);
-    setWidget(m_terminal);
+    lay->addWidget(m_terminal);
 
     connect(m_terminal, &TerminalWidget::spawnFailed, this, [this](const QString &msg) {
         QMessageBox::critical(this, tr("Terminal"), msg);
@@ -191,7 +189,7 @@ void TerminalDock::restartTask()
     m_terminal->setFocus();
 }
 
-void TerminalDock::closeEvent(QCloseEvent *event)
+bool TerminalDock::confirmClose()
 {
     if (m_terminal && m_terminal->isProcessRunning()) {
         QMessageBox::StandardButton answer = QMessageBox::question(
@@ -200,11 +198,22 @@ void TerminalDock::closeEvent(QCloseEvent *event)
             tr("A process is still running in this terminal. Close anyway?"),
             QMessageBox::Yes | QMessageBox::No,
             QMessageBox::No);
-        if (answer != QMessageBox::Yes) {
-            event->ignore();
-            return;
-        }
+        if (answer != QMessageBox::Yes)
+            return false;
         m_terminal->killProcess();
     }
-    QDockWidget::closeEvent(event);
+    return true;
+}
+
+void TerminalDock::reveal()
+{
+    QWidget *w = this;
+    while (w) {
+        if (auto *dw = qobject_cast<ads::CDockWidget *>(w)) {
+            dw->toggleView(true);
+            dw->raise();
+            return;
+        }
+        w = w->parentWidget();
+    }
 }

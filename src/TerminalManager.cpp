@@ -20,6 +20,8 @@
 
 #include "AiAgentDock.h"
 #include "ApplicationSettings.h"
+#include "DockedEditor.h"
+#include "DockWidget.h"
 #include "MainWindow.h"
 #include "NotepadNextApplication.h"
 #include "TerminalAiHelper.h"
@@ -27,7 +29,6 @@
 #include "TerminalTaskRegistry.h"
 #include "TerminalWidget.h"
 #include "TerminalColorScheme.h"
-#include "DockMiddleClickCloser.h"
 
 #include "iptyprocess.h"
 #include "ptyqt.h"
@@ -39,7 +40,7 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QFontDatabase>
-#include <QMainWindow>
+#include <QIcon>
 #include <QMenu>
 #include <QMessageBox>
 #include <QScopedPointer>
@@ -117,7 +118,6 @@ void TerminalManager::openTerminal(const QString &cwd)
     }
 
     auto *dock = new TerminalDock(shell, cwd, m_mainWindow);
-    DockMiddleClickCloser::install(dock);
     wireContextMenu(dock);
 
     QPointer<TerminalDock> p(dock);
@@ -148,21 +148,7 @@ void TerminalManager::openTerminal(const QString &cwd)
         }
     }
 
-    TerminalDock *existing = nullptr;
-    for (const auto &d : m_docks) {
-        if (d.isNull()) continue;
-        if (d.data() == dock) continue;
-        existing = d.data();
-        break;
-    }
-
-    m_mainWindow->addDockWidget(Qt::BottomDockWidgetArea, dock);
-    if (existing) {
-        m_mainWindow->tabifyDockWidget(existing, dock);
-    }
-    dock->setVisible(true);
-    dock->raise();
-    dock->terminalWidget()->setFocus();
+    placeInEditor(dock);
 }
 
 void TerminalManager::openRemoteTerminal(remote::ExecutionContext *ctx,
@@ -174,7 +160,6 @@ void TerminalManager::openRemoteTerminal(remote::ExecutionContext *ctx,
     // No local PTY probe — the backend is an SSH channel on `ctx`. Pass an empty
     // shell through as-is so SshPtyProcess defaults to the remote $SHELL.
     auto *dock = new TerminalDock(ctx, shell, remoteCwd, m_mainWindow);
-    DockMiddleClickCloser::install(dock);
     wireContextMenu(dock);
 
     QPointer<TerminalDock> p(dock);
@@ -205,21 +190,7 @@ void TerminalManager::openRemoteTerminal(remote::ExecutionContext *ctx,
         }
     }
 
-    TerminalDock *existing = nullptr;
-    for (const auto &d : m_docks) {
-        if (d.isNull()) continue;
-        if (d.data() == dock) continue;
-        existing = d.data();
-        break;
-    }
-
-    m_mainWindow->addDockWidget(Qt::BottomDockWidgetArea, dock);
-    if (existing) {
-        m_mainWindow->tabifyDockWidget(existing, dock);
-    }
-    dock->setVisible(true);
-    dock->raise();
-    dock->terminalWidget()->setFocus();
+    placeInEditor(dock);
 }
 
 static QStringList parseEnvText(const QString &envText)
@@ -309,7 +280,6 @@ void TerminalManager::openTask(const QString &workspaceCwd, const TerminalTask &
     auto *dock = new TerminalDock(shell, resolvedCwd, task.command, task.name, env, m_mainWindow);
     if (!cwdWarning.isEmpty())
         dock->setCwdWarning(cwdWarning);
-    DockMiddleClickCloser::install(dock);
     wireContextMenu(dock);
 
     QPointer<TerminalDock> p(dock);
@@ -340,21 +310,7 @@ void TerminalManager::openTask(const QString &workspaceCwd, const TerminalTask &
         }
     }
 
-    TerminalDock *existing = nullptr;
-    for (const auto &d : m_docks) {
-        if (d.isNull()) continue;
-        if (d.data() == dock) continue;
-        existing = d.data();
-        break;
-    }
-
-    m_mainWindow->addDockWidget(Qt::BottomDockWidgetArea, dock);
-    if (existing) {
-        m_mainWindow->tabifyDockWidget(existing, dock);
-    }
-    dock->setVisible(true);
-    dock->raise();
-    dock->terminalWidget()->setFocus();
+    placeInEditor(dock);
 }
 
 void TerminalManager::openRemoteTask(remote::ExecutionContext *ctx,
@@ -373,7 +329,6 @@ void TerminalManager::openRemoteTask(remote::ExecutionContext *ctx,
     }
 
     auto *dock = new TerminalDock(ctx, remoteCwd, task.command, task.name, m_mainWindow);
-    DockMiddleClickCloser::install(dock);
     wireContextMenu(dock);
 
     QPointer<TerminalDock> p(dock);
@@ -404,21 +359,7 @@ void TerminalManager::openRemoteTask(remote::ExecutionContext *ctx,
         }
     }
 
-    TerminalDock *existing = nullptr;
-    for (const auto &d : m_docks) {
-        if (d.isNull()) continue;
-        if (d.data() == dock) continue;
-        existing = d.data();
-        break;
-    }
-
-    m_mainWindow->addDockWidget(Qt::BottomDockWidgetArea, dock);
-    if (existing) {
-        m_mainWindow->tabifyDockWidget(existing, dock);
-    }
-    dock->setVisible(true);
-    dock->raise();
-    dock->terminalWidget()->setFocus();
+    placeInEditor(dock);
 }
 
 void TerminalManager::applyTheme()
@@ -484,8 +425,7 @@ void TerminalManager::runOrRestartTask(const QString &cwd, const TerminalTask &t
 {
     TerminalDock *existing = findTaskDock(task.command, cwd);
     if (existing) {
-        existing->setVisible(true);
-        existing->raise();
+        existing->reveal();
         existing->restartTask();
         if (auto *w = existing->terminalWidget()) {
             w->setFocus();
@@ -518,6 +458,27 @@ void TerminalManager::setTasks(const QString &workspacePath, const QList<Termina
     if (!m_app || !m_app->getSettings())
         return;
     TerminalTaskRegistry(m_app->getSettings()).setTasks(workspacePath, tasks);
+}
+
+void TerminalManager::placeInEditor(TerminalDock *dock)
+{
+    DockedEditor *editor = m_mainWindow->getDockedEditor();
+    ads::CDockWidget *dw = editor->addBottomToolTab(dock, dock->windowTitle(), QIcon());
+
+    connect(dock, &QWidget::windowTitleChanged, dw, [dw](const QString &title) {
+        dw->setWindowTitle(title);
+    });
+
+    dw->setFeature(ads::CDockWidget::DockWidgetFeature::CustomCloseHandling, true);
+    connect(dw, &ads::CDockWidget::closeRequested, dock, [dock, dw]() {
+        if (dock->confirmClose())
+            dw->closeDockWidget();
+    });
+
+    dw->toggleView(true);
+    dw->raise();
+    if (auto *tw = dock->terminalWidget())
+        tw->setFocus();
 }
 
 void TerminalManager::wireContextMenu(TerminalDock *dock)

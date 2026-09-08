@@ -4067,12 +4067,12 @@ void MainWindow::closeFile(ScintillaNext *editor)
     // Early out. If we aren't exiting-on-last-tab-closed and the thing being
     // closed is a single pristine "initial" editor, closing it would just force
     // an immediate respawn — so keep it. But ONLY when it is genuinely the last
-    // tab of ANY kind (totalTabCount() == 1): getInitialEditor() looks at
+    // content tab (totalTabCount() == 1): getInitialEditor() looks at
     // editorCount() alone, which ignores preview/browser/mini-app tabs, so
     // without the totalTabCount() guard this would wrongly refuse to close a
-    // pristine "New X" while a preview/browser tab is still open. If another tab
-    // survives, closing this editor leaves it behind without spawning anything —
-    // exactly what the user wants — so don't block it.
+    // pristine "New X" while a preview/browser tab is still open. Tool tabs
+    // (terminal) are excluded from totalTabCount, so a remaining terminal does
+    // not make a last "New X" closable.
     if (!app->getSettings()->exitOnLastTabClosed()
         && getInitialEditor() != Q_NULLPTR
         && dockedEditor->totalTabCount() == 1) {

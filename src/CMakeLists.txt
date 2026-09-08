@@ -32,6 +32,7 @@ qt_add_executable(NotepadAI
 	DebugManager.h
 	DefaultDirectoryManager.h
 	DockAreaSanitizer.h
+	DockBottomToolTab.h
 	DockedEditor.h
 	DockedEditorTitleBar.h
 	IAcpExecHost.h
@@ -133,6 +134,7 @@ qt_add_executable(NotepadAI
 	DebugManager.cpp
 	DefaultDirectoryManager.cpp
 	DockAreaSanitizer.cpp
+	DockBottomToolTab.cpp
 	DockedEditor.cpp
 
 	EditorManager.cpp
@@ -462,6 +464,7 @@ qt_add_executable(NotepadAI
 	TerminalAiHelper.h
 	TerminalAiHelper.cpp
 	TerminalCwdResolver.h
+	TerminalTabTitle.h
 	TerminalCwdResolver.cpp
 	TerminalManager.h
 	TerminalManager.cpp
