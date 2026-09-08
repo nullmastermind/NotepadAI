@@ -75,33 +75,42 @@ RemoteFsBackend::RemoteFsBackend(SshConnection *connection, QObject *parent)
 
 RemoteFsBackend::~RemoteFsBackend()
 {
+    // Snapshot-then-invoke, same as onConnectionLost: a callback that issues a
+    // new *Async op would otherwise mutate the live QHash while we iterate it
+    // (ACCESS_VIOLATION). New inserts land on the now-empty members and die
+    // with this object; callers must fail-closed on "Backend destroyed".
     const QString reason = tr("Backend destroyed");
-    for (auto it = m_readCallbacks.begin(); it != m_readCallbacks.end(); ++it) {
-        if (it.value()) it.value()(false, QByteArray(), reason);
-    }
+    QHash<quint64, ReadCallback> reads = std::move(m_readCallbacks);
     m_readCallbacks.clear();
-    for (auto it = m_writeCallbacks.begin(); it != m_writeCallbacks.end(); ++it) {
-        if (it.value()) it.value()(false, reason);
+    for (auto &cb : reads) {
+        if (cb) cb(false, QByteArray(), reason);
     }
+    QHash<quint64, WriteCallback> writes = std::move(m_writeCallbacks);
     m_writeCallbacks.clear();
-    for (auto it = m_statCallbacks.begin(); it != m_statCallbacks.end(); ++it) {
-        if (it.value()) it.value()(false, FileStat(), reason);
+    for (auto &cb : writes) {
+        if (cb) cb(false, reason);
     }
+    QHash<quint64, StatCallback> stats = std::move(m_statCallbacks);
     m_statCallbacks.clear();
-    for (auto it = m_readdirCallbacks.begin(); it != m_readdirCallbacks.end(); ++it) {
-        if (it.value()) it.value()(false, QList<RemoteDirEntry>(), reason);
+    for (auto &cb : stats) {
+        if (cb) cb(false, FileStat(), reason);
     }
+    QHash<quint64, ReaddirCallback> dirs = std::move(m_readdirCallbacks);
     m_readdirCallbacks.clear();
-    for (auto it = m_mutateCallbacks.begin(); it != m_mutateCallbacks.end(); ++it) {
-        if (it.value()) it.value()(false, reason);
+    for (auto &cb : dirs) {
+        if (cb) cb(false, QList<RemoteDirEntry>(), reason);
     }
+    QHash<quint64, MutateCallback> mutates = std::move(m_mutateCallbacks);
     m_mutateCallbacks.clear();
-    // Drain any in-flight streaming reads with a failure callback.
-    for (auto it = m_streamDoneCallbacks.begin(); it != m_streamDoneCallbacks.end(); ++it) {
-        if (it.value()) it.value()(false, reason);
+    for (auto &cb : mutates) {
+        if (cb) cb(false, reason);
     }
     m_streamChunkCallbacks.clear();
+    QHash<quint64, StreamDoneCallback> streamDone = std::move(m_streamDoneCallbacks);
     m_streamDoneCallbacks.clear();
+    for (auto &cb : streamDone) {
+        if (cb) cb(false, reason);
+    }
 }
 
 // --- async API ---------------------------------------------------------------

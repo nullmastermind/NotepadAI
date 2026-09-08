@@ -46,6 +46,16 @@ struct ZipProgressSink {
 
 namespace {
 
+// Connection/backend teardown — not a missing .gitignore. Callers that treat
+// !ok as "file absent, keep going" must fail-closed on these instead of
+// re-entering m_backend from inside ~RemoteFsBackend / onConnectionLost.
+bool isRemoteBackendDead(const QString &error)
+{
+    return remote::RemoteFsBackend::isTransientError(error)
+        || error.contains(QLatin1String("Backend destroyed"), Qt::CaseInsensitive)
+        || error.contains(QLatin1String("No SSH connection"), Qt::CaseInsensitive);
+}
+
 void postZipProgress(const std::shared_ptr<ZipProgressSink> &sink, int n, int total, const QString &name)
 {
     QCoreApplication *app = QCoreApplication::instance();
@@ -122,6 +132,10 @@ FolderZipTransfer::~FolderZipTransfer()
 
 void FolderZipTransfer::setRemoteBackend(remote::RemoteFsBackend *backend)
 {
+    if (m_backend == backend)
+        return;
+    if (m_busy)
+        cancel();
     m_backend = backend;
 }
 
@@ -459,6 +473,10 @@ void FolderZipTransfer::downloadRemote(const QString &workspaceRootPosix,
 
 void FolderZipTransfer::remotePreloadGitignores()
 {
+    if (!m_backend) {
+        fail(tr("No remote filesystem"));
+        return;
+    }
     if (m_gitignoreIdx >= m_gitignoreDirs.size()) {
         m_pendingWalk = 1;
         remoteWalkDir(m_selectedFolder, QString());
@@ -468,17 +486,29 @@ void FolderZipTransfer::remotePreloadGitignores()
     const QString dir = m_gitignoreDirs.at(m_gitignoreIdx);
     ++m_gitignoreIdx;
     const QString gi = posixJoin(dir, QStringLiteral(".gitignore"));
-    m_backend->readFileAsync(gi, [guard, dir](bool ok, const QByteArray &data, const QString &) {
+    m_backend->readFileAsync(gi, [guard, dir](bool ok, const QByteArray &data, const QString &error) {
         if (guard.isNull() || guard->m_cancelled.load())
             return;
-        if (ok)
+        if (ok) {
             guard->m_gitignore.addRules(dir, QString::fromUtf8(data));
+        } else if (isRemoteBackendDead(error)) {
+            guard->fail(error);
+            return;
+        }
+        if (!guard->m_backend) {
+            guard->fail(tr("No remote filesystem"));
+            return;
+        }
         guard->remotePreloadGitignores();
     });
 }
 
 void FolderZipTransfer::remoteWalkDir(const QString &remoteDir, const QString &entryPrefix)
 {
+    if (!m_backend) {
+        fail(tr("No remote filesystem"));
+        return;
+    }
     QPointer<FolderZipTransfer> guard(this);
     QPointer<remote::RemoteFsBackend> backend = m_backend;
     m_backend->readdirAsync(remoteDir,
@@ -579,6 +609,10 @@ void FolderZipTransfer::remotePackNext()
         }
         m_partialPath.clear();
         succeed(m_remoteFiles.size());
+        return;
+    }
+    if (!m_backend) {
+        fail(tr("No remote filesystem"));
         return;
     }
 
@@ -710,6 +744,10 @@ void FolderZipTransfer::remoteUploadNext()
         succeed(m_extractItems.size());
         return;
     }
+    if (!m_backend) {
+        fail(tr("No remote filesystem"));
+        return;
+    }
     const ExtractItem it = m_extractItems.at(m_extractIdx);
     const int n = m_extractIdx + 1;
     const int total = m_extractItems.size();
@@ -723,6 +761,10 @@ void FolderZipTransfer::remoteUploadNext()
             return;
         if (!ok) {
             guard->fail(tr("Could not create remote directory"));
+            return;
+        }
+        if (!guard->m_backend) {
+            guard->fail(tr("No remote filesystem"));
             return;
         }
         ZipReader reader;
@@ -771,8 +813,12 @@ void FolderZipTransfer::ensureRemoteParent(const QString &remoteFilePath,
                 callback(false);
                 return;
             }
-            guard->m_backend->mkdirAsync(remoteDirPath, [guard, remoteDirPath, callback](bool, const QString &) {
+            guard->m_backend->mkdirAsync(remoteDirPath, [guard, remoteDirPath, callback](bool ok, const QString &error) {
                 if (guard.isNull()) {
+                    callback(false);
+                    return;
+                }
+                if (!ok && isRemoteBackendDead(error)) {
                     callback(false);
                     return;
                 }
