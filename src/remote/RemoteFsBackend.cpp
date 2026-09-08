@@ -68,6 +68,8 @@ RemoteFsBackend::RemoteFsBackend(SshConnection *connection, QObject *parent)
                 this, &RemoteFsBackend::onMutateResult);
         connect(m_connection, &SshConnection::sftpUnlinkResult,
                 this, &RemoteFsBackend::onMutateResult);
+        connect(m_connection, &SshConnection::sftpRmdirResult,
+                this, &RemoteFsBackend::onMutateResult);
         connect(m_connection, &SshConnection::connectionLost,
                 this, &RemoteFsBackend::onConnectionLost);
     }
@@ -330,6 +332,17 @@ void RemoteFsBackend::unlinkAsync(const QString &path, const MutateCallback &cb)
     const quint64 reqId = ++m_nextReqId;
     if (cb) m_mutateCallbacks.insert(reqId, cb);
     m_connection->sftpUnlink(reqId, path);
+}
+
+void RemoteFsBackend::rmdirAsync(const QString &path, const MutateCallback &cb)
+{
+    if (!m_connection) {
+        if (cb) cb(false, tr("No SSH connection"));
+        return;
+    }
+    const quint64 reqId = ++m_nextReqId;
+    if (cb) m_mutateCallbacks.insert(reqId, cb);
+    m_connection->sftpRmdir(reqId, path);
 }
 
 // --- result handlers (UI thread) ---------------------------------------------

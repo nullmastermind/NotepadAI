@@ -113,6 +113,7 @@ public:
     void renameAsync(const QString &oldPath, const QString &newPath, const MutateCallback &cb);
     void mkdirAsync(const QString &path, const MutateCallback &cb);
     void unlinkAsync(const QString &path, const MutateCallback &cb);
+    void rmdirAsync(const QString &path, const MutateCallback &cb);
 
     // D12 read-only auto-retry classifier. Returns true when `error` is a
     // TRANSIENT (connection/session-level) worker failure that an idempotent

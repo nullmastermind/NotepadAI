@@ -72,9 +72,9 @@ CrocShareFlow::CrocShareFlow(QWidget *dialogParent)
         }
         closeLoading();
         if (m_extractSsh)
-            m_zip->uploadRemote(zip, m_extractTarget, m_parent);
+            m_zip->uploadRemote(m_extractWorkspaceRoot, zip, m_extractTarget, m_parent);
         else
-            m_zip->uploadLocal(zip, m_extractTarget, m_parent);
+            m_zip->uploadLocal(m_extractWorkspaceRoot, zip, m_extractTarget, m_parent);
         // Temp dir lives until this flow is destroyed; destroy after extract starts.
         // Extract reads the zip on a worker; keep tmp until zip transfer completes.
         connect(m_zip, &FolderZipTransfer::transferCompleted, this, [this](int) {
@@ -246,9 +246,11 @@ void CrocShareFlow::showPhrase(const QString &phrase)
     dlg->show();
 }
 
-void CrocShareFlow::receiveIntoFolder(FolderZipTransfer *zip, const QString &folderPath, bool ssh)
+void CrocShareFlow::receiveIntoFolder(FolderZipTransfer *zip, const QString &workspaceRoot,
+                                      const QString &folderPath, bool ssh)
 {
     m_zip = zip;
+    m_extractWorkspaceRoot = workspaceRoot;
     m_extractTarget = folderPath;
     m_extractSsh = ssh;
     bool ok = false;

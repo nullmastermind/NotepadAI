@@ -471,6 +471,8 @@ public:
 
     QHash<QString, Step> sftpUnlinkStepByPath;
     QList<QString> sftpUnlinkPaths;
+    QHash<QString, Step> sftpRmdirStepByPath;
+    QList<QString> sftpRmdirPaths;
 
     Step sftpRename(SftpLane, const QString &src, const QString &dst) override
     {
@@ -488,6 +490,11 @@ public:
     {
         sftpUnlinkPaths.append(path);
         return sftpUnlinkStepByPath.value(path, Step::Ok);
+    }
+    Step sftpRmdir(SftpLane, const QString &path) override
+    {
+        sftpRmdirPaths.append(path);
+        return sftpRmdirStepByPath.value(path, Step::Ok);
     }
 };
 

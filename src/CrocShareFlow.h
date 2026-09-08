@@ -28,7 +28,8 @@ public:
 
     void shareFolder(FolderZipTransfer *zip, const QString &workspaceRoot,
                      const QString &folderPath, const QString &folderName, bool ssh);
-    void receiveIntoFolder(FolderZipTransfer *zip, const QString &folderPath, bool ssh);
+    void receiveIntoFolder(FolderZipTransfer *zip, const QString &workspaceRoot,
+                           const QString &folderPath, bool ssh);
 
 private:
     void ensureThen(const std::function<void()> &next);
@@ -46,6 +47,7 @@ private:
     QPointer<QProgressDialog> m_loadDlg;
     QPointer<FolderZipTransfer> m_zip;
     QString m_extractTarget;
+    QString m_extractWorkspaceRoot;
     bool m_extractSsh = false;
 };
 

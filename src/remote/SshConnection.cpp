@@ -196,6 +196,13 @@ void SshConnection::init(std::unique_ptr<ISshTransport> transport)
                     : QStringLiteral("sftp-unlink-result: req=%1 ERROR=%2").arg(reqId).arg(error));
                 emit sftpUnlinkResult(reqId, ok, error);
             });
+    connect(m_worker, &SshSessionWorker::sftpRmdirDone, this,
+            [this](quint64 reqId, bool ok, const QString &error) {
+                appendDebugLog(ok
+                    ? QStringLiteral("sftp-rmdir-result: req=%1").arg(reqId)
+                    : QStringLiteral("sftp-rmdir-result: req=%1 ERROR=%2").arg(reqId).arg(error));
+                emit sftpRmdirResult(reqId, ok, error);
+            });
 
     // Exec results (D6): relays with debug logging, worker thread → UI thread
     // (queued). RemoteGitProcessRunner resolves the reqId to its in-flight op.
@@ -409,6 +416,13 @@ void SshConnection::sftpUnlink(quint64 reqId, const QString &path)
 {
     appendDebugLog(QStringLiteral("sftp-unlink: req=%1 %2").arg(reqId).arg(path));
     QMetaObject::invokeMethod(m_worker, "requestSftpUnlink", Qt::QueuedConnection,
+                              Q_ARG(quint64, reqId), Q_ARG(QString, path));
+}
+
+void SshConnection::sftpRmdir(quint64 reqId, const QString &path)
+{
+    appendDebugLog(QStringLiteral("sftp-rmdir: req=%1 %2").arg(reqId).arg(path));
+    QMetaObject::invokeMethod(m_worker, "requestSftpRmdir", Qt::QueuedConnection,
                               Q_ARG(quint64, reqId), Q_ARG(QString, path));
 }
 

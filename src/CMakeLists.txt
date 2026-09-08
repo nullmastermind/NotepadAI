@@ -572,6 +572,7 @@ target_sources(NotepadAI PRIVATE remote/RemoteTransferManager.cpp remote/RemoteT
 target_sources(NotepadAI PRIVATE
     ZipPath.cpp ZipPath.h
     ZipIgnoreWalk.cpp ZipIgnoreWalk.h
+    ZipUploadWipe.cpp ZipUploadWipe.h
     ZipArchive.cpp ZipArchive.h
     FolderZipTransfer.cpp FolderZipTransfer.h
     CrocTool.cpp CrocTool.h

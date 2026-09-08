@@ -800,6 +800,16 @@ ISshTransport::Step Libssh2Transport::sftpUnlink(SftpLane lane, const QString &p
     return stepFromRc(rc);
 }
 
+ISshTransport::Step Libssh2Transport::sftpRmdir(SftpLane lane, const QString &path)
+{
+    _LIBSSH2_SFTP *sftp = sftpSession(lane);
+    if (!sftp) return Step::Error;
+    const QByteArray p = path.toUtf8();
+    const int rc = libssh2_sftp_rmdir_ex(
+        sftp, p.constData(), static_cast<unsigned int>(p.size()));
+    return stepFromRc(rc);
+}
+
 int Libssh2Transport::sendKeepalive()
 {
     if (!m_session) return -1;

@@ -53,12 +53,13 @@ public:
 
     void downloadLocal(const QString &workspaceRoot, const QString &selectedFolder,
                        const QString &destZip);
-    void uploadLocal(const QString &zipPath, const QString &selectedFolder, QWidget *dialogParent);
+    void uploadLocal(const QString &workspaceRoot, const QString &zipPath,
+                     const QString &selectedFolder, QWidget *dialogParent);
 
     void downloadRemote(const QString &workspaceRootPosix, const QString &selectedFolderPosix,
                         const QString &destZip);
-    void uploadRemote(const QString &zipPath, const QString &selectedFolderPosix,
-                      QWidget *dialogParent);
+    void uploadRemote(const QString &workspaceRootPosix, const QString &zipPath,
+                      const QString &selectedFolderPosix, QWidget *dialogParent);
 
 public slots:
     void cancel();
@@ -97,6 +98,9 @@ private:
     void remoteWalkDone();
     void remotePackNext();
     void remoteUploadNext();
+    void startRemoteWipeWalk();
+    void startRemoteWipe();
+    void remoteWipeNext();
     void ensureRemoteParent(const QString &remoteFilePath, const std::function<void(bool)> &cb);
 
     bool m_busy = false;
@@ -124,6 +128,11 @@ private:
     QList<ExtractItem> m_extractItems;
     int m_extractIdx = 0;
     QSet<QString> m_ensuredDirs;
+    QStringList m_retainRelPaths;
+    bool m_walkForWipe = false;
+    QStringList m_wipePaths;
+    QStringList m_wipeDirs;
+    int m_wipeIdx = 0;
 };
 
 #endif // FOLDERZIPTRANSFER_H

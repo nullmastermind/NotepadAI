@@ -105,6 +105,7 @@ public:
     void sftpRename(quint64 reqId, const QString &oldPath, const QString &newPath);
     void sftpMkdir(quint64 reqId, const QString &path);
     void sftpUnlink(quint64 reqId, const QString &path);
+    void sftpRmdir(quint64 reqId, const QString &path);
 
     // --- exec (D6) -----------------------------------------------------------
     // Posted to the worker (queued). Called by RemoteGitProcessRunner (and the
@@ -172,6 +173,7 @@ signals:
     void sftpRenameResult(quint64 reqId, bool ok, const QString &error);
     void sftpMkdirResult(quint64 reqId, bool ok, const QString &error);
     void sftpUnlinkResult(quint64 reqId, bool ok, const QString &error);
+    void sftpRmdirResult(quint64 reqId, bool ok, const QString &error);
 
     // --- exec results (D6) — relayed queued from the worker ------------------
     void execStdout(quint64 reqId, const QByteArray &chunk);

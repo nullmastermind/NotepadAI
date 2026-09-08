@@ -185,6 +185,7 @@ public slots:
     void requestSftpRename(quint64 reqId, const QString &oldPath, const QString &newPath);
     void requestSftpMkdir(quint64 reqId, const QString &path);
     void requestSftpUnlink(quint64 reqId, const QString &path);
+    void requestSftpRmdir(quint64 reqId, const QString &path);
     // Cancel a timed-out bulk SFTP read: shuts down the bulk SFTP lane (so its
     // stuck open_state is reset) and fails the op, unblocking the FIFO queue.
     void requestSftpCancelBulk(quint64 reqId);
@@ -245,6 +246,7 @@ signals:
     void sftpRenameDone(quint64 reqId, bool ok, const QString &error);
     void sftpMkdirDone(quint64 reqId, bool ok, const QString &error);
     void sftpUnlinkDone(quint64 reqId, bool ok, const QString &error);
+    void sftpRmdirDone(quint64 reqId, bool ok, const QString &error);
 
     // --- exec result signals (D6/D8) -----------------------------------------
     void execStdoutChunk(quint64 reqId, const QByteArray &chunk);
@@ -363,7 +365,7 @@ private:
     // service function. Both are driven from onSocketActivity (after pump). Both
     // count toward the unified cap's 2-SFTP-reserved budget (FIX-2). A large bulk
     // read can never block tree-poll/readdir behind it.
-    enum class SftpKind : quint8 { Read, StreamRead, Write, Stat, Readdir, Rename, Mkdir, Unlink };
+    enum class SftpKind : quint8 { Read, StreamRead, Write, Stat, Readdir, Rename, Mkdir, Unlink, Rmdir };
     enum class SftpPhase : quint8 { NeedOpen, Transfer, NeedClose };
     enum class SftpLane : quint8 { Bulk, Meta };
 

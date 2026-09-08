@@ -21,10 +21,12 @@
 #include "ZipArchive.h"
 #include "ZipIgnoreWalk.h"
 #include "ZipPath.h"
+#include "ZipUploadWipe.h"
 #include "dialogs/TransferConflictDialog.h"
 #include "remote/RemoteFsBackend.h"
 #include "remote/SshSessionWorker.h"
 
+#include <algorithm>
 #include <memory>
 
 #include <QCoreApplication>
@@ -160,6 +162,11 @@ bool FolderZipTransfer::beginBusy()
     m_extractItems.clear();
     m_extractIdx = 0;
     m_ensuredDirs.clear();
+    m_retainRelPaths.clear();
+    m_walkForWipe = false;
+    m_wipePaths.clear();
+    m_wipeDirs.clear();
+    m_wipeIdx = 0;
     m_gitignore.clear();
     m_gitignoreDirs.clear();
     m_gitignoreIdx = 0;
@@ -367,8 +374,8 @@ QList<FolderZipTransfer::ExtractItem> FolderZipTransfer::applyConflictDialog(
     return kept;
 }
 
-void FolderZipTransfer::uploadLocal(const QString &zipPath, const QString &selectedFolder,
-                                    QWidget *dialogParent)
+void FolderZipTransfer::uploadLocal(const QString &workspaceRoot, const QString &zipPath,
+                                    const QString &selectedFolder, QWidget *dialogParent)
 {
     if (!beginBusy())
         return;
@@ -385,6 +392,7 @@ void FolderZipTransfer::uploadLocal(const QString &zipPath, const QString &selec
         if (QFileInfo::exists(dest))
             conflicts.append(it.destRel);
     }
+    const QList<ExtractItem> original = items;
     bool aborted = false;
     items = applyConflictDialog(items, conflicts, dialogParent, &aborted);
     if (aborted) {
@@ -392,14 +400,21 @@ void FolderZipTransfer::uploadLocal(const QString &zipPath, const QString &selec
         emit transferCancelled();
         return;
     }
-    if (items.isEmpty()) {
-        succeed(0);
-        return;
+    QStringList retain;
+    QSet<QString> kept;
+    retain.reserve(original.size());
+    for (const ExtractItem &it : items) {
+        kept.insert(it.destRel);
+        retain.append(it.destRel);
+    }
+    for (const ExtractItem &it : original) {
+        if (!kept.contains(it.destRel))
+            retain.append(it.destRel);
     }
 
     QPointer<FolderZipTransfer> guard(this);
     auto *watcher = new QFutureWatcher<QString>(this);
-    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, guard, watcher]() {
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, guard, watcher, n = items.size()]() {
         watcher->deleteLater();
         if (guard.isNull() || m_cancelled.load())
             return;
@@ -413,32 +428,22 @@ void FolderZipTransfer::uploadLocal(const QString &zipPath, const QString &selec
             fail(err);
             return;
         }
-        succeed(0);
+        succeed(n);
     });
     const auto cancelled = m_cancelFlag;
     const auto progress = m_progressSink;
-    watcher->setFuture(QtConcurrent::run([cancelled, progress, zipPath, selectedFolder, items]() -> QString {
-        ZipReader reader;
-        if (!reader.open(zipPath))
-            return reader.errorString();
-        const int total = items.size();
-        for (int i = 0; i < total; ++i) {
-            const ExtractItem &it = items.at(i);
-            if (cancelled && cancelled->load())
-                return QStringLiteral("cancelled");
-            const int n = i + 1;
+    QList<ZipUploadWipe::ExtractFile> files;
+    files.reserve(items.size());
+    for (const ExtractItem &it : items)
+        files.append({it.zipEntry, it.destRel});
+    watcher->setFuture(QtConcurrent::run([cancelled, progress, zipPath, workspaceRoot, selectedFolder, files,
+                                          retain]() -> QString {
+        auto prog = [progress](int n, int total, const QString &name) {
             if (shouldReportProgress(n, total))
-                postZipProgress(progress, n, total, it.destRel);
-            const QString dest = QDir::cleanPath(QDir(selectedFolder).filePath(it.destRel));
-            if (!ZipPath::isSafeExtractDest(selectedFolder, dest))
-                continue;
-            QDir().mkpath(QFileInfo(dest).absolutePath());
-            if (!ZipPath::isSafeExtractDest(selectedFolder, dest))
-                continue;
-            if (!reader.extractToFile(it.zipEntry, dest))
-                return reader.errorString();
-        }
-        return {};
+                postZipProgress(progress, n, total, name);
+        };
+        return ZipUploadWipe::extractThenWipeLocal(zipPath, workspaceRoot, selectedFolder, files, retain,
+                                                   cancelled.get(), prog);
     }));
 }
 
@@ -578,6 +583,11 @@ void FolderZipTransfer::remoteWalkDone()
         fail(tr("Failed to list remote folder"));
         return;
     }
+    if (m_walkForWipe) {
+        m_walkForWipe = false;
+        startRemoteWipe();
+        return;
+    }
     if (m_remoteFiles.isEmpty()) {
         fail(tr("Folder is empty or contains only ignored files"));
         return;
@@ -663,8 +673,8 @@ void FolderZipTransfer::remotePackNext()
         });
 }
 
-void FolderZipTransfer::uploadRemote(const QString &zipPath, const QString &selectedFolderPosix,
-                                     QWidget *dialogParent)
+void FolderZipTransfer::uploadRemote(const QString &workspaceRootPosix, const QString &zipPath,
+                                     const QString &selectedFolderPosix, QWidget *dialogParent)
 {
     if (!beginBusy())
         return;
@@ -672,6 +682,7 @@ void FolderZipTransfer::uploadRemote(const QString &zipPath, const QString &sele
         fail(tr("No remote filesystem"));
         return;
     }
+    m_workspaceRoot = workspaceRootPosix;
     m_selectedFolder = selectedFolderPosix;
     m_zipPath = zipPath;
     emit progressUpdated(0, 0, 0, 0, tr("Preparing zip…"), 0);
@@ -723,13 +734,25 @@ void FolderZipTransfer::uploadRemote(const QString &zipPath, const QString &sele
                     conflicts.append(it.destRel);
             }
             bool aborted = false;
-            guard->m_extractItems = guard->applyConflictDialog(guard->m_extractItems, conflicts,
+            const QList<ExtractItem> original = guard->m_extractItems;
+            guard->m_extractItems = guard->applyConflictDialog(original, conflicts,
                                                                dialogParent, &aborted);
             if (aborted) {
                 guard->finishIdle();
                 emit guard->transferCancelled();
                 return;
             }
+            QStringList retain;
+            QSet<QString> kept;
+            for (const ExtractItem &it : guard->m_extractItems) {
+                kept.insert(it.destRel);
+                retain.append(it.destRel);
+            }
+            for (const ExtractItem &it : original) {
+                if (!kept.contains(it.destRel))
+                    retain.append(it.destRel);
+            }
+            guard->m_retainRelPaths = retain;
             guard->m_extractIdx = 0;
             guard->remoteUploadNext();
         });
@@ -741,7 +764,7 @@ void FolderZipTransfer::remoteUploadNext()
     if (m_cancelled.load())
         return;
     if (m_extractIdx >= m_extractItems.size()) {
-        succeed(m_extractItems.size());
+        startRemoteWipeWalk();
         return;
     }
     if (!m_backend) {
@@ -788,6 +811,119 @@ void FolderZipTransfer::remoteUploadNext()
             guard->remoteUploadNext();
         });
     });
+}
+
+void FolderZipTransfer::startRemoteWipeWalk()
+{
+    if (m_cancelled.load())
+        return;
+    m_walkForWipe = true;
+    m_remoteFiles.clear();
+    m_gitignore.clear();
+    m_gitignoreDirs.clear();
+    m_gitignoreIdx = 0;
+    m_walkFailed = false;
+    m_pendingWalk = 0;
+    QString walk = m_workspaceRoot.isEmpty() ? m_selectedFolder : m_workspaceRoot;
+    m_gitignoreDirs.append(walk);
+    if (!m_workspaceRoot.isEmpty()) {
+        const QString rel = relToRoot(m_workspaceRoot, m_selectedFolder);
+        if (!rel.isEmpty()) {
+            for (const QString &seg : rel.split(QLatin1Char('/'))) {
+                walk = posixJoin(walk, seg);
+                if (!m_gitignoreDirs.contains(walk))
+                    m_gitignoreDirs.append(walk);
+            }
+        }
+    }
+    remotePreloadGitignores();
+}
+
+void FolderZipTransfer::startRemoteWipe()
+{
+    QStringList walked;
+    walked.reserve(m_remoteFiles.size());
+    for (const RemoteFile &f : m_remoteFiles)
+        walked.append(f.entryName);
+    const QStringList orphans = ZipUploadWipe::orphanRelPaths(walked, m_retainRelPaths);
+    m_wipePaths.clear();
+    QStringList deletedRels;
+    for (const QString &rel : orphans) {
+        const QString dest = posixJoin(m_selectedFolder, rel);
+        if (!ZipUploadWipe::isSafeRemoteDest(m_selectedFolder, dest))
+            continue;
+        m_wipePaths.append(dest);
+        deletedRels.append(rel);
+    }
+    QSet<QString> dirSet;
+    for (const QString &rel : deletedRels) {
+        QString parent = parentPosix(rel);
+        while (!parent.isEmpty()) {
+            dirSet.insert(parent);
+            parent = parentPosix(parent);
+        }
+    }
+    QStringList dirRels = dirSet.values();
+    std::sort(dirRels.begin(), dirRels.end(), [](const QString &a, const QString &b) {
+        const int da = a.count(QLatin1Char('/'));
+        const int db = b.count(QLatin1Char('/'));
+        if (da != db)
+            return da > db;
+        return a > b;
+    });
+    m_wipeDirs.clear();
+    for (const QString &drel : dirRels) {
+        const QString dabs = posixJoin(m_selectedFolder, drel);
+        if (dabs == m_selectedFolder)
+            continue;
+        if (!ZipUploadWipe::isSafeRemoteDest(m_selectedFolder, dabs))
+            continue;
+        m_wipeDirs.append(dabs);
+    }
+    m_wipeIdx = 0;
+    remoteWipeNext();
+}
+
+void FolderZipTransfer::remoteWipeNext()
+{
+    if (m_cancelled.load())
+        return;
+    if (!m_backend) {
+        fail(tr("No remote filesystem"));
+        return;
+    }
+    QPointer<FolderZipTransfer> guard(this);
+    if (m_wipeIdx < m_wipePaths.size()) {
+        const QString path = m_wipePaths.at(m_wipeIdx);
+        const int n = m_wipeIdx + 1;
+        const int total = m_wipePaths.size();
+        if (shouldReportProgress(n, total))
+            emit progressUpdated(n, total, 0, 0, path, 0);
+        m_backend->unlinkAsync(path, [guard, path](bool ok, const QString &error) {
+            if (guard.isNull() || guard->m_cancelled.load())
+                return;
+            if (!ok) {
+                guard->fail(error.isEmpty() ? tr("Failed to delete %1").arg(path)
+                                            : tr("Failed to delete %1: %2").arg(path, error));
+                return;
+            }
+            ++guard->m_wipeIdx;
+            guard->remoteWipeNext();
+        });
+        return;
+    }
+    const int dirIdx = m_wipeIdx - m_wipePaths.size();
+    if (dirIdx < m_wipeDirs.size()) {
+        const QString path = m_wipeDirs.at(dirIdx);
+        m_backend->rmdirAsync(path, [guard](bool, const QString &) {
+            if (guard.isNull() || guard->m_cancelled.load())
+                return;
+            ++guard->m_wipeIdx;
+            guard->remoteWipeNext();
+        });
+        return;
+    }
+    succeed(m_extractItems.size());
 }
 
 void FolderZipTransfer::ensureRemoteParent(const QString &remoteFilePath,

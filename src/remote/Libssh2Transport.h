@@ -89,6 +89,7 @@ public:
     Step sftpRename(SftpLane lane, const QString &srcPath, const QString &dstPath) override;
     Step sftpMkdir(SftpLane lane, const QString &path) override;
     Step sftpUnlink(SftpLane lane, const QString &path) override;
+    Step sftpRmdir(SftpLane lane, const QString &path) override;
 
     int sendKeepalive() override;
 

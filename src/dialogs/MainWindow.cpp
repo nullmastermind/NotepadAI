@@ -3335,9 +3335,10 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 if (isSshDock) {
                     const remote::SshUri uri = remote::parseSshUri(absPath);
                     if (!uri.valid) return;
-                    zip->uploadRemote(zipFile, uri.remotePath, this);
+                    const QString workspaceRoot = remote::parseSshUri(dock->rootPath()).remotePath;
+                    zip->uploadRemote(workspaceRoot, zipFile, uri.remotePath, this);
                 } else {
-                    zip->uploadLocal(zipFile, absPath, this);
+                    zip->uploadLocal(dock->rootPath(), zipFile, absPath, this);
                 }
             });
 
@@ -3348,8 +3349,11 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 const QString folderPath = isSshDock
                     ? remote::parseSshUri(absPath).remotePath
                     : absPath;
+                const QString workspaceRoot = isSshDock
+                    ? remote::parseSshUri(dock->rootPath()).remotePath
+                    : dock->rootPath();
                 auto *flow = new CrocShareFlow(this);
-                flow->receiveIntoFolder(zip, folderPath, isSshDock);
+                flow->receiveIntoFolder(zip, workspaceRoot, folderPath, isSshDock);
             });
 
             menu->addMenu(zipMenu);

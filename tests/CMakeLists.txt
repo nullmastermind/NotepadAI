@@ -1750,6 +1750,27 @@ target_sources(test_zip_ignore_walk PRIVATE
 )
 add_test(NAME ZipIgnoreWalk COMMAND test_zip_ignore_walk)
 
+# --- ZipUploadWipe: post-extract orphan set ---
+qt_add_executable(test_zip_upload_wipe test_zip_upload_wipe.cpp)
+target_include_directories(test_zip_upload_wipe PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/remote
+)
+target_link_libraries(test_zip_upload_wipe PRIVATE Qt6::Core Qt6::Test wildmatch_c miniz)
+target_sources(test_zip_upload_wipe PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ZipUploadWipe.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipUploadWipe.h
+    ${CMAKE_SOURCE_DIR}/src/ZipIgnoreWalk.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipIgnoreWalk.h
+    ${CMAKE_SOURCE_DIR}/src/ZipPath.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipPath.h
+    ${CMAKE_SOURCE_DIR}/src/ZipArchive.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipArchive.h
+    ${CMAKE_SOURCE_DIR}/src/remote/GitignoreMatcher.cpp
+    ${CMAKE_SOURCE_DIR}/src/remote/GitignoreMatcher.h
+)
+add_test(NAME ZipUploadWipe COMMAND test_zip_upload_wipe)
+
 # --- CrocTool: code-phrase parse + release asset hint ---
 qt_add_executable(test_croc_tool test_croc_tool.cpp)
 target_include_directories(test_croc_tool PRIVATE ${CMAKE_SOURCE_DIR}/src)

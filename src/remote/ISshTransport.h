@@ -228,6 +228,9 @@ public:
     // directories — use exec "rm -rf" for recursive directory removal.
     virtual Step sftpUnlink(SftpLane lane, const QString &path) = 0;
 
+    // Remove the empty directory at `path` on `lane`'s session.
+    virtual Step sftpRmdir(SftpLane lane, const QString &path) = 0;
+
     // --- keepalive (FIX-3) -------------------------------------------------------
     // Send a keepalive probe. Returns seconds-to-next on success (>= 0), or -1 on
     // a fatal socket error (the connection is dead). EAGAIN is non-fatal and
