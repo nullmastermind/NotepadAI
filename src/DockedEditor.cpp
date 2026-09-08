@@ -114,12 +114,13 @@ DockedEditor::DockedEditor(QWidget *parent) : QObject(parent)
         emit editorActivated(editor);
     });
 
-    // Fire lastTabClosed() once the area is fully empty. dockWidgetRemoved is
+    // Fire lastTabClosed() once content tabs are gone. dockWidgetRemoved is
     // emitted by CDockManager ONLY from CDockWidget::deleteDockWidget() (the
     // delete-on-close path) — never during drag/split/float — and AFTER the
     // widget and any now-empty dock area are removed, so totalTabCount() reads
-    // the settled state here. Both tab kinds use DockWidgetDeleteOnClose, so
-    // neither lingers as a hidden phantom in the layout count.
+    // the settled state here. Editor, preview, and tool tabs all use
+    // DockWidgetDeleteOnClose, so none linger as a hidden phantom. Tool tabs
+    // are excluded from totalTabCount(), so a remaining terminal still fires this.
     connect(dockManager, &ads::CDockManager::dockWidgetRemoved, this, [this](ads::CDockWidget *) {
         if (totalTabCount() == 0)
             emit lastTabClosed();

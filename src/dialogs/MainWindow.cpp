@@ -4086,7 +4086,7 @@ void MainWindow::closeFile(ScintillaNext *editor)
     editor->close();
 
     // No respawn/exit decision here. editor->close() removes the dock widget; if
-    // it was the last tab of any kind, DockedEditor::lastTabClosed fires and
+    // it was the last content tab, DockedEditor::lastTabClosed fires and
     // handleEditorAreaEmptied() does the exit-or-newFile decision centrally.
 }
 
@@ -4103,7 +4103,7 @@ void MainWindow::handleEditorAreaEmptied()
 
     // Defensive re-check: between the signal and this queued slot the user could
     // have opened something (CLI drop, session, a new tab). Only act if the area
-    // is genuinely still empty — covers every tab kind, not just editors.
+    // is genuinely still empty — content tabs only, not tool tabs.
     if (dockedEditor->totalTabCount() != 0) {
         return;
     }

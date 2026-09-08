@@ -18,7 +18,7 @@ Inline blame, gutter diff markers, commit history, staging and unstaging, a bran
 
 ### Terminal
 
-A PTY terminal built on libvterm and libptyqt, with mouse reporting and a scrollback buffer. It reads Justfile, Makefile, package.json, and deno.json, finds which tasks you can run, and draws clickable run icons in the editor margin. Open a terminal at the active workspace or at the current file's folder.
+A PTY terminal built on libvterm and libptyqt, with mouse reporting and a scrollback buffer. New terminals open as a bottom tab under the editor. It reads Justfile, Makefile, package.json, and deno.json, finds which tasks you can run, and draws clickable run icons in the editor margin. Open a terminal at the active workspace or at the current file's folder.
 
 ### Editor
 

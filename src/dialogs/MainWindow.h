@@ -223,9 +223,10 @@ private slots:
     void activateEditor(ScintillaNext *editor);
 
     // Centralized "the editor area just became empty" handler. Wired to
-    // DockedEditor::lastTabClosed, which fires after the LAST tab of ANY kind
-    // (editor, preview, browser, mini-app, …) is removed. Decides between
-    // exiting and spawning a fresh "New X" buffer. No-ops while m_isClosing.
+    // DockedEditor::lastTabClosed, which fires after the last CONTENT tab
+    // (editor, preview, browser, mini-app) is removed — tool tabs (terminal)
+    // do not count. Decides between exiting and spawning a fresh "New X"
+    // buffer. No-ops while m_isClosing.
     void handleEditorAreaEmptied();
 
 private:

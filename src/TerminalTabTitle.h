@@ -29,7 +29,7 @@ inline QString terminalTabTitle(const QString &cwd)
     if (cwd.trimmed().isEmpty())
         return QStringLiteral("Terminal");
 
-    const QString native = QDir::toNativeSeparators(QDir::cleanPath(cwd));
+    QString native = QDir::toNativeSeparators(QDir::cleanPath(cwd));
 #ifdef Q_OS_WIN
     // cleanPath("d:/") collapses to "d:"; keep the root slash the user expects.
     if (native.size() == 2 && native.at(1) == QLatin1Char(':'))
