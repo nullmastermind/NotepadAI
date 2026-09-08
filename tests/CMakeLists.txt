@@ -1629,6 +1629,61 @@ else()
         ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Linux.cpp)
 endif()
 
+# --- ZipPath: zip-slip validation, wrapper-prefix strip, reserved names ---
+qt_add_executable(test_zip_path test_zip_path.cpp)
+target_include_directories(test_zip_path PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_zip_path PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_zip_path PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ZipPath.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipPath.h
+)
+add_test(NAME ZipPath COMMAND test_zip_path)
+
+# --- ZipArchive: miniz pack/extract round-trip ---
+qt_add_executable(test_zip_archive test_zip_archive.cpp)
+target_include_directories(test_zip_archive PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_zip_archive PRIVATE Qt6::Core Qt6::Test miniz)
+target_sources(test_zip_archive PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ZipArchive.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipArchive.h
+)
+add_test(NAME ZipArchive COMMAND test_zip_archive)
+
+# --- ZipIgnoreWalk: .git / node_modules skip + gitignore ---
+qt_add_executable(test_zip_ignore_walk test_zip_ignore_walk.cpp)
+target_include_directories(test_zip_ignore_walk PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/remote
+)
+target_link_libraries(test_zip_ignore_walk PRIVATE Qt6::Core Qt6::Test wildmatch_c)
+target_sources(test_zip_ignore_walk PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ZipIgnoreWalk.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipIgnoreWalk.h
+    ${CMAKE_SOURCE_DIR}/src/ZipPath.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipPath.h
+    ${CMAKE_SOURCE_DIR}/src/remote/GitignoreMatcher.cpp
+    ${CMAKE_SOURCE_DIR}/src/remote/GitignoreMatcher.h
+)
+add_test(NAME ZipIgnoreWalk COMMAND test_zip_ignore_walk)
+
+# --- zip_bench: manual end-to-end walk+pack timing (no ctest, large tree) ---
+qt_add_executable(zip_bench zip_bench.cpp)
+target_include_directories(zip_bench PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/remote
+)
+target_link_libraries(zip_bench PRIVATE Qt6::Core miniz wildmatch_c)
+target_sources(zip_bench PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ZipArchive.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipArchive.h
+    ${CMAKE_SOURCE_DIR}/src/ZipIgnoreWalk.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipIgnoreWalk.h
+    ${CMAKE_SOURCE_DIR}/src/ZipPath.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipPath.h
+    ${CMAKE_SOURCE_DIR}/src/remote/GitignoreMatcher.cpp
+    ${CMAKE_SOURCE_DIR}/src/remote/GitignoreMatcher.h
+)
+
 # --- Optional: real-localhost-sshd smoke test of Libssh2Transport end-to-end.
 #     Excluded from CI (needs a live sshd + libssh2 vendored). Enable with
 #     -DNOTEPADAI_SSH_INTEGRATION=ON and the env NOTEPADAI_SSH_TEST_HOST/USER. ---

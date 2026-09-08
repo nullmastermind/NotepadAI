@@ -37,6 +37,7 @@
 #include "../remote/SshProfile.h"
 #include "../widgets/TransferProgressBar.h"
 #include "../dialogs/TransferLogDialog.h"
+#include "FolderZipTransfer.h"
 #include "ui_FolderAsWorkspaceDock.h"
 
 #include <QApplication>
@@ -44,6 +45,7 @@
 #include <QCursor>
 #include <QDateTime>
 #include <QDir>
+#include <QEventLoop>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFont>
@@ -57,7 +59,9 @@
 #include <QMetaObject>
 #include <QPointer>
 #include <QProgressBar>
+#include <QProgressDialog>
 #include <QPushButton>
+#include <QMessageBox>
 #include <QShowEvent>
 #include <QStyle>
 #include <QTabWidget>
@@ -139,6 +143,8 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(QWidget *parent) :
 
     wireTreeContextMenu();
 
+    setupZipTransfer();
+
     const int wakeUpDelay = QApplication::style()->styleHint(QStyle::SH_ToolTip_WakeUpDelay);
     tooltipTimer->setSingleShot(true);
     tooltipTimer->setInterval(wakeUpDelay > 0 ? wakeUpDelay : 700);
@@ -211,6 +217,8 @@ FolderAsWorkspaceDock::FolderAsWorkspaceDock(const QString &initialPath, QWidget
     });
 
     wireTreeContextMenu();
+
+    setupZipTransfer();
 
     const int wakeUpDelay = QApplication::style()->styleHint(QStyle::SH_ToolTip_WakeUpDelay);
     tooltipTimer->setSingleShot(true);
@@ -405,6 +413,8 @@ void FolderAsWorkspaceDock::useRemoteBackend(remote::RemoteFsBackend *backend)
 
     // Set up the transfer progress bar + manager for this backend.
     setupTransferManager(backend);
+    if (m_zipTransfer)
+        m_zipTransfer->setRemoteBackend(backend);
 }
 
 void FolderAsWorkspaceDock::setupTransferManager(remote::RemoteFsBackend *backend)
@@ -500,6 +510,75 @@ void FolderAsWorkspaceDock::setupTransferManager(remote::RemoteFsBackend *backen
                     m_transferLogDialog->appendStatus(path, ok, error);
             });
 
+}
+
+void FolderAsWorkspaceDock::setupZipTransfer()
+{
+    if (m_zipTransfer)
+        return;
+    m_zipTransfer = new FolderZipTransfer(this);
+
+    auto closeZipProgress = [this]() {
+        if (!m_zipProgressDialog)
+            return;
+        QProgressDialog *dlg = m_zipProgressDialog;
+        m_zipProgressDialog = nullptr;
+        dlg->disconnect();
+        dlg->reset();
+        dlg->hide();
+        dlg->deleteLater();
+    };
+
+    auto ensureZipProgress = [this](int current, int total, const QString &label) {
+        if (!m_zipProgressDialog) {
+            auto *dlg = new QProgressDialog(this->window());
+            dlg->setWindowTitle(tr("Zip"));
+            dlg->setLabelText(label.isEmpty() ? tr("Preparing…") : label);
+            dlg->setCancelButtonText(tr("Cancel"));
+            dlg->setWindowModality(Qt::WindowModal);
+            dlg->setMinimumDuration(0);
+            dlg->setAutoClose(false);
+            dlg->setAutoReset(false);
+            dlg->setMinimumWidth(360);
+            dlg->setMaximumWidth(420);
+            dlg->setFixedWidth(420);
+            connect(dlg, &QProgressDialog::canceled,
+                    m_zipTransfer, &FolderZipTransfer::cancel, Qt::UniqueConnection);
+            m_zipProgressDialog = dlg;
+            dlg->show();
+            dlg->raise();
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        }
+        if (total > 0) {
+            m_zipProgressDialog->setRange(0, total);
+            m_zipProgressDialog->setValue(qBound(0, current, total));
+        } else {
+            m_zipProgressDialog->setRange(0, 0);
+        }
+        if (!label.isEmpty())
+            m_zipProgressDialog->setLabelText(label);
+    };
+
+    connect(m_zipTransfer, &FolderZipTransfer::progressUpdated,
+            this, [ensureZipProgress](int current, int total, qint64, qint64,
+                                       const QString &currentFile, int) {
+                const QString base = QFileInfo(currentFile).fileName();
+                const QString label = currentFile.isEmpty()
+                    ? QString()
+                    : (total > 0
+                           ? QObject::tr("%1 (%2/%3)").arg(base).arg(current).arg(total)
+                           : base);
+                ensureZipProgress(current, total, label);
+            });
+    connect(m_zipTransfer, &FolderZipTransfer::transferCompleted,
+            this, [closeZipProgress](int) { closeZipProgress(); });
+    connect(m_zipTransfer, &FolderZipTransfer::transferCancelled,
+            this, [closeZipProgress]() { closeZipProgress(); });
+    connect(m_zipTransfer, &FolderZipTransfer::transferError,
+            this, [this, closeZipProgress](const QString &message) {
+                closeZipProgress();
+                QMessageBox::warning(this->window(), tr("Zip"), message);
+            });
 }
 
 QStringList FolderAsWorkspaceDock::selectedPaths() const{

@@ -566,6 +566,13 @@ target_sources(NotepadAI PRIVATE widgets/TransferProgressBar.cpp widgets/Transfe
 target_sources(NotepadAI PRIVATE dialogs/TransferConflictDialog.cpp dialogs/TransferConflictDialog.h)
 target_sources(NotepadAI PRIVATE dialogs/TransferLogDialog.cpp dialogs/TransferLogDialog.h)
 target_sources(NotepadAI PRIVATE remote/RemoteTransferManager.cpp remote/RemoteTransferManager.h)
+target_sources(NotepadAI PRIVATE
+    ZipPath.cpp ZipPath.h
+    ZipIgnoreWalk.cpp ZipIgnoreWalk.h
+    ZipArchive.cpp ZipArchive.h
+    FolderZipTransfer.cpp FolderZipTransfer.h
+)
+target_link_libraries(NotepadAI PRIVATE miniz)
 
 # Platform-conditional CredentialStore backend + native API link.
 if(WIN32)
@@ -662,6 +669,7 @@ target_link_libraries(NotepadAI
         supertinycron
         libssh2
         sentry
+        miniz
 )
 
 target_compile_definitions(NotepadAI

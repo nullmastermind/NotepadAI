@@ -41,6 +41,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QFileInfo>
 #include <QUuid>
 #include <QLineEdit>
 #include <QLabel>
@@ -118,6 +119,7 @@
 #include "SshConnectDialog.h"
 #include "SshRemoteFolderPickerDialog.h"
 #include "remote/RemoteTransferManager.h"
+#include "FolderZipTransfer.h"
 #include "TransferConflictDialog.h"
 
 #include "FindReplaceDialog.h"
@@ -3250,6 +3252,61 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             }
         }
         if (isDir) {
+            FolderZipTransfer *zip = dock ? dock->zipTransfer() : nullptr;
+            remote::RemoteTransferManager *zipTx = dock ? dock->transferManager() : nullptr;
+            const bool zipBusy = (zip && zip->isBusy()) || (zipTx && zipTx->isTransferring());
+            auto *zipMenu = new QMenu(tr("Zip"), menu);
+            auto *zipDl = zipMenu->addAction(tr("Download"));
+            auto *zipUl = zipMenu->addAction(tr("Upload"));
+            zipDl->setEnabled(zip && !zipBusy);
+            zipUl->setEnabled(zip && !zipBusy);
+
+            connect(zipDl, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
+                if (!zip || !dock) return;
+                QString folderPath;
+                QString folderName;
+                QString workspaceRoot;
+                if (isSshDock) {
+                    const remote::SshUri uri = remote::parseSshUri(absPath);
+                    if (!uri.valid) return;
+                    folderPath = uri.remotePath;
+                    folderName = folderPath.section(QLatin1Char('/'), -1);
+                    workspaceRoot = remote::parseSshUri(dock->rootPath()).remotePath;
+                } else {
+                    folderPath = absPath;
+                    folderName = QFileInfo(absPath).fileName();
+                    workspaceRoot = dock->rootPath();
+                }
+                if (folderName.isEmpty())
+                    folderName = QStringLiteral("project");
+                const QString dest = QFileDialog::getSaveFileName(
+                    this, tr("Save ZIP"),
+                    QDir::homePath() + QLatin1Char('/') + folderName + QStringLiteral(".zip"),
+                    tr("ZIP archives (*.zip)"));
+                if (dest.isEmpty()) return;
+                if (isSshDock)
+                    zip->downloadRemote(workspaceRoot, folderPath, dest);
+                else
+                    zip->downloadLocal(workspaceRoot, folderPath, dest);
+            });
+
+            connect(zipUl, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
+                if (!zip || !dock) return;
+                const QString zipFile = QFileDialog::getOpenFileName(
+                    this, tr("Open ZIP"), QDir::homePath(), tr("ZIP archives (*.zip)"));
+                if (zipFile.isEmpty()) return;
+                if (isSshDock) {
+                    const remote::SshUri uri = remote::parseSshUri(absPath);
+                    if (!uri.valid) return;
+                    zip->uploadRemote(zipFile, uri.remotePath, this);
+                } else {
+                    zip->uploadLocal(zipFile, absPath, this);
+                }
+            });
+
+            menu->addMenu(zipMenu);
+            menu->addSeparator();
+
             auto *openTerminal = new QAction(tr("Open Terminal Here"), menu);
             if (remote::isSshUri(wsRoot)) {
                 remote::ExecutionContext *ctx = nullptr;
