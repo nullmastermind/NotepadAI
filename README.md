@@ -28,7 +28,7 @@ A tabbed, splittable interface (Qt Advanced Docking System) with syntax highligh
 
 You can connect to a remote machine over SSH and work on it as a local folder. The file tree, terminal, git, and AI agents all route through the connection. Transfers happen over SFTP with conflict detection and a progress UI.
 
-Right-click a folder in the file tree to pack it as a zip (honors .gitignore, skips .git and node_modules) or extract a zip into it, locally or over SSH. You can also share that zip with a one-shot encrypted code-phrase via [croc](https://github.com/schollz/croc), or receive one the same way.
+Right-click a folder in the file tree to pack it as a zip (honors .gitignore, skips .git and node_modules) or extract a zip into it, locally or over SSH. Extracting also removes files that are no longer in the archive, so the folder stays in sync with the zip. You can also share that zip with a one-shot encrypted code-phrase via [croc](https://github.com/schollz/croc), or receive one the same way.
 
 CSV and TSV files open in a sortable, filterable spreadsheet preview that handles large files without loading them entirely into memory.
 
