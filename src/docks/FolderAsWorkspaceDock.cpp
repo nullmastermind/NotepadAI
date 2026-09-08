@@ -524,39 +524,40 @@ void FolderAsWorkspaceDock::setupZipTransfer()
         QProgressDialog *dlg = m_zipProgressDialog;
         m_zipProgressDialog = nullptr;
         dlg->disconnect();
-        dlg->reset();
         dlg->hide();
         dlg->deleteLater();
     };
 
     auto ensureZipProgress = [this](int current, int total, const QString &label) {
+        if (!m_zipTransfer || !m_zipTransfer->isBusy())
+            return;
         if (!m_zipProgressDialog) {
-            auto *dlg = new QProgressDialog(this->window());
+            auto *dlg = new QProgressDialog(this);
             dlg->setWindowTitle(tr("Zip"));
             dlg->setLabelText(label.isEmpty() ? tr("Preparing…") : label);
             dlg->setCancelButtonText(tr("Cancel"));
-            dlg->setWindowModality(Qt::WindowModal);
+            dlg->setWindowModality(Qt::NonModal);
             dlg->setMinimumDuration(0);
             dlg->setAutoClose(false);
             dlg->setAutoReset(false);
             dlg->setMinimumWidth(360);
             dlg->setMaximumWidth(420);
-            dlg->setFixedWidth(420);
             connect(dlg, &QProgressDialog::canceled,
                     m_zipTransfer, &FolderZipTransfer::cancel, Qt::UniqueConnection);
             m_zipProgressDialog = dlg;
             dlg->show();
-            dlg->raise();
-            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         }
+        QProgressDialog *dlg = m_zipProgressDialog;
+        if (!dlg)
+            return;
         if (total > 0) {
-            m_zipProgressDialog->setRange(0, total);
-            m_zipProgressDialog->setValue(qBound(0, current, total));
+            dlg->setRange(0, total);
+            dlg->setValue(qBound(0, current, total));
         } else {
-            m_zipProgressDialog->setRange(0, 0);
+            dlg->setRange(0, 0);
         }
         if (!label.isEmpty())
-            m_zipProgressDialog->setLabelText(label);
+            dlg->setLabelText(label);
     };
 
     connect(m_zipTransfer, &FolderZipTransfer::progressUpdated,

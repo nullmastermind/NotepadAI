@@ -571,6 +571,8 @@ target_sources(NotepadAI PRIVATE
     ZipIgnoreWalk.cpp ZipIgnoreWalk.h
     ZipArchive.cpp ZipArchive.h
     FolderZipTransfer.cpp FolderZipTransfer.h
+    CrocTool.cpp CrocTool.h
+    CrocShareFlow.cpp CrocShareFlow.h
 )
 target_link_libraries(NotepadAI PRIVATE miniz)
 

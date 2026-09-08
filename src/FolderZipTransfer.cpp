@@ -170,22 +170,18 @@ void FolderZipTransfer::downloadLocal(const QString &workspaceRoot, const QStrin
 {
     if (!beginBusy())
         return;
-    m_destZip = destZip;
-    m_partialPath = destZip + QStringLiteral(".partial");
-    QFile::remove(m_partialPath);
-    emit progressUpdated(0, 0, 0, 0, tr("Preparing zip…"), 0);
-
     const QString root = workspaceRoot;
     const QString sel = selectedFolder;
     const QString dest = destZip;
+    m_destZip = dest;
+    m_partialPath = dest + QStringLiteral(".partial");
     const QString partial = m_partialPath;
-    QPointer<FolderZipTransfer> guard(this);
+    QFile::remove(partial);
+    emit progressUpdated(0, 0, 0, 0, tr("Preparing zip…"), 0);
 
     auto *watcher = new QFutureWatcher<QString>(this);
-    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, guard, watcher, dest, partial]() {
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, dest, partial]() {
         watcher->deleteLater();
-        if (guard.isNull())
-            return;
         if (m_cancelled.load()) {
             QFile::remove(partial);
             return;
@@ -245,11 +241,8 @@ void FolderZipTransfer::downloadLocal(const QString &workspaceRoot, const QStrin
             const int n = i + 1;
             const QString name = f.entryName;
             if (shouldReportProgress(n, total)) {
-                QPointer<FolderZipTransfer> g(this);
-                QMetaObject::invokeMethod(this, [g, n, total, name]() {
-                    if (g.isNull() || g->m_cancelled.load())
-                        return;
-                    emit g->progressUpdated(n, total, 0, 0, name, 0);
+                QMetaObject::invokeMethod(this, [this, n, total, name]() {
+                    emit progressUpdated(n, total, 0, 0, name, 0);
                 }, Qt::QueuedConnection);
             }
             if (!writer.addFile(f.absPath, f.entryName)) {
@@ -390,11 +383,8 @@ void FolderZipTransfer::uploadLocal(const QString &zipPath, const QString &selec
             const int n = i + 1;
             const QString name = it.destRel;
             if (shouldReportProgress(n, total)) {
-                QPointer<FolderZipTransfer> g(this);
-                QMetaObject::invokeMethod(this, [g, n, total, name]() {
-                    if (g.isNull() || g->m_cancelled.load())
-                        return;
-                    emit g->progressUpdated(n, total, 0, 0, name, 0);
+                QMetaObject::invokeMethod(this, [this, n, total, name]() {
+                    emit progressUpdated(n, total, 0, 0, name, 0);
                 }, Qt::QueuedConnection);
             }
             const QString dest = QDir::cleanPath(QDir(sel).filePath(it.destRel));

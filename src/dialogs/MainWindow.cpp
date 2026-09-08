@@ -120,6 +120,7 @@
 #include "SshRemoteFolderPickerDialog.h"
 #include "remote/RemoteTransferManager.h"
 #include "FolderZipTransfer.h"
+#include "CrocShareFlow.h"
 #include "TransferConflictDialog.h"
 
 #include "FindReplaceDialog.h"
@@ -3256,12 +3257,20 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             remote::RemoteTransferManager *zipTx = dock ? dock->transferManager() : nullptr;
             const bool zipBusy = (zip && zip->isBusy()) || (zipTx && zipTx->isTransferring());
             auto *zipMenu = new QMenu(tr("Zip"), menu);
-            auto *zipDl = zipMenu->addAction(tr("Download"));
-            auto *zipUl = zipMenu->addAction(tr("Upload"));
-            zipDl->setEnabled(zip && !zipBusy);
-            zipUl->setEnabled(zip && !zipBusy);
+            auto *dlMenu = new QMenu(tr("Download"), zipMenu);
+            auto *ulMenu = new QMenu(tr("Upload"), zipMenu);
+            auto *zipSave = dlMenu->addAction(tr("Save…"));
+            auto *zipShare = dlMenu->addAction(tr("Share…"));
+            auto *zipFromFile = ulMenu->addAction(tr("From file…"));
+            auto *zipFromPhrase = ulMenu->addAction(tr("From code-phrase…"));
+            zipSave->setEnabled(zip && !zipBusy);
+            zipShare->setEnabled(zip && !zipBusy);
+            zipFromFile->setEnabled(zip && !zipBusy);
+            zipFromPhrase->setEnabled(zip && !zipBusy);
+            zipMenu->addMenu(dlMenu);
+            zipMenu->addMenu(ulMenu);
 
-            connect(zipDl, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
+            connect(zipSave, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
                 if (!zip || !dock) return;
                 QString folderPath;
                 QString folderName;
@@ -3290,7 +3299,29 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                     zip->downloadLocal(workspaceRoot, folderPath, dest);
             });
 
-            connect(zipUl, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
+            connect(zipShare, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
+                if (!zip || !dock) return;
+                QString folderPath;
+                QString folderName;
+                QString workspaceRoot;
+                if (isSshDock) {
+                    const remote::SshUri uri = remote::parseSshUri(absPath);
+                    if (!uri.valid) return;
+                    folderPath = uri.remotePath;
+                    folderName = folderPath.section(QLatin1Char('/'), -1);
+                    workspaceRoot = remote::parseSshUri(dock->rootPath()).remotePath;
+                } else {
+                    folderPath = absPath;
+                    folderName = QFileInfo(absPath).fileName();
+                    workspaceRoot = dock->rootPath();
+                }
+                if (folderName.isEmpty())
+                    folderName = QStringLiteral("project");
+                auto *flow = new CrocShareFlow(this);
+                flow->shareFolder(zip, workspaceRoot, folderPath, folderName, isSshDock);
+            });
+
+            connect(zipFromFile, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
                 if (!zip || !dock) return;
                 const QString zipFile = QFileDialog::getOpenFileName(
                     this, tr("Open ZIP"), QDir::homePath(), tr("ZIP archives (*.zip)"));
@@ -3302,6 +3333,15 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 } else {
                     zip->uploadLocal(zipFile, absPath, this);
                 }
+            });
+
+            connect(zipFromPhrase, &QAction::triggered, this, [this, dock, absPath, isSshDock, zip]() {
+                if (!zip || !dock) return;
+                const QString folderPath = isSshDock
+                    ? remote::parseSshUri(absPath).remotePath
+                    : absPath;
+                auto *flow = new CrocShareFlow(this);
+                flow->receiveIntoFolder(zip, folderPath, isSshDock);
             });
 
             menu->addMenu(zipMenu);

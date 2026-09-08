@@ -1666,6 +1666,20 @@ target_sources(test_zip_ignore_walk PRIVATE
 )
 add_test(NAME ZipIgnoreWalk COMMAND test_zip_ignore_walk)
 
+# --- CrocTool: code-phrase parse + release asset hint ---
+qt_add_executable(test_croc_tool test_croc_tool.cpp)
+target_include_directories(test_croc_tool PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_croc_tool PRIVATE Qt6::Core Qt6::Network Qt6::Test miniz)
+target_sources(test_croc_tool PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/CrocTool.cpp
+    ${CMAKE_SOURCE_DIR}/src/CrocTool.h
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.h
+    ${CMAKE_SOURCE_DIR}/src/ZipArchive.cpp
+    ${CMAKE_SOURCE_DIR}/src/ZipArchive.h
+)
+add_test(NAME CrocTool COMMAND test_croc_tool)
+
 # --- zip_bench: manual end-to-end walk+pack timing (no ctest, large tree) ---
 qt_add_executable(zip_bench zip_bench.cpp)
 target_include_directories(zip_bench PRIVATE
