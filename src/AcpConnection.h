@@ -99,6 +99,14 @@ public:
         handleProcessFinished(exitCode, status);
     }
 
+    // Test seam — adopt a process channel without spawn() so tests can observe
+    // outbound JSON-RPC (e.g. session/cancel) without a real subprocess.
+    // Caller must start() the channel afterwards if writes should be delivered.
+    void attachChannelForTest(IAcpProcessChannel *channel)
+    {
+        adoptChannel(channel);
+    }
+
 public slots:
     // Outbound request slots — wrappers that build params and dispatch.
     void sendPrompt(const QString &text, const QList<QPair<QByteArray, QString>> &images);

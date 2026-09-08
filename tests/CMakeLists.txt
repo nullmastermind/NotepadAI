@@ -1648,6 +1648,71 @@ else()
         ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Linux.cpp)
 endif()
 
+# --- GoalAgent: Stop tears down the judge, not the target ACP prompt ---
+qt_add_executable(test_goal_agent test_goal_agent.cpp)
+target_include_directories(test_goal_agent PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/remote
+)
+target_link_libraries(test_goal_agent PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Test)
+target_sources(test_goal_agent PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentDefinition.h
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.h
+    ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpConnection.h
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.h
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.h
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.h
+    ${CMAKE_SOURCE_DIR}/src/GoalActionParser.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalActionParser.h
+    ${CMAKE_SOURCE_DIR}/src/GoalAgent.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalAgent.h
+    ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.h
+    ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeRunner.h
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeSession.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalHttpJudgeSession.h
+    ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.h
+    ${CMAKE_SOURCE_DIR}/src/IAcpProcessChannel.h
+    ${CMAKE_SOURCE_DIR}/src/LocalAcpProcessChannel.cpp
+    ${CMAKE_SOURCE_DIR}/src/LocalAcpProcessChannel.h
+    ${CMAKE_SOURCE_DIR}/src/ai/IAnthropicMessagesClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/AnthropicMessagesClient.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/AnthropicMessagesClient.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore.h
+    ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
+)
+add_test(NAME GoalAgent COMMAND test_goal_agent)
+if(WIN32)
+    target_sources(test_goal_agent PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Windows.cpp)
+    target_link_libraries(test_goal_agent PRIVATE crypt32)
+elseif(APPLE)
+    target_sources(test_goal_agent PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Mac.mm)
+    target_link_libraries(test_goal_agent PRIVATE
+        "-framework Security" "-framework CoreFoundation")
+else()
+    target_sources(test_goal_agent PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Linux.cpp)
+endif()
+
 # --- ZipPath: zip-slip validation, wrapper-prefix strip, reserved names ---
 qt_add_executable(test_zip_path test_zip_path.cpp)
 target_include_directories(test_zip_path PRIVATE ${CMAKE_SOURCE_DIR}/src)

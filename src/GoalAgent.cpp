@@ -127,14 +127,13 @@ void GoalAgent::stop()
     if (m_status != Active)
         return;
     logDebug(QStringLiteral("stop: user requested"));
+    // Tear down the supervisor only: HTTP judge (API) and/or the spawned ACP
+    // judge connection (Agent). Do not cancelPrompt() the target session —
+    // the user's ACP agent keeps its in-flight turn. Composer Cancel is the
+    // path that stops both (AcpSessionView::onCancelClicked).
     destroyJudgeConnection();
     if (m_httpSession)
         m_httpSession->cancel();
-    if (m_targetConnection) {
-        disconnect(m_targetConnection, &AcpConnection::promptEnded,
-                   this, &GoalAgent::onTargetPromptEnded);
-        m_targetConnection->cancelPrompt();
-    }
     markTerminal(Cancelled, QStringLiteral("user_stop"));
 }
 
