@@ -817,6 +817,8 @@ void GitTabWidget::handleCheckoutRequested(const QString &name)
         box.exec();
         auto *clicked = box.clickedButton();
         if (clicked == cancel) return;
+        // Nested event loop: workspace switch can teardown the controller.
+        if (!m_controller) return;
         if (clicked == stash) {
             m_controller->switchBranch(target, GitController::BranchSwitchPolicy::StashAndSwitch);
             return;
@@ -882,21 +884,32 @@ void GitTabWidget::onMenuButtonClicked()
 
     for (const auto &r : remotes) {
         QAction *f = fetchFrom->addAction(r);
-        connect(f, &QAction::triggered, this, [this, r]() { m_controller->fetch(r); });
+        connect(f, &QAction::triggered, this, [this, r]() {
+            if (m_controller) m_controller->fetch(r);
+        });
         QAction *p = pushTo->addAction(r);
         connect(p, &QAction::triggered, this, [this, r]() {
-            m_controller->push(r, /*setUpstream=*/true);
+            if (m_controller) m_controller->push(r, /*setUpstream=*/true);
         });
     }
 
-    connect(aFetch, &QAction::triggered, this, [this]() { m_controller->fetch(); });
-    connect(aPull, &QAction::triggered, this, [this]() { m_controller->pull(false); });
-    connect(aPullR, &QAction::triggered, this, [this]() { m_controller->pull(true); });
-    connect(aPush, &QAction::triggered, this, [this]() { m_controller->push(); });
+    connect(aFetch, &QAction::triggered, this, [this]() {
+        if (m_controller) m_controller->fetch();
+    });
+    connect(aPull, &QAction::triggered, this, [this]() {
+        if (m_controller) m_controller->pull(false);
+    });
+    connect(aPullR, &QAction::triggered, this, [this]() {
+        if (m_controller) m_controller->pull(true);
+    });
+    connect(aPush, &QAction::triggered, this, [this]() {
+        if (m_controller) m_controller->push();
+    });
     connect(aForce, &QAction::triggered, this, [this]() {
         if (QMessageBox::warning(this, tr("Force push?"),
                 tr("Force push with --force-with-lease. This rewrites remote history. Continue?"),
-                QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes) {
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes
+            && m_controller) {
             m_controller->forcePush();
         }
     });
@@ -1076,6 +1089,8 @@ void GitTabWidget::onDirtyTreePrompt(const QString &target)
     box.exec();
     auto *clicked = box.clickedButton();
     if (clicked == cancel) return;
+    // Nested event loop: workspace switch can teardown the controller.
+    if (!m_controller) return;
     if (clicked == stash) {
         m_controller->switchBranch(target, GitController::BranchSwitchPolicy::StashAndSwitch);
     } else if (clicked == force) {
@@ -1095,6 +1110,8 @@ void GitTabWidget::onPullDivergedPrompt()
     box.setDefaultButton(merge);
     box.exec();
     auto *clicked = box.clickedButton();
+    // Nested event loop: workspace switch can teardown the controller.
+    if (!m_controller) return;
     if (clicked == merge) {
         m_controller->pullMerge();
     } else if (clicked == rebase) {
@@ -1113,6 +1130,8 @@ void GitTabWidget::onPushRejectedPrompt()
     box.setDefaultButton(rebase);
     box.exec();
     auto *clicked = box.clickedButton();
+    // Nested event loop: workspace switch can teardown the controller.
+    if (!m_controller) return;
     if (clicked == rebase) {
         m_pushAfterPull = true;
         m_controller->pull(/*rebase=*/true);
