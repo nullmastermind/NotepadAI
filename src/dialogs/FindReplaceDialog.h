@@ -20,6 +20,7 @@
 #ifndef FINDREPLACEDIALOG_H
 #define FINDREPLACEDIALOG_H
 
+#include <cstdint>
 #include <QDialog>
 #include <QEvent>
 #include <QStatusBar>
@@ -42,7 +43,7 @@ class FindReplaceDialog : public QDialog
     Q_OBJECT
 
 public:
-    enum {
+    enum : std::uint8_t {
         FIND_TAB = 0,
         REPLACE_TAB = 1,
         MARK_TAB = 2

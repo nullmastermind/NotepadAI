@@ -158,7 +158,7 @@ NotepadNextApplication::NotepadNextApplication(int &argc, char **argv, const QSt
 {
 #ifdef Q_OS_WIN
     // Create a system-wide mutex so the installer can detect if it is running
-    CreateMutex(NULL, false, L"NotepadNextMutex");
+    CreateMutex(nullptr, false, L"NotepadNextMutex");
 #endif
     parseCommandLine(parser, arguments());
 
@@ -739,11 +739,11 @@ bool NotepadNextApplication::isRunningAsAdmin() const
 #ifdef Q_OS_WIN
         BOOL isMember;
         SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
-        PSID administratorsGroupSid = NULL;
+        PSID administratorsGroupSid = nullptr;
 
         // Create a SID for the Administrators group
         if (AllocateAndInitializeSid(&ntAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &administratorsGroupSid)) {
-            if (CheckTokenMembership(NULL, administratorsGroupSid, &isMember)) {
+            if (CheckTokenMembership(nullptr, administratorsGroupSid, &isMember)) {
                 isAdmin = isMember;
             }
             FreeSid(administratorsGroupSid);

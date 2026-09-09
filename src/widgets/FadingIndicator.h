@@ -19,11 +19,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <QWidget>
 
 namespace FadingIndicator {
 
-enum TextSize {
+enum TextSize : std::uint8_t {
     SmallText,
     LargeText
 };

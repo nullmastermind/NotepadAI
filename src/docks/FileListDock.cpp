@@ -23,6 +23,7 @@
 
 #include "MainWindow.h"
 
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization): ApplicationSetting stores std::function.
 ApplicationSetting<bool> sortByName{"FileList/SortByName", false};
 
 FileListDock::FileListDock(MainWindow *parent) :

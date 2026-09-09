@@ -37,10 +37,10 @@
 #define INDIC_BRACEHIGHLIGHT INDIC_CONTAINER
 
 static bool inline isBrace(int ch) {
-    return strchr("[]{}()", ch) != NULL;
+    return strchr("[]{}()", ch) != nullptr;
 }
 
-inline static void raise_error(lua_State *L, const char *errMsg=NULL) {
+inline static void raise_error(lua_State *L, const char *errMsg=nullptr) {
     luaL_where(L, 1);
     if (errMsg) {
         lua_pushstring(L, errMsg);

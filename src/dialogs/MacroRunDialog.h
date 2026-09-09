@@ -36,7 +36,7 @@ class MacroRunDialog : public QDialog
 
 public:
     MacroRunDialog(QWidget *parent, MacroManager *mm);
-    ~MacroRunDialog();
+    ~MacroRunDialog() override;
 
 protected:
     void showEvent(QShowEvent *event) override;

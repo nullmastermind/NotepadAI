@@ -33,7 +33,7 @@ class ColumnEditorDialog : public QDialog
 
 public:
     explicit ColumnEditorDialog(MainWindow *parent);
-    ~ColumnEditorDialog();
+    ~ColumnEditorDialog() override;
 
     void insertTextStartingAtCurrentColumn(const std::function <QString (void)>& f);
     void insertTextAtColumn(ScintillaNext *editor, int line, int column, const QString &str);

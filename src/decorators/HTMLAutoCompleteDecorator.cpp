@@ -23,7 +23,9 @@
 static const int MAX_TAG_NAME_LENGTH = 64;
 static const int MAX_TAG_LENGTH = 1024;
 
-static const QByteArrayList voidTags = { "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr" };
+static constexpr const char *kVoidTags[] = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"
+};
 
 
 HTMLAutoCompleteDecorator::HTMLAutoCompleteDecorator(ScintillaNext *editor)
@@ -79,7 +81,9 @@ void HTMLAutoCompleteDecorator::notify(const Scintilla::NotificationData *pscn)
             if (tag[0] == '/') return; // </div>
             if (tag[0] == '?') return; // <?php>
             if (tag[0] == '!') return; // <!-- and <!doctype
-            if (voidTags.contains(tag)) return; // Some tags are not expected to have closing tags
+            for (const char *name : kVoidTags) {
+                if (tag == name) return; // Some tags are not expected to have closing tags
+            }
 
             // All good to go now, wrap it and insert it
             tag.prepend("</");

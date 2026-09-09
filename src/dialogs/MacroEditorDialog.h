@@ -36,7 +36,7 @@ class MacroEditorDialog : public QDialog
 
 public:
     explicit MacroEditorDialog(QWidget *parent, MacroManager *mm);
-    ~MacroEditorDialog();
+    ~MacroEditorDialog() override;
 
 private slots:
     void rowChanged(const QModelIndex &current, const QModelIndex &previous);

@@ -36,7 +36,7 @@ class LanguageInspectorDock : public QDockWidget
 
 public:
     explicit LanguageInspectorDock(MainWindow *parent);
-    ~LanguageInspectorDock();
+    ~LanguageInspectorDock() override;
 
 private slots:
     void connectToEditor(ScintillaNext *editor);

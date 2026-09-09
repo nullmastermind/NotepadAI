@@ -31,8 +31,8 @@ class MacroSaveDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit MacroSaveDialog(QWidget *parent = 0);
-    ~MacroSaveDialog();
+    explicit MacroSaveDialog(QWidget *parent = nullptr);
+    ~MacroSaveDialog() override;
 
     QString getName() const;
     QKeySequence getShortcut() const;

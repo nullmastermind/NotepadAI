@@ -24,7 +24,7 @@
 #include <iterator>
 
 template<typename Iter>
-typename std::iterator_traits<Iter>::value_type const *binary_find(Iter begin, Iter end, const char *name) {
+typename std::iterator_traits<Iter>::value_type const *binary_find(const Iter &begin, const Iter &end, const char *name) {
     auto it = std::lower_bound(begin, end, name, [](const auto &lhs, const char *rhs) {
         return strcmp(lhs.name, rhs) < 0;
     });
@@ -38,11 +38,11 @@ typename std::iterator_traits<Iter>::value_type const *binary_find(Iter begin, I
 }
 
 const IFaceConstant *IFaceTable::FindConstant(const char *name) const {
-    return binary_find(constants.cbegin(), constants.cend(), name);
+    return binary_find(constants.begin(), constants.end(), name);
 }
 
 const IFaceFunction *IFaceTable::FindFunction(const char *name) const {
-    return binary_find(functions.cbegin(), functions.cend(), name);
+    return binary_find(functions.begin(), functions.end(), name);
 }
 
 const IFaceFunction *IFaceTable::FindFunctionByConstantName(const char *name) const {
@@ -75,7 +75,7 @@ const IFaceFunction *IFaceTable::FindFunctionByValue(int value) const {
 }
 
 const IFaceProperty *IFaceTable::FindProperty(const char *name) const {
-    return binary_find(properties.cbegin(), properties.cend(), name);
+    return binary_find(properties.begin(), properties.end(), name);
 }
 
 int IFaceTable::GetConstantName(int value, char *nameOut, unsigned nameBufferLen, const char *hint) const {
@@ -104,7 +104,7 @@ int IFaceTable::GetConstantName(int value, char *nameOut, unsigned nameBufferLen
     }
 
     for (const auto &con : constants) {
-        if (con.value == value && (hint == NULL || strncmp(hint, con.name, strlen(hint)) == 0)) {
+        if (con.value == value && (hint == nullptr || strncmp(hint, con.name, strlen(hint)) == 0)) {
             int len = static_cast<int>(strlen(con.name));
             if (nameOut && (static_cast<int>(nameBufferLen) > len)) {
                 strcpy(nameOut, con.name);

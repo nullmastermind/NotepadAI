@@ -23,6 +23,7 @@
 #include <time.h>
 
 #include <string>
+#include <cstdint>
 
 #include "Scintilla.h"
 #include "LuaExtension.h"
@@ -82,7 +83,7 @@ static bool call_function(lua_State *L, int nargs, bool ignoreFunctionReturnValu
 // and for these I just make a judgement call
 
 static ScintillaEdit *editor;
-static lua_State *luaState = 0;
+static lua_State *luaState = nullptr;
 static bool luaDisabled = false;
 static bool tracebackEnabled = true;
 
@@ -101,7 +102,7 @@ static NppExtensionAPIPane check_pane_object(lua_State *L, int index);
 static void push_pane_object(lua_State *L, NppExtensionAPIPane p);
 static int iface_function_helper(lua_State *L, const IFaceFunction &func);
 
-inline void raise_error(lua_State *L, const char *errMsg=NULL) {
+inline void raise_error(lua_State *L, const char *errMsg=nullptr) {
     luaL_where(L, 1);
     if (errMsg) {
         lua_pushstring(L, errMsg);
@@ -315,8 +316,8 @@ static int iface_function_helper(lua_State *L, const IFaceFunction &func) {
 
     sptr_t params[2] = {0,0};
 
-    char *stringResult = 0;
-    enum stringResultType { none, string, tstring } needStringResult = none;
+    char *stringResult = nullptr;
+    enum stringResultType : std::uint8_t { none, string, tstring } needStringResult = none;
     int loopParamCount = 2;
 
     if (func.paramType[0] == iface_length && func.paramType[1] == iface_string) {
@@ -667,7 +668,7 @@ static int cf_global_metatable_index(lua_State *L) {
 static int LuaPanicFunction(lua_State *L) {
     if (L == luaState) {
         lua_close(luaState);
-        luaState = NULL;
+        luaState = nullptr;
         luaDisabled = true;
     }
     hostTraceError("\nError occurred in unprotected call.  This is very bad.\n");
@@ -743,8 +744,8 @@ bool LuaExtension::Finalise() {
         lua_close(luaState);
     }
 
-    luaState = NULL;
-    editor = NULL;
+    luaState = nullptr;
+    editor = nullptr;
 
     return false;
 }

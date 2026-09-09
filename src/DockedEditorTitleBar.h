@@ -34,7 +34,7 @@ signals:
     void doubleClicked();
 
 protected:
-    void mouseDoubleClickEvent(QMouseEvent *event) {
+    void mouseDoubleClickEvent(QMouseEvent *event) override {
         ads::CDockAreaTitleBar::mouseDoubleClickEvent(event);
 
         if (event->button() == Qt::LeftButton) {

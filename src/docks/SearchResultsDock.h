@@ -37,7 +37,7 @@ class SearchResultsDock : public QDockWidget, public ISearchResultsHandler
 
 public:
     explicit SearchResultsDock(QWidget *parent = nullptr);
-    ~SearchResultsDock();
+    ~SearchResultsDock() override;
 
     void newSearch(const QString searchTerm) override;
     void newFileEntry(ScintillaNext *editor) override;

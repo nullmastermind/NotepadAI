@@ -18,13 +18,14 @@
 
 #pragma once
 
+#include <cstdint>
 #include <QList>
 #include <QByteArray>
 
 class Sorter
 {
 public:
-    enum class Direction {
+    enum class Direction : std::uint8_t {
         Ascending,
         Descending
     };

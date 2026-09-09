@@ -37,7 +37,7 @@ class FileListDock : public QDockWidget
 
 public:
     explicit FileListDock(MainWindow *parent);
-    ~FileListDock();
+    ~FileListDock() override;
 
 private slots:
     void refreshList();

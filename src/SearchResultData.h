@@ -18,10 +18,11 @@
 
 #pragma once
 
+#include <cstdint>
 #include <Qt>
 
 namespace SearchResultData {
-    enum Role
+    enum Role : std::uint16_t
     {
         LineNumber = Qt::UserRole,
         LinePosStart,

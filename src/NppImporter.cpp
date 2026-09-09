@@ -58,6 +58,7 @@ struct LanguageName {
 };
 
 #define TEXT(x) x
+// NOLINTBEGIN(bugprone-throwing-static-initialization): QMap/QString tables cannot have noexcept dynamic init.
 static const QMap<QString, LanguageName> langNamesToLexer = {
     {TEXT("normal"),		{TEXT("Normal text"),		TEXT("Normal text file"),								SCLEX_NULL}},
     {TEXT("php"),			{TEXT("PHP"),				TEXT("PHP Hypertext Preprocessor file"),				SCLEX_HTML}},
@@ -153,6 +154,7 @@ static const QMap<QString, QVector<int>> folderMarkers = {
     {"circle", {SC_MARK_CIRCLEMINUS,   SC_MARK_CIRCLEPLUS,SC_MARK_VLINE,        SC_MARK_LCORNERCURVE,  SC_MARK_CIRCLEPLUSCONNECTED, SC_MARK_CIRCLEMINUSCONNECTED, SC_MARK_TCORNERCURVE}},
     {"box", {SC_MARK_BOXMINUS,      SC_MARK_BOXPLUS,   SC_MARK_VLINE,        SC_MARK_LCORNER,       SC_MARK_BOXPLUSCONNECTED,    SC_MARK_BOXMINUSCONNECTED,    SC_MARK_TCORNER}}
 };
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 NppImporter::NppImporter(const QString &configPath, ScintillaEdit *_editor) :
     editor(_editor)

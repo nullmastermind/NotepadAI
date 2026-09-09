@@ -34,12 +34,12 @@ class LuaConsoleDock : public QDockWidget
     Q_OBJECT
 
 public:
-    explicit LuaConsoleDock(LuaState *l, QWidget *parent = 0);
-    ~LuaConsoleDock();
+    explicit LuaConsoleDock(LuaState *l, QWidget *parent = nullptr);
+    ~LuaConsoleDock() override;
 
     void writeToOutput(const char *s);
     void writeErrorToOutput(const char *s);
-    LuaState *L = Q_NULLPTR;
+    LuaState *L = nullptr;
 
     void historyNext();
     void historyPrevious();
@@ -47,10 +47,10 @@ public:
     void historyEnd();
 
 public slots:
-    void runCurrentCommand(void);
+    void runCurrentCommand();
 
 protected:
-    bool eventFilter(QObject *obj, QEvent *event);
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private:
     Ui::LuaConsoleDock *ui;

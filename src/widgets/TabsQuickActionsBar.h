@@ -20,6 +20,7 @@
 #ifndef TABSQUICKACTIONSBAR_H
 #define TABSQUICKACTIONSBAR_H
 
+#include <cstdint>
 #include <QToolBar>
 
 class TabsQuickActionsBar : public QToolBar
@@ -34,7 +35,7 @@ class TabsQuickActionsBar : public QToolBar
     )
 
 public:
-    enum Button {
+    enum Button : std::uint8_t {
         None            = 0x00,
         CreateNewTab    = 0x01,
         ShowTabsMenu    = 0x02,

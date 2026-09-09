@@ -21,7 +21,10 @@ deadValues = [
 ]
 
 def HMessages(f):
-    out = ["enum class Message {"]
+    out = [
+        "// NOLINTBEGIN(performance-enum-size): generated Scintilla.iface protocol enums; values are ints and Q_ENUM-registered.",
+        "enum class Message {",
+    ]
     for name in f.order:
         v = f.features[name]
         if v["Category"] != "Deprecated":
@@ -72,6 +75,7 @@ def HEnumerations(f):
                 out.append("\t\t" + name + " = " + v["Value"] + ",")
     out.append("\t};")
     out.append(f"\tQ_ENUM(Notification);")
+    out.append("// NOLINTEND(performance-enum-size)")
     return out
 
 

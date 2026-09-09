@@ -33,7 +33,7 @@ class DebugLogDock : public QDockWidget
 
 public:
     explicit DebugLogDock(QWidget *parent = nullptr);
-    ~DebugLogDock();
+    ~DebugLogDock() override;
 
 private:
     Ui::DebugLogDock *ui;

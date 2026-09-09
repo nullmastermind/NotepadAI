@@ -20,10 +20,12 @@
 #ifndef IFACETABLE_H
 #define IFACETABLE_H
 
+#include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
-enum IFaceType {
+enum IFaceType : std::uint8_t {
     iface_void,
     iface_int,
     iface_length,
@@ -116,9 +118,9 @@ public:
 class IFaceTable : public IFaceTableInterface {
 public:
     IFaceTable(const char *_prefix,
-        const std::vector<IFaceFunction> &_functions,
-        const std::vector<IFaceConstant> &_constants,
-        const std::vector<IFaceProperty> &_properties) :
+        std::span<const IFaceFunction> _functions,
+        std::span<const IFaceConstant> _constants,
+        std::span<const IFaceProperty> _properties) noexcept :
         prefix(_prefix),
         functions(_functions),
         constants(_constants),
@@ -127,19 +129,19 @@ public:
 
     const char *prefix;
 
-    const std::vector<IFaceFunction> &functions;
-    const std::vector<IFaceConstant> &constants;
-    const std::vector<IFaceProperty> &properties;
+    std::span<const IFaceFunction> functions;
+    std::span<const IFaceConstant> constants;
+    std::span<const IFaceProperty> properties;
 
     // IFaceTableInterface
-    const IFaceConstant *FindConstant(const char *name) const;
-    const IFaceFunction *FindFunction(const char *name) const;
-    const IFaceFunction *FindFunctionByConstantName(const char *name) const;
-    const IFaceFunction *FindFunctionByValue(int value) const;
-    const IFaceProperty *FindProperty(const char *name) const;
-    int GetConstantName(int value, char *nameOut, unsigned nameBufferLen, const char *hint) const;
-    const IFaceFunction *GetFunctionByMessage(int message) const;
-    IFaceFunction GetPropertyFuncByMessage(int message) const;
+    const IFaceConstant *FindConstant(const char *name) const override;
+    const IFaceFunction *FindFunction(const char *name) const override;
+    const IFaceFunction *FindFunctionByConstantName(const char *name) const override;
+    const IFaceFunction *FindFunctionByValue(int value) const override;
+    const IFaceProperty *FindProperty(const char *name) const override;
+    int GetConstantName(int value, char *nameOut, unsigned nameBufferLen, const char *hint) const override;
+    const IFaceFunction *GetFunctionByMessage(int message) const override;
+    IFaceFunction GetPropertyFuncByMessage(int message) const override;
 
     std::vector<std::string> GetAllConstantNames() const;
     std::vector<std::string> GetAllFunctionNames() const;

@@ -21,6 +21,7 @@
 #define SESSIONMANAGER_H
 
 
+#include <cstdint>
 #include <QDir>
 #include <QSettings>
 
@@ -32,7 +33,7 @@ class NotepadNextApplication;
 class SessionManager
 {
 public:
-    enum SessionFileType {
+    enum SessionFileType : std::uint8_t {
         None = 0,
         SavedFile = 1,
         UnsavedFile = 2,

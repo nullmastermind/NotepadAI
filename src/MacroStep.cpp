@@ -26,6 +26,7 @@
 using namespace Scintilla;
 
 
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization): QMap<QString> display names cannot have noexcept dynamic init.
 QMap<Scintilla::Message, QString> messageData {
     { Scintilla::Message::Cut, "Cut" },
     { Scintilla::Message::Copy, "Copy" },

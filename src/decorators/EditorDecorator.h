@@ -31,7 +31,7 @@ class EditorDecorator : public QObject
 
 public:
     explicit EditorDecorator(ScintillaNext *editor) : QObject(editor), editor(editor) {}
-    virtual ~EditorDecorator() {}
+    ~EditorDecorator() override = default;
 
     bool isEnabled() const { return enabled; }
     ScintillaNext *getEditor() const { return editor; }

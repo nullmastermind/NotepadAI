@@ -20,6 +20,8 @@
 #include "ScintillaNext.h"
 #include "ComboBoxDelegate.h"
 
+#include <iterator>
+
 static inline QRgb convert_color(QRgb c) {
     const int red = qRed(c);
     const int green = qGreen(c);
@@ -28,7 +30,10 @@ static inline QRgb convert_color(QRgb c) {
     return qRgb(blue, green, red);
 }
 
-QList<ComboBoxItem> caseItems{
+static constexpr struct {
+    const char *name;
+    int value;
+} kCaseItems[] = {
     {"SC_CASE_MIXED", SC_CASE_MIXED},
     {"SC_CASE_UPPER", SC_CASE_UPPER},
     {"SC_CASE_LOWER", SC_CASE_LOWER},
@@ -36,16 +41,16 @@ QList<ComboBoxItem> caseItems{
 };
 
 QString val_to_case_str(int val) {
-    for (const ComboBoxItem &item : caseItems) {
-        if (item.second == val) {
-            return item.first;
+    for (const auto &item : kCaseItems) {
+        if (item.value == val) {
+            return QLatin1String(item.name);
         }
     }
 
     return QString();
 }
 
-QStringList columns{
+static constexpr const char *kColumns[] = {
     "ID",
     "Name",
     "Tags",
@@ -76,7 +81,7 @@ QVariant LanguageStylesModel::headerData(int section, Qt::Orientation orientatio
 {
     if (role == Qt::DisplayRole) {
         if (orientation == Qt::Horizontal) {
-            return columns[section];
+            return QLatin1String(kColumns[section]);
         }
     }
 
@@ -96,7 +101,7 @@ int LanguageStylesModel::columnCount(const QModelIndex &parent) const
     if (parent.isValid())
         return 0;
 
-    return columns.size();
+    return static_cast<int>(std::size(kColumns));
 }
 
 QVariant LanguageStylesModel::data(const QModelIndex &index, int role) const

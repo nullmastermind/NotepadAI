@@ -20,11 +20,13 @@
 #include "EditorManager.h"
 #include "ScintillaNext.h"
 
+#include <iterator>
 
-static QList<QColor> marker_colors = {
-    QColor(0x00, 0xFF, 0xFF),
-    QColor(0xFF, 0x80, 0x00),
-    QColor(0xFF, 0xFF, 0x00)
+
+static constexpr QRgb kMarkerColors[] = {
+    qRgb(0x00, 0xFF, 0xFF),
+    qRgb(0xFF, 0x80, 0x00),
+    qRgb(0xFF, 0xFF, 0x00)
 };
 
 static int QColorToScintillaColour(QColor c)
@@ -37,9 +39,9 @@ MarkerAppDecorator::MarkerAppDecorator(NotepadNextApplication *app)
 {
     // Any time an editor is created go ahead and allocate/set the required indicators
     connect(app->getEditorManager(), &EditorManager::editorCreated, this, [](ScintillaNext *editor) {
-        for (int i = 0; i < marker_colors.size(); i++) {
+        for (int i = 0; i < static_cast<int>(std::size(kMarkerColors)); i++) {
             int indicator = editor->allocateIndicator(QString("marker_%1").arg(i));
-            editor->indicSetFore(indicator, QColorToScintillaColour(marker_colors[i]));
+            editor->indicSetFore(indicator, QColorToScintillaColour(QColor(kMarkerColors[i])));
             editor->indicSetStyle(indicator, INDIC_ROUNDBOX);
             editor->indicSetOutlineAlpha(indicator, 150);
             editor->indicSetAlpha(indicator, 100);
@@ -50,7 +52,7 @@ MarkerAppDecorator::MarkerAppDecorator(NotepadNextApplication *app)
 
 QColor MarkerAppDecorator::markerColor(int i) const
 {
-    return marker_colors[i];
+    return QColor(kMarkerColors[i]);
 }
 
 void MarkerAppDecorator::mark(ScintillaNext *editor, int i)
@@ -99,7 +101,7 @@ void MarkerAppDecorator::clear(ScintillaNext *editor, int i)
 
 void MarkerAppDecorator::clearAll(ScintillaNext *editor)
 {
-    for (int i = 0; i < marker_colors.size(); i++) {
+    for (int i = 0; i < static_cast<int>(std::size(kMarkerColors)); i++) {
         clear(editor, i);
     }
 }

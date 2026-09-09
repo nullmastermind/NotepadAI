@@ -46,15 +46,15 @@ const int CHUNK_SIZE = 1024 * 1024 * 4; // Not sure what is best
 // give the remote load 60s before declaring failure (matches kTimeoutStatus).
 static constexpr int kRemoteLoadTimeoutMs = 60'000;
 
-inline const QByteArray BOM_UTF8    = QByteArray::fromHex("EFBBBF");
-inline const QByteArray BOM_UTF16LE = QByteArray::fromHex("FFFE");
-inline const QByteArray BOM_UTF16BE = QByteArray::fromHex("FEFF");
+constexpr char kBomUtf8[] = "\xEF\xBB\xBF";
+constexpr char kBomUtf16LE[] = "\xFF\xFE";
+constexpr char kBomUtf16BE[] = "\xFE\xFF";
 
 ScintillaNext::BomType detectBom(const QByteArray& data)
 {
-    if (data.startsWith(BOM_UTF8))    return ScintillaNext::BomType::Utf8;
-    if (data.startsWith(BOM_UTF16LE)) return ScintillaNext::BomType::Utf16LE;
-    if (data.startsWith(BOM_UTF16BE)) return ScintillaNext::BomType::Utf16BE;
+    if (data.startsWith(kBomUtf8))    return ScintillaNext::BomType::Utf8;
+    if (data.startsWith(kBomUtf16LE)) return ScintillaNext::BomType::Utf16LE;
+    if (data.startsWith(kBomUtf16BE)) return ScintillaNext::BomType::Utf16BE;
 
     return ScintillaNext::BomType::None;
 }
@@ -62,9 +62,9 @@ ScintillaNext::BomType detectBom(const QByteArray& data)
 QByteArray bomData(ScintillaNext::BomType bom)
 {
     switch (bom) {
-    case ScintillaNext::BomType::Utf8:    return BOM_UTF8;
-    case ScintillaNext::BomType::Utf16LE: return BOM_UTF16LE;
-    case ScintillaNext::BomType::Utf16BE: return BOM_UTF16BE;
+    case ScintillaNext::BomType::Utf8:    return QByteArray(kBomUtf8, 3);
+    case ScintillaNext::BomType::Utf16LE: return QByteArray(kBomUtf16LE, 2);
+    case ScintillaNext::BomType::Utf16BE: return QByteArray(kBomUtf16BE, 2);
     case ScintillaNext::BomType::None:    return QByteArray();
     }
     return QByteArray();
@@ -72,9 +72,9 @@ QByteArray bomData(ScintillaNext::BomType bom)
 
 int bomLength(ScintillaNext::BomType bom)
 {
-    if (bom == ScintillaNext::BomType::Utf8) return BOM_UTF8.length();
-    else if (bom == ScintillaNext::BomType::Utf16LE) return BOM_UTF16LE.length();
-    else if (bom == ScintillaNext::BomType::Utf16BE) return BOM_UTF16BE.length();
+    if (bom == ScintillaNext::BomType::Utf8) return 3;
+    else if (bom == ScintillaNext::BomType::Utf16LE) return 2;
+    else if (bom == ScintillaNext::BomType::Utf16BE) return 2;
 
     return 0;
 }

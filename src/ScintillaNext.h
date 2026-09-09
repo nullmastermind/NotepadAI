@@ -23,6 +23,8 @@
 #include "RangeAllocator.h"
 #include "ScintillaEdit.h"
 
+#include <cstdint>
+
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
@@ -47,7 +49,7 @@ public:
     }
 
     explicit ScintillaNext(const QString &name, QWidget *parent = Q_NULLPTR);
-    virtual ~ScintillaNext();
+    ~ScintillaNext() override;
 
     static ScintillaNext *fromFile(const QString &filePath, bool tryToCreate=false);
 
@@ -86,7 +88,7 @@ public:
     QString remotePath() const { return remoteFilePath; }
     void setRemoteIdentity(const QString &newRemotePath, const QString &newUri);
 
-    enum class LoadState {
+    enum class LoadState : std::uint8_t {
         Idle,    // local buffer or fully-loaded remote buffer
         Loading, // remote bytes in flight (read-only placeholder shown)
         Loaded,  // remote content arrived and filled
@@ -119,7 +121,8 @@ public:
 
     void deleteLine(int line);
 
-    void cutAllowLine();
+    // Intentional wrap of non-virtual ScintillaEdit::cutAllowLine with empty-selection cut-line behavior.
+    void cutAllowLine(); // NOLINT(bugprone-derived-method-shadowing-base-method)
 
     void modifyFoldLevels(int level, int action);
     void foldAllLevels(int level);
@@ -155,20 +158,20 @@ public:
 
     void detachFileInfo(const QString &newName);
 
-    enum FileStateChange {
+    enum FileStateChange : std::uint8_t {
         NoChange,
         Modified,
         Deleted,
         Restored,
     };
 
-    enum BufferType {
+    enum BufferType : std::uint8_t {
         New, // A temporary buffer, e.g. "New 1"
         File, // Buffer tied to a file on the file system
         FileMissing, // Buffer with a missing file on the file system
     };
 
-    enum class BomType {
+    enum class BomType : std::uint8_t {
         None,
         Utf8,
         Utf16LE,
@@ -189,7 +192,8 @@ public:
 
 
 public slots:
-    void close();
+    // Buffer-close slot; QWidget::close() is bool and non-virtual, so this cannot override.
+    void close(); // NOLINT(bugprone-derived-method-shadowing-base-method)
     QFileDevice::FileError save();
     void reload();
     void omitModifications();

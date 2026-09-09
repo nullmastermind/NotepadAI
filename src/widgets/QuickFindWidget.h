@@ -40,7 +40,7 @@ class QuickFindWidget : public QFrame
 
 public:
     explicit QuickFindWidget(QWidget *parent = nullptr);
-    ~QuickFindWidget();
+    ~QuickFindWidget() override;
 
     void setEditor(ScintillaNext *editor);
 

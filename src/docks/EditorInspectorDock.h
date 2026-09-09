@@ -41,7 +41,7 @@ class EditorInspectorDock : public QDockWidget
 
 public:
     explicit EditorInspectorDock(MainWindow *parent);
-    ~EditorInspectorDock();
+    ~EditorInspectorDock() override;
 
 private slots:
     void connectToEditor(ScintillaNext *editor);
