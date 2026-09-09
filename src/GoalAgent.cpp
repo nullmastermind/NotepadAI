@@ -77,6 +77,8 @@ bool GoalAgent::start(const StartRequest &req)
     m_awaitingJudgeResponse = false;
     m_correctionAttempted = false;
     m_awaitingAuthoring = false;
+    m_restartedSinceLastEval = false;
+    m_restartingTarget = false;
     m_authoringBuffer.clear();
     m_authoringVerdict.clear();
 
@@ -215,6 +217,8 @@ void GoalAgent::onTargetDestroyed()
 {
     m_targetConnection = nullptr;
     m_targetModel = nullptr;
+    if (m_restartingTarget)
+        return;
     if (m_status != Active)
         return;
     logDebug(QStringLiteral("onTargetDestroyed: target session terminated, target=%1")
@@ -225,6 +229,7 @@ void GoalAgent::onTargetDestroyed()
 
 void GoalAgent::evaluateCurrentCriterion()
 {
+    m_restartedSinceLastEval = false;
     if (GoalHttpJudge::isCustomApiAgent(m_agentId)) {
         evaluateViaHttp();
         return;
@@ -335,43 +340,127 @@ void GoalAgent::processJudgeResponse()
 
 void GoalAgent::applyJudgeAction(const GoalAction &action)
 {
-    m_lastActionText = action.text;
-    logDebug(QStringLiteral("processJudgeResponse: action=%1, text=%2")
-                 .arg(action.type == GoalAction::Complete
-                          ? QStringLiteral("complete")
-                          : QStringLiteral("continue"),
-                      action.text.left(100)));
-    emit actionEmitted(action.type == GoalAction::Complete
-                           ? QStringLiteral("complete")
-                           : QStringLiteral("continue"),
-                       action.text);
+    if (m_status != Active)
+        return;
 
-    if (action.type == GoalAction::Continue) {
+    m_lastActionText = action.text;
+    QString typeName = QStringLiteral("continue");
+    if (action.type == GoalAction::Complete)
+        typeName = QStringLiteral("complete");
+    else if (action.type == GoalAction::Restart)
+        typeName = QStringLiteral("restart");
+    logDebug(QStringLiteral("processJudgeResponse: action=%1, text=%2")
+                 .arg(typeName, action.text.left(100)));
+    emit actionEmitted(typeName, action.text);
+
+    if (action.type == GoalAction::Complete) {
+        advanceToNextCriterion(action.text);
+        return;
+    }
+
+    if (action.type == GoalAction::Restart) {
+        if (m_restartedSinceLastEval) {
+            logDebug(QStringLiteral("applyJudgeAction: duplicate restart skipped"));
+            return;
+        }
+        if (action.text.trimmed().isEmpty()) {
+            markTerminal(Failed, QStringLiteral("restart_empty_prompt"));
+            return;
+        }
+        if (!m_sessionRestarter) {
+            markTerminal(Failed, QStringLiteral("restart_failed"));
+            return;
+        }
+
         auto &crit = m_criteria[m_currentCriterionIndex];
         crit.iteration++;
-        emit iterationChanged(m_currentCriterionIndex, crit.iteration);
-
         if (crit.iteration >= m_maxIterations) {
+            emit iterationChanged(m_currentCriterionIndex, crit.iteration);
             destroyJudgeConnection();
             markTerminal(Cancelled, QStringLiteral("max_iter"));
             return;
         }
 
-        // Forward the continue text to the target agent.
-        if (m_targetConnection) {
-            logDebug(QStringLiteral("processJudgeResponse: forwarding continue to target (%1 chars)")
-                         .arg(action.text.size()));
-            if (m_targetModel) {
-                m_targetModel->appendUserMessage(action.text, {}, /*fromGoalAgent=*/true);
-            }
-            m_targetConnection->sendPrompt(action.text, {});
-        }
-        m_lastSeenTargetMessageCount = m_targetModel
-            ? m_targetModel->messages().size() : 0;
-    } else {
-        // Complete
-        advanceToNextCriterion(action.text);
+        restartWatchedSession(action.text);
+        if (m_status != Active)
+            return;
+        // After restarter → dock rebind → view.clearGoalStatus(). Paint the
+        // banner only now so it is not wiped.
+        emit iterationChanged(m_currentCriterionIndex, crit.iteration);
+        return;
     }
+
+    auto &crit = m_criteria[m_currentCriterionIndex];
+    crit.iteration++;
+    emit iterationChanged(m_currentCriterionIndex, crit.iteration);
+
+    if (crit.iteration >= m_maxIterations) {
+        destroyJudgeConnection();
+        markTerminal(Cancelled, QStringLiteral("max_iter"));
+        return;
+    }
+
+    if (m_targetConnection) {
+        logDebug(QStringLiteral("processJudgeResponse: forwarding continue to target (%1 chars)")
+                     .arg(action.text.size()));
+        if (m_targetModel) {
+            m_targetModel->appendUserMessage(action.text, {}, /*fromGoalAgent=*/true);
+        }
+        m_targetConnection->sendPrompt(action.text, {});
+    }
+    m_lastSeenTargetMessageCount = m_targetModel
+        ? m_targetModel->messages().size() : 0;
+}
+
+void GoalAgent::setSessionRestarter(std::function<RestartedSession(const QString &oldSessionId)> fn)
+{
+    m_sessionRestarter = std::move(fn);
+}
+
+void GoalAgent::restartWatchedSession(const QString &prompt)
+{
+    if (!m_sessionRestarter) {
+        logDebug(QStringLiteral("restartWatchedSession: no restarter"));
+        markTerminal(Failed, QStringLiteral("restart_failed"));
+        return;
+    }
+
+    m_restartingTarget = true;
+    if (m_targetConnection) {
+        disconnect(m_targetConnection, &AcpConnection::promptEnded,
+                   this, &GoalAgent::onTargetPromptEnded);
+        disconnect(m_targetConnection, &QObject::destroyed,
+                   this, &GoalAgent::onTargetDestroyed);
+    }
+
+    const QString oldId = m_targetSessionId;
+    const RestartedSession restarted = m_sessionRestarter(oldId);
+    if (restarted.sessionId.isEmpty() || !restarted.connection) {
+        m_restartingTarget = false;
+        markTerminal(Failed, QStringLiteral("restart_failed"));
+        return;
+    }
+
+    m_targetSessionId = restarted.sessionId;
+    setTargetSession(restarted.connection, restarted.model);
+    m_lastSeenTargetMessageCount = 0;
+    m_restartedSinceLastEval = true;
+
+    connect(m_targetConnection, &AcpConnection::promptEnded,
+            this, &GoalAgent::onTargetPromptEnded);
+    connect(m_targetConnection, &QObject::destroyed,
+            this, &GoalAgent::onTargetDestroyed);
+
+    logDebug(QStringLiteral("restartWatchedSession: %1 -> %2, forwarding prompt (%3 chars)")
+                 .arg(oldId, restarted.sessionId)
+                 .arg(prompt.size()));
+    if (m_targetModel) {
+        m_targetModel->appendUserMessage(prompt, {}, /*fromGoalAgent=*/true);
+    }
+    m_targetConnection->sendPrompt(prompt, {});
+    m_lastSeenTargetMessageCount = m_targetModel
+        ? m_targetModel->messages().size() : 0;
+    m_restartingTarget = false;
 }
 
 void GoalAgent::advanceToNextCriterion(const QString &verdict)

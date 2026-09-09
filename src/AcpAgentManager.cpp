@@ -185,12 +185,12 @@ void AcpAgentManager::deleteSessionHistory(const QString &sessionId)
                               Q_ARG(QString, sessionId));
 }
 
-void AcpAgentManager::restartSession(const QString &oldSessionId)
+QString AcpAgentManager::restartSession(const QString &oldSessionId)
 {
     auto it = m_sessions.find(oldSessionId);
     if (it == m_sessions.end()) {
         qCWarning(lcAcpManager) << "restartSession: unknown id" << oldSessionId;
-        return;
+        return {};
     }
     // Copy required: m_sessions is re-keyed (erase + insert) further down,
     // which invalidates `it`. We read `old` after that, so a reference into
@@ -200,7 +200,7 @@ void AcpAgentManager::restartSession(const QString &oldSessionId)
     if (!old.dock) {
         qCWarning(lcAcpManager) << "restartSession: dock already gone for" << oldSessionId;
         m_sessions.erase(it);
-        return;
+        return {};
     }
 
     // Snapshot what we need before tearing down the old connection.
@@ -283,6 +283,19 @@ void AcpAgentManager::restartSession(const QString &oldSessionId)
     qCInfo(lcAcpManager) << "restartSession: replaced" << oldSessionId
                          << "with" << newSessionId
                          << "agent" << agent.id;
+    return newSessionId;
+}
+
+AcpConnection *AcpAgentManager::connectionFor(const QString &sessionId) const
+{
+    auto it = m_sessions.constFind(sessionId);
+    return (it == m_sessions.cend()) ? nullptr : it.value().connection;
+}
+
+AcpSessionModel *AcpAgentManager::modelFor(const QString &sessionId) const
+{
+    auto it = m_sessions.constFind(sessionId);
+    return (it == m_sessions.cend()) ? nullptr : it.value().model;
 }
 
 void AcpAgentManager::shutdown()

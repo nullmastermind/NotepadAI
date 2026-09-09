@@ -5,7 +5,7 @@
 bool GoalActionParser::parse(const QString &response, GoalAction *out, ParseError *error)
 {
     static const QRegularExpression re(
-        QString::fromLatin1(R"RE(<action\s+type\s*=\s*"(continue|complete)"\s*>([\s\S]*?)</action>)RE"),
+        QString::fromLatin1(R"RE(<action\s+type\s*=\s*"(continue|complete|restart)"\s*>([\s\S]*?)</action>)RE"),
         QRegularExpression::CaseInsensitiveOption);
 
     const auto match = re.match(response);
@@ -17,7 +17,8 @@ bool GoalActionParser::parse(const QString &response, GoalAction *out, ParseErro
     const QString type = match.captured(1).toLower();
     const QString body = match.captured(2).trimmed();
 
-    if (type != QLatin1String("continue") && type != QLatin1String("complete")) {
+    if (type != QLatin1String("continue") && type != QLatin1String("complete")
+        && type != QLatin1String("restart")) {
         if (error) *error = InvalidType;
         return false;
     }
@@ -27,7 +28,12 @@ bool GoalActionParser::parse(const QString &response, GoalAction *out, ParseErro
     }
 
     if (out) {
-        out->type = (type == QLatin1String("complete")) ? GoalAction::Complete : GoalAction::Continue;
+        if (type == QLatin1String("complete"))
+            out->type = GoalAction::Complete;
+        else if (type == QLatin1String("restart"))
+            out->type = GoalAction::Restart;
+        else
+            out->type = GoalAction::Continue;
         out->text = body;
     }
     if (error) *error = NoError;
@@ -42,5 +48,7 @@ QString GoalActionParser::correctionPrompt()
         "  <action type=\"continue\">guidance text</action>\n\n"
         "OR\n\n"
         "  <action type=\"complete\">reason text</action>\n\n"
+        "OR\n\n"
+        "  <action type=\"restart\">prompt to send after restarting the coding agent</action>\n\n"
         "Nothing else. Try again now.");
 }

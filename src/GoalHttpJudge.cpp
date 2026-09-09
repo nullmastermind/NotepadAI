@@ -55,7 +55,8 @@ bool GoalHttpJudge::parseResponse(const QByteArray &json, GoalAction *out, Parse
         const QString status = input.value(QLatin1String("status")).toString().toLower();
         const QString text = input.value(QLatin1String("text")).toString().trimmed();
 
-        if (status != QLatin1String("continue") && status != QLatin1String("complete")) {
+        if (status != QLatin1String("continue") && status != QLatin1String("complete")
+            && status != QLatin1String("restart")) {
             if (error) *error = InvalidStatus;
             return false;
         }
@@ -65,8 +66,12 @@ bool GoalHttpJudge::parseResponse(const QByteArray &json, GoalAction *out, Parse
         }
 
         if (out) {
-            out->type = (status == QLatin1String("complete")) ? GoalAction::Complete
-                                                              : GoalAction::Continue;
+            if (status == QLatin1String("complete"))
+                out->type = GoalAction::Complete;
+            else if (status == QLatin1String("restart"))
+                out->type = GoalAction::Restart;
+            else
+                out->type = GoalAction::Continue;
             out->text = text;
         }
         if (error) *error = NoError;
@@ -97,8 +102,11 @@ QString GoalHttpJudge::correctionPrompt()
     return QStringLiteral(
         "Your previous reply did not call submit_goal_verdict. "
         "You MUST call submit_goal_verdict now with status \"continue\" "
-        "(guidance for the coding agent) or status \"complete\" "
-        "(the success criterion is met). Do not reply in prose.");
+        "(guidance for the coding agent), status \"complete\" "
+        "(the success criterion is met), or status \"restart\" "
+        "(the coding agent session must be restarted, e.g. context-length "
+        "or a sudden stop; text is the prompt to send after restart). "
+        "Do not reply in prose.");
 }
 
 QString GoalHttpJudge::judgePrompt(const QString &goal,
@@ -125,7 +133,10 @@ QString GoalHttpJudge::judgePrompt(const QString &goal,
         "Use status \"continue\" with a first-person follow-up to the coding agent if the "
         "criterion is not yet met. Match the language and tone of the developer's original "
         "message. Use status \"complete\" with a brief reason only if the conversation "
-        "contains clear evidence the criterion is satisfied. If you are not sure, continue "
+        "contains clear evidence the criterion is satisfied. "
+        "Use status \"restart\" with a prompt to send after a fresh coding-agent session "
+        "when the current session has hit a context-length error, a sudden stop, or is "
+        "otherwise unusable. If you are not sure, continue "
         "and nudge toward verification. Do not answer in prose.\n");
 
     QString core = GoalPromptRenderer::renderJudgePrompt(
@@ -149,15 +160,19 @@ QByteArray GoalHttpJudge::buildRequestBody(const QString &model, const QString &
 {
     QJsonObject statusProp{
         {QStringLiteral("type"), QStringLiteral("string")},
-        {QStringLiteral("enum"), QJsonArray{QStringLiteral("continue"), QStringLiteral("complete")}},
+        {QStringLiteral("enum"), QJsonArray{QStringLiteral("continue"), QStringLiteral("complete"),
+                                           QStringLiteral("restart")}},
         {QStringLiteral("description"),
-         QStringLiteral("continue if the criterion is not yet met; complete if it is met.")},
+         QStringLiteral("continue if the criterion is not yet met; complete if it is met; "
+                        "restart if the coding-agent session must be restarted "
+                        "(context-length error, sudden stop) and text is the next prompt.")},
     };
     QJsonObject textProp{
         {QStringLiteral("type"), QStringLiteral("string")},
         {QStringLiteral("description"),
          QStringLiteral("If continue: a first-person follow-up to the coding agent. "
-                        "If complete: brief reason the criterion is met.")},
+                        "If complete: brief reason the criterion is met. "
+                        "If restart: prompt to send after the coding agent session restarts.")},
     };
     QJsonObject schema{
         {QStringLiteral("type"), QStringLiteral("object")},
@@ -189,7 +204,8 @@ QByteArray GoalHttpJudge::buildRequestBody(const QString &model, const QString &
                         "Do not answer in prose. "
                         "If and only if you cannot invoke tools, emit exactly one XML tag: "
                         "<action type=\"continue\">guidance</action> or "
-                        "<action type=\"complete\">reason</action>.")},
+                        "<action type=\"complete\">reason</action> or "
+                        "<action type=\"restart\">prompt after restart</action>.")},
         {QStringLiteral("tools"), QJsonArray{tool}},
         {QStringLiteral("messages"), QJsonArray{userMsg}},
     };

@@ -110,8 +110,12 @@ public:
     // Allocate a fresh session id and connection for the existing dock that
     // owns `oldSessionId`. The dock widget itself survives — only the inner
     // model + connection swap. The previous session's history file is
-    // deleted. No-op when oldSessionId is unknown.
-    void restartSession(const QString &oldSessionId);
+    // deleted. Returns the new session id, or an empty string when
+    // oldSessionId is unknown / the dock is already gone.
+    QString restartSession(const QString &oldSessionId);
+
+    AcpConnection *connectionFor(const QString &sessionId) const;
+    AcpSessionModel *modelFor(const QString &sessionId) const;
 
     // Flush the history worker and quit its thread. Called from
     // NotepadNextApplication's aboutToQuit handler.

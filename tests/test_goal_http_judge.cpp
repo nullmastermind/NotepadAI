@@ -19,8 +19,12 @@ private slots:
     void messagesUrl_stripsTrailingSlashBeforeAppend();
     void parseResponse_readsContinueToolUse();
     void parseResponse_readsCompleteToolUse();
+    void parseResponse_readsRestartToolUse();
     void parseResponse_readsContinueFromXmlText();
     void parseResponse_readsCompleteFromXmlText();
+    void parseResponse_readsRestartFromXmlText();
+    void parseResponse_emptyRestartText_fails();
+    void parseResponse_emptyRestartXml_fails();
     void parseResponse_prefersToolUseOverXml();
     void parseResponse_noToolCall();
     void parseResponse_emptyContent_failsClosed();
@@ -113,6 +117,20 @@ void TestGoalHttpJudge::parseResponse_readsCompleteToolUse()
     QCOMPARE(action.text, QStringLiteral("Tests passed."));
 }
 
+void TestGoalHttpJudge::parseResponse_readsRestartToolUse()
+{
+    const QByteArray json = QByteArrayLiteral(
+        R"({"content":[{"type":"tool_use","id":"toolu_1","name":"submit_goal_verdict",)"
+        R"("input":{"status":"restart","text":"Continue from the last failing test."}}],)"
+        R"("stop_reason":"tool_use"})");
+    GoalAction action;
+    GoalHttpJudge::ParseError err = GoalHttpJudge::InvalidJson;
+    QVERIFY(GoalHttpJudge::parseResponse(json, &action, &err));
+    QCOMPARE(err, GoalHttpJudge::NoError);
+    QCOMPARE(action.type, GoalAction::Restart);
+    QCOMPARE(action.text, QStringLiteral("Continue from the last failing test."));
+}
+
 void TestGoalHttpJudge::parseResponse_readsContinueFromXmlText()
 {
     const QByteArray json = QByteArrayLiteral(
@@ -135,6 +153,41 @@ void TestGoalHttpJudge::parseResponse_readsCompleteFromXmlText()
     QVERIFY(GoalHttpJudge::parseResponse(json, &action, nullptr));
     QCOMPARE(action.type, GoalAction::Complete);
     QCOMPARE(action.text, QStringLiteral("Tests passed."));
+}
+
+void TestGoalHttpJudge::parseResponse_readsRestartFromXmlText()
+{
+    const QByteArray json = QByteArrayLiteral(
+        R"({"content":[{"type":"text","text":"<action type=\"restart\">Continue from the last failing test.</action>"}],)"
+        R"("stop_reason":"end_turn"})");
+    GoalAction action;
+    GoalHttpJudge::ParseError err = GoalHttpJudge::InvalidJson;
+    QVERIFY(GoalHttpJudge::parseResponse(json, &action, &err));
+    QCOMPARE(err, GoalHttpJudge::NoError);
+    QCOMPARE(action.type, GoalAction::Restart);
+    QCOMPARE(action.text, QStringLiteral("Continue from the last failing test."));
+}
+
+void TestGoalHttpJudge::parseResponse_emptyRestartText_fails()
+{
+    const QByteArray json = QByteArrayLiteral(
+        R"({"content":[{"type":"tool_use","id":"toolu_1","name":"submit_goal_verdict",)"
+        R"("input":{"status":"restart","text":"  "}}],)"
+        R"("stop_reason":"tool_use"})");
+    GoalAction action;
+    GoalHttpJudge::ParseError err = GoalHttpJudge::InvalidJson;
+    QVERIFY(!GoalHttpJudge::parseResponse(json, &action, &err));
+    QCOMPARE(err, GoalHttpJudge::EmptyText);
+}
+
+void TestGoalHttpJudge::parseResponse_emptyRestartXml_fails()
+{
+    const QByteArray json = QByteArrayLiteral(
+        R"({"content":[{"type":"text","text":"<action type=\"restart\">   </action>"}],)"
+        R"("stop_reason":"end_turn"})");
+    GoalAction action;
+    GoalHttpJudge::ParseError err = GoalHttpJudge::InvalidJson;
+    QVERIFY(!GoalHttpJudge::parseResponse(json, &action, &err));
 }
 
 void TestGoalHttpJudge::parseResponse_prefersToolUseOverXml()

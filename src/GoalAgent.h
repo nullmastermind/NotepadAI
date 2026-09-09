@@ -9,6 +9,7 @@
 #include <QStringList>
 
 #include <cstdint>
+#include <functional>
 
 #include "GoalActionParser.h"
 #include "GoalAgentSettings.h"
@@ -61,6 +62,13 @@ public:
     void stop();
     void setTargetSession(AcpConnection *conn, AcpSessionModel *model);
 
+    struct RestartedSession {
+        QString sessionId;
+        AcpConnection *connection = nullptr;
+        AcpSessionModel *model = nullptr;
+    };
+    void setSessionRestarter(std::function<RestartedSession(const QString &oldSessionId)> fn);
+
 signals:
     void statusChanged(GoalAgent::Status status);
     void criterionAdvanced(int newIndex);
@@ -93,11 +101,14 @@ private:
     void evaluateViaHttp();
     void ensureHttpJudge();
     void applyJudgeAction(const GoalAction &action);
+    void restartWatchedSession(const QString &prompt);
     void onHttpVerdict(const GoalAction &action);
     void onHttpAssumedAchieved(const QString &reason);
     void onHttpFailed(const QString &message);
     QString buildConversationSummary();
     QString collectRecentUserMessages(int take, int perEntryCharCap);
+
+    friend class TestGoalAgent;
 
     AcpAgentManager *m_manager;
     ApplicationSettings *m_appSettings;
@@ -122,6 +133,9 @@ private:
     bool m_awaitingJudgeResponse = false;
     bool m_correctionAttempted = false;
     int m_lastSeenTargetMessageCount = 0;
+    bool m_restartingTarget = false;
+    bool m_restartedSinceLastEval = false;
+    std::function<RestartedSession(const QString &)> m_sessionRestarter;
 
     bool m_awaitingAuthoring = false;
     QString m_authoringBuffer;

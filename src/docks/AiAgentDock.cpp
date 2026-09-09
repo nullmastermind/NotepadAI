@@ -208,6 +208,15 @@ void AiAgentDock::rebind(AcpConnection *connection,
 
     if (m_view) {
         m_view->rebind(model, connection);
+        // rebind() calls clearGoalStatus(). Goal-driven (and user) restart
+        // keeps an Active GoalAgent on this dock — restore the banner.
+        if (m_goalAgent && m_goalAgent->status() == GoalAgent::Active) {
+            const int idx = m_goalAgent->currentCriterionIndex();
+            const auto &crits = m_goalAgent->criteria();
+            const int iter = (idx >= 0 && idx < crits.size()) ? crits.at(idx).iteration : 0;
+            m_view->setGoalActive(idx + 1, crits.size(), iter,
+                                  m_goalAgent->maxIterations());
+        }
     }
 
     if (m_model) {
@@ -348,6 +357,18 @@ bool AiAgentDock::attachGoalAgent(GoalAgent *goal)
 
     m_goalAgent = goal;
     goal->setParent(this);
+
+    if (m_agentManager) {
+        goal->setSessionRestarter([mgr = m_agentManager](const QString &oldId) {
+            GoalAgent::RestartedSession out;
+            out.sessionId = mgr->restartSession(oldId);
+            if (out.sessionId.isEmpty())
+                return out;
+            out.connection = mgr->connectionFor(out.sessionId);
+            out.model = mgr->modelFor(out.sessionId);
+            return out;
+        });
+    }
 
     connect(m_goalAgent, &GoalAgent::debugLogEntry, this, [this](const QString &entry) {
         m_goalDebugLog.append(entry);

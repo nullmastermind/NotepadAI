@@ -7,7 +7,7 @@
 
 struct GoalAction
 {
-    enum Type : std::uint8_t { Continue, Complete };
+    enum Type : std::uint8_t { Continue, Complete, Restart };
     Type type = Continue;
     QString text;
 };
