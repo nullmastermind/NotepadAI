@@ -39,7 +39,7 @@ static QString posixRel(const QString &root, const QString &abs)
 
 static QString giRelDir(const QString &base, const QString &dirAbs)
 {
-    const QString rel = posixRel(base, dirAbs);
+    QString rel = posixRel(base, dirAbs);
     if (rel.isEmpty() || rel == QLatin1String("."))
         return {};
     return rel;

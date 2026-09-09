@@ -395,7 +395,8 @@ void GitTabWidget::buildUi()
                 auto answer = QMessageBox::warning(
                     this, tr("Revert Changes"), text,
                     QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-                if (answer == QMessageBox::Yes)
+                // Nested event loop: workspace switch can teardown the controller.
+                if (answer == QMessageBox::Yes && m_controller)
                     m_controller->revertPaths(paths);
             });
             menu->addAction(revertAction);
@@ -421,7 +422,8 @@ void GitTabWidget::buildUi()
                 auto answer = QMessageBox::warning(
                     this, tr("Delete Untracked Files"), text,
                     QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-                if (answer == QMessageBox::Yes)
+                // Nested event loop: workspace switch can teardown the controller.
+                if (answer == QMessageBox::Yes && m_controller)
                     m_controller->deleteUntrackedPaths(paths);
             });
             menu->addAction(deleteAction);
