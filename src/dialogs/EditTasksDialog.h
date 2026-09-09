@@ -55,6 +55,7 @@ private:
     void commitCurrentTask();
     void loadTask(int row);
     void updateButtonStates();
+    void moveCurrentBy(int delta);
 
     QString m_workspacePath;
     QList<TerminalTask> m_tasks;

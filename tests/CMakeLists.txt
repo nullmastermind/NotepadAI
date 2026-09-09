@@ -123,6 +123,20 @@ target_sources(test_terminal_task_registry PRIVATE
 )
 add_test(NAME TerminalTaskRegistry COMMAND test_terminal_task_registry)
 
+# --- EditTasksDialog: reorder must not clobber neighbor task fields ---
+qt_add_executable(test_edit_tasks_dialog test_edit_tasks_dialog.cpp)
+target_include_directories(test_edit_tasks_dialog PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/dialogs
+)
+target_link_libraries(test_edit_tasks_dialog PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_edit_tasks_dialog PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/dialogs/EditTasksDialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/dialogs/EditTasksDialog.h
+    ${CMAKE_SOURCE_DIR}/src/TerminalTaskRegistry.h
+)
+add_test(NAME EditTasksDialog COMMAND test_edit_tasks_dialog)
+
 # --- ScrollbackBuffer: bounded history ring used by TerminalWidget for sb_pushline/sb_popline ---
 qt_add_executable(test_scrollback_buffer test_scrollback_buffer.cpp)
 target_include_directories(test_scrollback_buffer PRIVATE ${CMAKE_SOURCE_DIR}/src/widgets)

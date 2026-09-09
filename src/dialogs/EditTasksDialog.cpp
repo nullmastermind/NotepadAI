@@ -29,6 +29,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -263,28 +264,34 @@ void EditTasksDialog::onRemoveClicked()
 
 void EditTasksDialog::onMoveUpClicked()
 {
-    const int row = m_listWidget->currentRow();
-    if (row <= 0)
-        return;
-    commitCurrentTask();
-    m_tasks.swapItemsAt(row, row - 1);
-    auto *item = m_listWidget->takeItem(row);
-    m_listWidget->insertItem(row - 1, item);
-    m_currentRow = -1;
-    m_listWidget->setCurrentRow(row - 1);
+    moveCurrentBy(-1);
 }
 
 void EditTasksDialog::onMoveDownClicked()
 {
+    moveCurrentBy(1);
+}
+
+void EditTasksDialog::moveCurrentBy(int delta)
+{
     const int row = m_listWidget->currentRow();
-    if (row < 0 || row >= m_tasks.size() - 1)
+    const int dest = row + delta;
+    if (row < 0 || dest < 0 || dest >= m_tasks.size())
         return;
     commitCurrentTask();
-    m_tasks.swapItemsAt(row, row + 1);
-    auto *item = m_listWidget->takeItem(row);
-    m_listWidget->insertItem(row + 1, item);
+    m_tasks.swapItemsAt(row, dest);
+    // takeItem/insertItem emit currentRowChanged. Commit during that window
+    // writes the form into the post-swap neighbor and duplicates the moved task.
     m_currentRow = -1;
-    m_listWidget->setCurrentRow(row + 1);
+    {
+        const QSignalBlocker blocker(m_listWidget);
+        auto *item = m_listWidget->takeItem(row);
+        m_listWidget->insertItem(dest, item);
+        m_listWidget->setCurrentRow(dest);
+    }
+    m_currentRow = dest;
+    loadTask(m_currentRow);
+    updateButtonStates();
 }
 
 void EditTasksDialog::onBrowseCwdClicked()
