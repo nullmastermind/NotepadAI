@@ -91,6 +91,7 @@ public:
     // Helpers for the view: pick the rel paths under a list of indexes
     // (sections expand to their children).
     QStringList relPathsAtIndexes(const QModelIndexList &idxs) const;
+    QStringList relPathsInSection(GitStatusEntry::Section s) const;
     QStringList stagedSelectionPaths(const QModelIndexList &idxs) const;
     QStringList unstagedSelectionPaths(const QModelIndexList &idxs) const;
 

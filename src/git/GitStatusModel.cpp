@@ -136,6 +136,16 @@ int GitStatusModel::entriesInSection(GitStatusEntry::Section s) const
     return m_buckets[s].size();
 }
 
+QStringList GitStatusModel::relPathsInSection(GitStatusEntry::Section s) const
+{
+    const auto &bucket = m_buckets[s];
+    QStringList out;
+    out.reserve(bucket.size());
+    for (const GitStatusEntry &e : bucket)
+        out.append(e.relPath);
+    return out;
+}
+
 int GitStatusModel::totalEntries() const
 {
     int t = 0;

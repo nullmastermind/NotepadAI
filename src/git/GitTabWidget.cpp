@@ -372,24 +372,63 @@ void GitTabWidget::buildUi()
             this, &GitTabWidget::onChangesOpenSubmoduleRequested);
     connect(m_changesPanel, &ChangesPanel::treeContextMenuRequested,
             this, [this](QMenu *menu, const GitStatusEntry &entry) {
-        // Only show Revert for tracked (unstaged) changes.
+        const bool isSection = entry.relPath.isEmpty();
         if (m_controller && entry.section == GitStatusEntry::Tracked) {
             auto *revertAction = new QAction(tr("Revert"), menu);
-            connect(revertAction, &QAction::triggered, this, [this, entry]() {
+            connect(revertAction, &QAction::triggered, this, [this, isSection, path = entry.relPath]() {
                 if (!m_controller) return;
-                auto answer = QMessageBox::warning(
-                    this, tr("Revert Changes"),
-                    tr("Are you sure you want to revert <b>%1</b>?<br>"
-                       "This will discard all uncommitted changes to this file.")
-                        .arg(entry.relPath.toHtmlEscaped()),
-                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-                if (answer == QMessageBox::Yes) {
-                    m_controller->revertPaths({entry.relPath});
+                QStringList paths;
+                if (isSection) {
+                    if (auto *st = m_controller->statusModel())
+                        paths = st->relPathsInSection(GitStatusEntry::Tracked);
+                } else {
+                    paths = {path};
                 }
+                if (paths.isEmpty()) return;
+                const QString text = isSection
+                    ? tr("Are you sure you want to revert all %1 tracked files?<br>"
+                         "This will discard all uncommitted changes to these files.")
+                          .arg(paths.size())
+                    : tr("Are you sure you want to revert <b>%1</b>?<br>"
+                         "This will discard all uncommitted changes to this file.")
+                          .arg(path.toHtmlEscaped());
+                auto answer = QMessageBox::warning(
+                    this, tr("Revert Changes"), text,
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                if (answer == QMessageBox::Yes)
+                    m_controller->revertPaths(paths);
             });
             menu->addAction(revertAction);
+        } else if (m_controller && entry.section == GitStatusEntry::Untracked) {
+            auto *deleteAction = new QAction(tr("Delete"), menu);
+            connect(deleteAction, &QAction::triggered, this, [this, isSection, path = entry.relPath]() {
+                if (!m_controller) return;
+                QStringList paths;
+                if (isSection) {
+                    if (auto *st = m_controller->statusModel())
+                        paths = st->relPathsInSection(GitStatusEntry::Untracked);
+                } else {
+                    paths = {path};
+                }
+                if (paths.isEmpty()) return;
+                const QString text = isSection
+                    ? tr("Are you sure you want to delete all %1 untracked files?<br>"
+                         "This will permanently remove these files.")
+                          .arg(paths.size())
+                    : tr("Are you sure you want to delete <b>%1</b>?<br>"
+                         "This will permanently remove this untracked file.")
+                          .arg(path.toHtmlEscaped());
+                auto answer = QMessageBox::warning(
+                    this, tr("Delete Untracked Files"), text,
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                if (answer == QMessageBox::Yes)
+                    m_controller->deleteUntrackedPaths(paths);
+            });
+            menu->addAction(deleteAction);
         }
-        emit changesTreeContextMenuRequested(menu, entry);
+        // Host extras (Send to AI) are file-row only — a section has no path to @-mention.
+        if (!isSection)
+            emit changesTreeContextMenuRequested(menu, entry);
     });
 
     // History view → forward openCommitDetailRequested up to the host.

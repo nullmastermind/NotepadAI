@@ -100,6 +100,7 @@ public slots:
     void renameBranch(const QString &oldName, const QString &newName, bool updateRemote);
     void deleteBranch(const QString &branchName, bool force);
     void revertPaths(const QStringList &relPaths);
+    void deleteUntrackedPaths(const QStringList &relPaths);
     void cancelCurrent();
 
     // Request a unified diff for a single path. Side: false = working-tree
@@ -164,7 +165,7 @@ private:
         Commit,
         SwitchBranch, CreateBranch, RenameBranch, DeleteBranch, SetUpstream, ConfigTracking, Stash,
         Fetch, Pull, Push, ForcePush,
-        Revert
+        Revert, CleanUntracked
     };
     struct Op {
         OpKind kind;

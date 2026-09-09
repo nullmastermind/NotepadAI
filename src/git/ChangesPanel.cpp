@@ -137,26 +137,31 @@ void ChangesPanel::buildUi()
     connect(m_tree, &QTreeView::customContextMenuRequested, this, [this](const QPoint &pos) {
         const QModelIndex index = m_tree->indexAt(pos);
         if (!index.isValid()) return;
-        if (index.data(GitStatusModel::IsSectionRole).toBool()) return;
-        const QString rel = index.data(GitStatusModel::RelPathRole).toString();
-        if (rel.isEmpty()) return;
 
         GitStatusEntry entry;
-        entry.relPath        = rel;
-        entry.origRelPath    = index.data(GitStatusModel::OrigPathRole).toString();
-        entry.change         = static_cast<GitStatusEntry::Change>(
-                                  index.data(GitStatusModel::ChangeRole).toInt());
-        entry.stagedSide     = index.data(GitStatusModel::StagedSideRole).toBool();
-        entry.section        = static_cast<GitStatusEntry::Section>(
-                                  index.data(GitStatusModel::SectionRole).toInt());
-        entry.xy             = index.data(GitStatusModel::XyRole).toString();
-        entry.hasUnstableEncoding =
-            index.data(GitStatusModel::HasUnstableEncodingRole).toBool();
-        entry.isBinary       = index.data(GitStatusModel::IsBinaryRole).toBool();
-        entry.addedLines     = index.data(GitStatusModel::AddedLinesRole).toInt();
-        entry.deletedLines   = index.data(GitStatusModel::DeletedLinesRole).toInt();
-        entry.oursSha        = index.data(GitStatusModel::OursShaRole).toString();
-        entry.theirsSha      = index.data(GitStatusModel::TheirsShaRole).toString();
+        if (index.data(GitStatusModel::IsSectionRole).toBool()) {
+            // Header row: empty relPath. GitTabWidget keys bulk actions off section.
+            entry.section = static_cast<GitStatusEntry::Section>(
+                index.data(GitStatusModel::SectionRole).toInt());
+        } else {
+            const QString rel = index.data(GitStatusModel::RelPathRole).toString();
+            if (rel.isEmpty()) return;
+            entry.relPath        = rel;
+            entry.origRelPath    = index.data(GitStatusModel::OrigPathRole).toString();
+            entry.change         = static_cast<GitStatusEntry::Change>(
+                                      index.data(GitStatusModel::ChangeRole).toInt());
+            entry.stagedSide     = index.data(GitStatusModel::StagedSideRole).toBool();
+            entry.section        = static_cast<GitStatusEntry::Section>(
+                                      index.data(GitStatusModel::SectionRole).toInt());
+            entry.xy             = index.data(GitStatusModel::XyRole).toString();
+            entry.hasUnstableEncoding =
+                index.data(GitStatusModel::HasUnstableEncodingRole).toBool();
+            entry.isBinary       = index.data(GitStatusModel::IsBinaryRole).toBool();
+            entry.addedLines     = index.data(GitStatusModel::AddedLinesRole).toInt();
+            entry.deletedLines   = index.data(GitStatusModel::DeletedLinesRole).toInt();
+            entry.oursSha        = index.data(GitStatusModel::OursShaRole).toString();
+            entry.theirsSha      = index.data(GitStatusModel::TheirsShaRole).toString();
+        }
 
         auto *menu = new QMenu(this);
         menu->setAttribute(Qt::WA_DeleteOnClose);
