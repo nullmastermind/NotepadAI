@@ -537,11 +537,11 @@ void RemoteTransferManager::walkRemoteDirSftp(const QString &remoteDirPath,
                     ++(*pending);
                     const QString gitignorePath = rDir + QStringLiteral("/.gitignore");
                     guard->m_backend->readFileAsync(gitignorePath,
-                        [guard, rDir, pending](bool readOk, const QByteArray &data, const QString &) {
+                        [guard, rel, pending](bool readOk, const QByteArray &data, const QString &) {
                             if (guard.isNull()) { --(*pending); return; }
                             if (guard->m_cancelled) { --(*pending); return; }
                             if (readOk) {
-                                guard->m_gitignore.addRules(rDir, QString::fromUtf8(data));
+                                guard->m_gitignore.addRules(rel, QString::fromUtf8(data));
                             }
                             if (--(*pending) == 0)
                                 guard->downloadWalkDone();

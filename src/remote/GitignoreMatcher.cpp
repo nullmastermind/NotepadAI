@@ -26,6 +26,13 @@ namespace remote {
 
 void GitignoreMatcher::addRules(const QString &dirPath, const QString &rulesText)
 {
+    QString giDir = dirPath;
+    giDir.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    while (giDir.endsWith(QLatin1Char('/')))
+        giDir.chop(1);
+    if (giDir == QLatin1String("."))
+        giDir.clear();
+
     const QStringList lines = rulesText.split(QLatin1Char('\n'));
     for (QString line : lines) {
         // Strip trailing CR (Windows line endings).
@@ -37,7 +44,7 @@ void GitignoreMatcher::addRules(const QString &dirPath, const QString &rulesText
             continue;
 
         GitignoreRule rule;
-        rule.dir = dirPath;
+        rule.dir = giDir;
 
         // Negation.
         if (line.startsWith(QLatin1Char('!'))) {
@@ -81,62 +88,43 @@ bool GitignoreMatcher::matchRule(const GitignoreRule &rule, const QString &relPa
     if (rule.dirOnly && !isDir)
         return false;
 
-    // Build the flags for wildmatch.
-    unsigned int flags = WM_PATHNAME | WM_WILDSTAR;
+    QString owned;
+    QStringView path = relPath;
+    if (path.contains(QLatin1Char('\\'))) {
+        owned = relPath;
+        owned.replace(QLatin1Char('\\'), QLatin1Char('/'));
+        path = owned;
+    }
 
+    if (!rule.dir.isEmpty()) {
+        const int dirLen = rule.dir.size();
+        if (path.size() <= dirLen || path.left(dirLen) != rule.dir
+            || path.at(dirLen) != QLatin1Char('/')) {
+            return false;
+        }
+        path = path.mid(dirLen + 1);
+        if (path.isEmpty())
+            return false;
+    }
+
+    const unsigned int flags = WM_PATHNAME | WM_WILDSTAR;
     const QByteArray patternBytes = rule.pattern.toUtf8();
     const char *pat = patternBytes.constData();
+    const QByteArray textBytes = path.toUtf8();
 
-    if (rule.anchored) {
-        // Anchored: match against the full relPath (or the portion relative to
-        // the .gitignore's directory). The relPath is always relative to the
-        // workspace root; rule.dir is the absolute path of the .gitignore dir.
-        // We need to compute the path relative to rule.dir from relPath.
-        // For simplicity, match against the full relPath using the anchored pattern.
-        // If rule.dir is non-empty, strip the rule.dir prefix from relPath first.
-        // (rule.dir may be empty when it equals the workspace root itself.)
-        const QString &matchPath = relPath;
-        // rule.dir is an absolute path; to find what part of relPath is under it,
-        // we'd need the workspace root. Instead we keep it simple: the anchored
-        // pattern is matched against both the full relPath and the portion after
-        // the last parent of rule.dir that we can infer from relPath.
-        // Since the workspace root is the context we don't have directly here,
-        // we try matching the anchored pattern at every path prefix boundary.
-        // This is conservative: an anchored pattern like "build/output" will
-        // match "build/output" or "subdir/build/output" — acceptable for our
-        // download-skip use case where false positives are safe (we skip more).
-        const QByteArray textBytes = matchPath.toUtf8();
-        if (wildmatch(pat, textBytes.constData(), flags) == WM_MATCH)
-            return true;
-        // Try stripping leading components to handle sub-directory .gitignore files.
-        const QString sep = QStringLiteral("/");
-        int pos = 0;
-        while ((pos = matchPath.indexOf(sep, pos)) != -1) {
-            pos++;
-            const QString sub = matchPath.mid(pos);
-            const QByteArray subBytes = sub.toUtf8();
-            if (wildmatch(pat, subBytes.constData(), flags) == WM_MATCH)
-                return true;
-        }
-        return false;
-    } else {
-        // Unanchored: match against each path component (basename match at any depth).
-        // Also try matching the full path (for patterns without '/').
-        const QByteArray textBytes = relPath.toUtf8();
-        if (wildmatch(pat, textBytes.constData(), flags) == WM_MATCH)
-            return true;
+    if (rule.anchored)
+        return wildmatch(pat, textBytes.constData(), flags) == WM_MATCH;
 
-        // Basename match: extract the last component and try.
-        const int lastSlash = relPath.lastIndexOf(QLatin1Char('/'));
-        if (lastSlash >= 0) {
-            const QString basename = relPath.mid(lastSlash + 1);
-            const QByteArray basenameBytes = basename.toUtf8();
-            // Disable WM_PATHNAME for basename-only match (no '/' in basename).
-            if (wildmatch(pat, basenameBytes.constData(), WM_WILDSTAR) == WM_MATCH)
-                return true;
-        }
-        return false;
+    if (wildmatch(pat, textBytes.constData(), flags) == WM_MATCH)
+        return true;
+
+    const int lastSlash = path.lastIndexOf(QLatin1Char('/'));
+    if (lastSlash >= 0) {
+        const QByteArray basenameBytes = path.mid(lastSlash + 1).toUtf8();
+        if (wildmatch(pat, basenameBytes.constData(), WM_WILDSTAR) == WM_MATCH)
+            return true;
     }
+    return false;
 }
 
 bool GitignoreMatcher::isIgnored(const QString &relPath, bool isDir) const

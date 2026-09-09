@@ -33,7 +33,7 @@ struct GitignoreRule
     bool dirOnly;       // True if the pattern ended with '/'
     bool anchored;      // True if the pattern contains '/' (after stripping trailing '/')
     bool wildstar;      // True if pattern contains '**'
-    QString dir;        // The directory this rule belongs to (absolute POSIX path)
+    QString dir;        // Gitignore directory, POSIX, relative to workspace root (empty = root)
 };
 
 /*
@@ -41,7 +41,8 @@ struct GitignoreRule
  *
  * Usage:
  *   GitignoreMatcher m;
- *   m.addRules("/home/user/project", rulesText);   // parse .gitignore content
+ *   m.addRules(QString(), rulesText);                 // workspace-root .gitignore
+ *   m.addRules(QStringLiteral(".ruff_cache"), "*\n"); // nested .gitignore
  *   if (m.isIgnored("build/output.o", false)) { ... }
  *
  * Supported gitignore features:
@@ -49,9 +50,9 @@ struct GitignoreRule
  *   - Negation (!pattern)
  *   - Trailing '/' means directory-only match
  *   - '**' anywhere matches zero or more path components
- *   - Anchored patterns (contain '/') match from the root of the workspace
- *   - Unanchored patterns match the basename at any depth
- *   - Nested .gitignore files (child rules added with their own dirPath)
+ *   - Anchored patterns (contain '/' or leading '/') match relative to dirPath
+ *   - Unanchored patterns match the basename at any depth under dirPath
+ *   - Nested .gitignore files apply only under their dirPath (never to siblings)
  *
  * Not supported:
  *   - .git/info/exclude, global gitignore, core.excludesFile
@@ -63,7 +64,9 @@ public:
     GitignoreMatcher() = default;
 
     // Parse and store all rules from `rulesText` (the content of a .gitignore file).
-    // `dirPath` is the absolute POSIX path of the directory containing that .gitignore.
+    // `dirPath` is the directory containing that .gitignore, POSIX, relative to the
+    // same root as `isIgnored` (empty or "." = that root). Nested rules apply only
+    // under `dirPath`.
     // May be called multiple times with different directories — rules accumulate and
     // are evaluated in order (later rules override earlier ones, per gitignore semantics).
     void addRules(const QString &dirPath, const QString &rulesText);

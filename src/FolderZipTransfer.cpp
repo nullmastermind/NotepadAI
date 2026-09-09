@@ -495,7 +495,8 @@ void FolderZipTransfer::remotePreloadGitignores()
         if (guard.isNull() || guard->m_cancelled.load())
             return;
         if (ok) {
-            guard->m_gitignore.addRules(dir, QString::fromUtf8(data));
+            guard->m_gitignore.addRules(relToRoot(guard->m_workspaceRoot, dir),
+                                        QString::fromUtf8(data));
         } else if (isRemoteBackendDead(error)) {
             guard->fail(error);
             return;
@@ -543,7 +544,8 @@ void FolderZipTransfer::remoteWalkDir(const QString &remoteDir, const QString &e
                     if (guard.isNull() || guard->m_cancelled.load())
                         return;
                     if (readOk)
-                        guard->m_gitignore.addRules(remoteDir, QString::fromUtf8(data));
+                        guard->m_gitignore.addRules(relToRoot(guard->m_workspaceRoot, remoteDir),
+                                                    QString::fromUtf8(data));
                     if (--guard->m_pendingWalk == 0)
                         guard->remoteWalkDone();
                 });

@@ -37,8 +37,16 @@ static QString posixRel(const QString &root, const QString &abs)
     return rel;
 }
 
+static QString giRelDir(const QString &base, const QString &dirAbs)
+{
+    const QString rel = posixRel(base, dirAbs);
+    if (rel.isEmpty() || rel == QLatin1String("."))
+        return {};
+    return rel;
+}
+
 static void loadGitignore(remote::GitignoreMatcher &matcher, const QString &dirAbs,
-                          QSet<QString> *loaded)
+                          const QString &base, QSet<QString> *loaded)
 {
     const QString clean = QDir::cleanPath(dirAbs);
     if (loaded->contains(clean))
@@ -47,24 +55,24 @@ static void loadGitignore(remote::GitignoreMatcher &matcher, const QString &dirA
     QFile f(QDir(clean).filePath(QStringLiteral(".gitignore")));
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
         return;
-    matcher.addRules(clean, QString::fromUtf8(f.readAll()));
+    matcher.addRules(giRelDir(base, clean), QString::fromUtf8(f.readAll()));
 }
 
 static void walkDir(const QString &dirAbs, const QString &root, const QString &sel,
-                    remote::GitignoreMatcher &matcher, QSet<QString> *loaded,
-                    QList<File> *out)
+                    const QString &base, remote::GitignoreMatcher &matcher,
+                    QSet<QString> *loaded, QList<File> *out)
 {
-    loadGitignore(matcher, dirAbs, loaded);
+    loadGitignore(matcher, dirAbs, base, loaded);
 
     const QFileInfoList ents = QDir(dirAbs).entryInfoList(
         QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
         QDir::Name);
 
     for (const QFileInfo &fi : ents) {
+        if (ZipPath::isHardSkippedDirName(fi.fileName()))
+            continue;
         if (fi.isDir()) {
             if (fi.isSymLink())
-                continue;
-            if (ZipPath::isHardSkippedDirName(fi.fileName()))
                 continue;
             const QString childAbs = QDir::cleanPath(fi.absoluteFilePath());
             const QString relWs = root.isEmpty() ? posixRel(sel, childAbs)
@@ -73,7 +81,7 @@ static void walkDir(const QString &dirAbs, const QString &root, const QString &s
                 && matcher.isIgnored(relWs, true)) {
                 continue;
             }
-            walkDir(childAbs, root, sel, matcher, loaded, out);
+            walkDir(childAbs, root, sel, base, matcher, loaded, out);
             continue;
         }
 
@@ -102,22 +110,23 @@ QList<File> walkLocalFolder(const QString &workspaceRoot, const QString &selecte
 
     remote::GitignoreMatcher matcher;
     QSet<QString> loaded;
+    const QString base = root.isEmpty() ? sel : root;
 
     if (!root.isEmpty()) {
         QString walk = root;
-        loadGitignore(matcher, walk, &loaded);
+        loadGitignore(matcher, walk, base, &loaded);
         const QString relToRoot = posixRel(root, sel);
         if (!relToRoot.isEmpty() && relToRoot != QLatin1String(".")) {
             for (const QString &seg : relToRoot.split(QLatin1Char('/'))) {
                 walk += QLatin1Char('/') + seg;
-                loadGitignore(matcher, walk, &loaded);
+                loadGitignore(matcher, walk, base, &loaded);
             }
         }
     } else {
-        loadGitignore(matcher, sel, &loaded);
+        loadGitignore(matcher, sel, base, &loaded);
     }
 
-    walkDir(sel, root, sel, matcher, &loaded, &out);
+    walkDir(sel, root, sel, base, matcher, &loaded, &out);
     return out;
 }
 

@@ -405,7 +405,7 @@ QStringList FolderSearchEngine::walkDfsFiltered(const QString &folder,
     const QString rootGitignore = folder + QStringLiteral("/.gitignore");
     QFile gi(rootGitignore);
     if (gi.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        matcher.addRules(QDir::cleanPath(folder), QString::fromUtf8(gi.readAll()));
+        matcher.addRules(QString(), QString::fromUtf8(gi.readAll()));
         gi.close();
     }
 
@@ -425,7 +425,11 @@ QStringList FolderSearchEngine::walkDfsFiltered(const QString &folder,
         if (dirPath != cleanRoot) {
             QFile ngi(nestedGi);
             if (ngi.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                matcher.addRules(dirPath, QString::fromUtf8(ngi.readAll()));
+                QString relDir = QDir(cleanRoot).relativeFilePath(dirPath);
+                relDir.replace(QLatin1Char('\\'), QLatin1Char('/'));
+                if (relDir == QLatin1String("."))
+                    relDir.clear();
+                matcher.addRules(relDir, QString::fromUtf8(ngi.readAll()));
                 ngi.close();
             }
         }
