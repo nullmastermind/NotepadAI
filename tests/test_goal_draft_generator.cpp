@@ -3,7 +3,9 @@
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QEvent>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QPair>
 #include <QPointer>
 #include <QSettings>
@@ -50,6 +52,16 @@ private slots:
     void parse_malformedOrEmptyAction_rejects();
     void renderPrompt_usesFullTargetHistoryForEnhance();
     void conversationSummary_startIndexKeepsIncrementalWindow();
+    void conversationSummary_includesToolCallBetweenMessages();
+    void conversationSummary_truncatesLongToolStringFields();
+    void conversationSummary_startIndexIncludesLaterToolCalls();
+    void conversationSummary_usesTruncatedContentWhenRawOutputEmpty();
+    void conversationSummary_keepsFailedAndCancelledStatus();
+    void conversationSummary_omitsEmptyInputAndOutput();
+    void conversationSummary_truncatesNestedToolStringFields();
+    void conversationSummary_doesNotTruncateStringOf256Chars();
+    void conversationSummary_doesNotSplitSurrogatePairWhenTruncating();
+    void conversationSummary_escapesToolCallXmlAttributes();
     void cancel_isIdempotentAndDeletesConnection();
     void start_customApiContinue_emitsDraft();
     void start_customApiComplete_emitsAlreadyComplete();
@@ -228,6 +240,284 @@ void TestGoalDraftGenerator::conversationSummary_startIndexKeepsIncrementalWindo
     QVERIFY(incremental.contains(QStringLiteral("new user")));
     QVERIFY(incremental.contains(QStringLiteral("new assistant")));
     QCOMPARE(model.messages().size(), lastSeen + 2);
+}
+
+void TestGoalDraftGenerator::conversationSummary_includesToolCallBetweenMessages()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-call-summary"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("inspect a.cpp"),
+                            QVector<QPair<QByteArray, QString>>{});
+
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("call-1");
+    tc.title = QStringLiteral("Read a.cpp");
+    tc.kind = QStringLiteral("read");
+    tc.status = QStringLiteral("completed");
+    tc.rawInput.insert(QStringLiteral("path"), QStringLiteral("a.cpp"));
+    tc.rawOutput.insert(QStringLiteral("text"), QStringLiteral("int main() {}"));
+    model.onToolCallReceived(tc);
+
+    model.onPromptStarted();
+    model.onMessageChunk(QStringLiteral("file looks fine"));
+    model.onPromptEnded();
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+
+    QVERIFY(xml.contains(QStringLiteral("<message role=\"user\">inspect a.cpp</message>")));
+    QVERIFY(xml.contains(QStringLiteral(
+        "<tool-call id=\"call-1\" title=\"Read a.cpp\" kind=\"read\" status=\"completed\">")));
+    QVERIFY2(xml.contains(QStringLiteral("<input>{\"path\":\"a.cpp\"}</input>")),
+               qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("<output>{\"text\":\"int main() {}\"}</output>")),
+               qPrintable(xml));
+    QVERIFY(xml.contains(QStringLiteral("<message role=\"assistant\">file looks fine</message>")));
+
+    const int userAt = xml.indexOf(QStringLiteral("role=\"user\""));
+    const int toolAt = xml.indexOf(QStringLiteral("<tool-call "));
+    const int assistantAt = xml.indexOf(QStringLiteral("role=\"assistant\""));
+    QVERIFY(userAt >= 0);
+    QVERIFY(toolAt > userAt);
+    QVERIFY(assistantAt > toolAt);
+}
+
+void TestGoalDraftGenerator::conversationSummary_truncatesLongToolStringFields()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-trunc"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+
+    const QString longText = QString(300, QLatin1Char('A'));
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("call-2");
+    tc.title = QStringLiteral("Write");
+    tc.kind = QStringLiteral("edit");
+    tc.status = QStringLiteral("completed");
+    tc.rawInput.insert(QStringLiteral("contents"), longText);
+    tc.rawInput.insert(QStringLiteral("path"), QStringLiteral("b.cpp"));
+    model.onToolCallReceived(tc);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(!xml.contains(longText), qPrintable(xml.left(500)));
+    const QString truncated = QString(256, QLatin1Char('A')) + QChar(0x2026);
+    QVERIFY2(xml.contains(truncated), qPrintable(xml.left(500)));
+    QVERIFY(xml.contains(QStringLiteral("\"path\":\"b.cpp\"")));
+}
+
+void TestGoalDraftGenerator::conversationSummary_startIndexIncludesLaterToolCalls()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-window"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("old user"),
+                            QVector<QPair<QByteArray, QString>>{});
+    model.onPromptStarted();
+    model.onMessageChunk(QStringLiteral("old assistant"));
+    model.onPromptEnded();
+
+    const int lastSeen = model.messages().size();
+
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("call-3");
+    tc.title = QStringLiteral("Bash");
+    tc.kind = QStringLiteral("execute");
+    tc.status = QStringLiteral("completed");
+    tc.rawInput.insert(QStringLiteral("command"), QStringLiteral("ls"));
+    model.onToolCallReceived(tc);
+    model.onPromptStarted();
+    model.onMessageChunk(QStringLiteral("new assistant"));
+    model.onPromptEnded();
+
+    const QString xml = GoalConversationSummary::fromModel(&model, lastSeen);
+    QVERIFY(!xml.contains(QStringLiteral("old user")));
+    QVERIFY(!xml.contains(QStringLiteral("old assistant")));
+    QVERIFY(xml.contains(QStringLiteral("<tool-call id=\"call-3\"")));
+    QVERIFY(xml.contains(QStringLiteral("\"command\":\"ls\"")));
+    QVERIFY(xml.contains(QStringLiteral("new assistant")));
+}
+
+void TestGoalDraftGenerator::conversationSummary_usesTruncatedContentWhenRawOutputEmpty()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-content"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+
+    const QString longText = QString(300, QLatin1Char('B'));
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("call-4");
+    tc.title = QStringLiteral("Bash");
+    tc.kind = QStringLiteral("execute");
+    tc.status = QStringLiteral("completed");
+    tc.rawInput.insert(QStringLiteral("command"), QStringLiteral("just test"));
+    QJsonObject block;
+    block.insert(QStringLiteral("type"), QStringLiteral("text"));
+    block.insert(QStringLiteral("text"), longText);
+    tc.content.append(block);
+    model.onToolCallReceived(tc);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(!xml.contains(longText), qPrintable(xml.left(500)));
+    const QString truncated = QString(256, QLatin1Char('B')) + QChar(0x2026);
+    QVERIFY2(xml.contains(truncated), qPrintable(xml.left(500)));
+    QVERIFY(xml.contains(QStringLiteral("\"command\":\"just test\"")));
+}
+
+void TestGoalDraftGenerator::conversationSummary_keepsFailedAndCancelledStatus()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-status"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+
+    AcpProtocol::AcpToolCall failed;
+    failed.id = QStringLiteral("call-fail");
+    failed.title = QStringLiteral("Bash");
+    failed.kind = QStringLiteral("execute");
+    failed.status = QStringLiteral("failed");
+    failed.rawInput.insert(QStringLiteral("command"), QStringLiteral("false"));
+    model.onToolCallReceived(failed);
+
+    AcpProtocol::AcpToolCall cancelled;
+    cancelled.id = QStringLiteral("call-cancel");
+    cancelled.title = QStringLiteral("Read");
+    cancelled.kind = QStringLiteral("read");
+    cancelled.status = QStringLiteral("cancelled");
+    cancelled.rawInput.insert(QStringLiteral("path"), QStringLiteral("x.cpp"));
+    model.onToolCallReceived(cancelled);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(xml.contains(QStringLiteral("status=\"failed\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("status=\"cancelled\"")), qPrintable(xml));
+    QVERIFY(xml.contains(QStringLiteral("id=\"call-fail\"")));
+    QVERIFY(xml.contains(QStringLiteral("id=\"call-cancel\"")));
+}
+
+void TestGoalDraftGenerator::conversationSummary_omitsEmptyInputAndOutput()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-empty"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("call-empty");
+    tc.title = QStringLiteral("Pending");
+    tc.kind = QStringLiteral("other");
+    tc.status = QStringLiteral("pending");
+    model.onToolCallReceived(tc);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(xml.contains(QStringLiteral("<tool-call id=\"call-empty\"")), qPrintable(xml));
+    QVERIFY(!xml.contains(QStringLiteral("<input")));
+    QVERIFY(!xml.contains(QStringLiteral("<output")));
+}
+
+void TestGoalDraftGenerator::conversationSummary_truncatesNestedToolStringFields()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-nested"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+
+    const QString longText = QString(300, QLatin1Char('C'));
+    QJsonObject inner;
+    inner.insert(QStringLiteral("body"), longText);
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("call-nested");
+    tc.title = QStringLiteral("Write");
+    tc.kind = QStringLiteral("edit");
+    tc.status = QStringLiteral("completed");
+    tc.rawInput.insert(QStringLiteral("file"), inner);
+    tc.rawInput.insert(QStringLiteral("path"), QStringLiteral("c.cpp"));
+    model.onToolCallReceived(tc);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(!xml.contains(longText), qPrintable(xml.left(500)));
+    const QString truncated = QString(256, QLatin1Char('C')) + QChar(0x2026);
+    QVERIFY2(xml.contains(truncated), qPrintable(xml.left(500)));
+    QVERIFY(xml.contains(QStringLiteral("\"path\":\"c.cpp\"")));
+}
+
+void TestGoalDraftGenerator::conversationSummary_doesNotTruncateStringOf256Chars()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-exact256"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+
+    const QString exact = QString(256, QLatin1Char('D'));
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("call-256");
+    tc.title = QStringLiteral("Write");
+    tc.kind = QStringLiteral("edit");
+    tc.status = QStringLiteral("completed");
+    tc.rawInput.insert(QStringLiteral("contents"), exact);
+    model.onToolCallReceived(tc);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(xml.contains(exact), qPrintable(xml.left(400)));
+    QVERIFY(!xml.contains(exact + QChar(0x2026)));
+}
+
+void TestGoalDraftGenerator::conversationSummary_doesNotSplitSurrogatePairWhenTruncating()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-utf8"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+
+    const QString emoji = QString::fromUtf8("\xF0\x9F\x98\x80"); // U+1F600 😀, 2 QChars
+    QCOMPARE(emoji.size(), 2);
+    const QString longText = QString(255, QLatin1Char('A')) + emoji + QString(8, QLatin1Char('X'));
+
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("call-utf8");
+    tc.title = QStringLiteral("Write");
+    tc.kind = QStringLiteral("edit");
+    tc.status = QStringLiteral("completed");
+    tc.rawInput.insert(QStringLiteral("contents"), longText);
+    model.onToolCallReceived(tc);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    const QString expected = QString(255, QLatin1Char('A')) + QChar(0x2026);
+    QVERIFY2(xml.contains(expected), qPrintable(xml.left(400)));
+    QVERIFY(!xml.contains(emoji));
+    QCOMPARE(QString::fromUtf8(xml.toUtf8()), xml);
+}
+
+void TestGoalDraftGenerator::conversationSummary_escapesToolCallXmlAttributes()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-escape"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("id&1");
+    tc.title = QStringLiteral("say \"hi\" & <go>");
+    tc.kind = QStringLiteral("read");
+    tc.status = QStringLiteral("completed");
+    model.onToolCallReceived(tc);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(xml.contains(QStringLiteral("id=\"id&amp;1\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("title=\"say &quot;hi&quot; &amp; &lt;go&gt;\"")),
+             qPrintable(xml));
 }
 
 void TestGoalDraftGenerator::cancel_isIdempotentAndDeletesConnection()
