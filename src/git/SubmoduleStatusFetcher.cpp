@@ -42,25 +42,21 @@ SubmoduleStatusFetcher::~SubmoduleStatusFetcher()
 void SubmoduleStatusFetcher::cancelAll()
 {
     // Bump generation so any late-finishing process is ignored. Detach and
-    // kill in-flight processes; their finished signal will land in
-    // onTaskFinished, see the stale generation, and clean themselves up.
+    // kill in-flight processes. Lambdas hold QPointer<Task>, so a queued
+    // finished/readyRead after this is a no-op rather than a UAF. Unparent
+    // each QProcess before deleteLater so ~SubmoduleStatusFetcher cannot
+    // destroy a still-running child (QProcess warns/crashes in that case).
     ++m_generation;
     for (Task *t : m_tasks) {
-        if (t->proc && t->proc->state() != QProcess::NotRunning) {
+        if (t->proc) {
             t->proc->disconnect(this);
-            t->proc->kill();
+            t->proc->setParent(nullptr);
+            if (t->proc->state() != QProcess::NotRunning)
+                t->proc->kill();
             t->proc->deleteLater();
-        } else if (t->proc) {
-            // Already-finished proc. Under the current same-thread
-            // direct-connection design no further signal can fire on it, but we
-            // disconnect anyway before freeing `t`: it keeps both branches
-            // symmetric and stays UAF-safe if the connection type or thread
-            // affinity ever changes (a queued readyRead/finished would
-            // otherwise reference the freed Task). Mirrors row-30 convention.
-            t->proc->disconnect(this);
-            t->proc->deleteLater();
+            t->proc = nullptr;
         }
-        delete t;
+        t->deleteLater();
     }
     m_tasks.clear();
     m_pending.clear();
@@ -92,7 +88,7 @@ void SubmoduleStatusFetcher::fetch(const QVector<Submodule> &submodules)
 
 void SubmoduleStatusFetcher::startOne(const Submodule &sub, int generation)
 {
-    auto *t = new Task;
+    auto *t = new Task(this);
     t->relFromRoot = sub.relFromRoot;
     t->generation = generation;
     t->proc = new QProcess(this);
@@ -118,25 +114,23 @@ void SubmoduleStatusFetcher::startOne(const Submodule &sub, int generation)
     t->proc->setProcessEnvironment(GitProcessRunner::baseEnv());
     t->proc->setProcessChannelMode(QProcess::SeparateChannels);
 
-    connect(t->proc, &QProcess::readyReadStandardOutput, this, [t]() {
+    connect(t->proc, &QProcess::readyReadStandardOutput, this, [t = QPointer<Task>(t)]() {
+        if (!t || !t->proc) return;
         t->stdoutBuf.append(t->proc->readAllStandardOutput());
     });
     connect(t->proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, [this, t](int code, QProcess::ExitStatus status) {
+            this, [this, t = QPointer<Task>(t)](int code, QProcess::ExitStatus status) {
         // A killed/crashed process emits BOTH finished and errorOccurred for
         // the same QProcess. onTaskFinished disconnects this task on first
         // entry, so the partner signal can never re-enter; the generation +
-        // null guards here are belt-and-suspenders for a stale/late delivery.
-        if (t->generation != m_generation || !t->proc) return;
-        // Drain any remaining stdout the readyRead signal hasn't dispatched yet.
+        // null + QPointer guards here catch a stale/late delivery after cancelAll.
+        if (!t || t->generation != m_generation || !t->proc) return;
         t->stdoutBuf.append(t->proc->readAllStandardOutput());
         const int effectiveExit = (status == QProcess::CrashExit) ? -1 : code;
         onTaskFinished(t, effectiveExit);
     });
-    connect(t->proc, &QProcess::errorOccurred, this, [this, t](QProcess::ProcessError) {
-        // Errors map to "skip this submodule" — drain whatever we have and
-        // finish so other submodules still count down.
-        if (t->generation != m_generation || !t->proc) return;
+    connect(t->proc, &QProcess::errorOccurred, this, [this, t = QPointer<Task>(t)](QProcess::ProcessError) {
+        if (!t || t->generation != m_generation || !t->proc) return;
         t->stdoutBuf.append(t->proc->readAllStandardOutput());
         onTaskFinished(t, -1);
     });
@@ -156,6 +150,12 @@ void SubmoduleStatusFetcher::startOne(const Submodule &sub, int generation)
 
     m_tasks.append(t);
     t->proc->start();
+    // Invalid cwd (rm -rf of the submodule) fails to start. errorOccurred may
+    // already have run onTaskFinished; the idempotent !t->proc guard makes a
+    // second call here a no-op. If Qt left the process NotRunning without
+    // emitting, this is what un-strands m_inflight / entriesReady.
+    if (t->proc && t->proc->state() == QProcess::NotRunning)
+        onTaskFinished(t, -1);
 }
 
 void SubmoduleStatusFetcher::onTaskFinished(Task *t, int exitCode)
@@ -173,6 +173,7 @@ void SubmoduleStatusFetcher::onTaskFinished(Task *t, int exitCode)
 
     if (t->generation != m_generation) {
         // Stale completion from a cancelled round — discard silently.
+        t->proc->setParent(nullptr);
         t->proc->deleteLater();
         t->proc = nullptr;
         return;
@@ -196,6 +197,7 @@ void SubmoduleStatusFetcher::onTaskFinished(Task *t, int exitCode)
     // "no entries". This matches the user-visible outcome of no decorations for
     // that subtree, which is preferable to a hard error.
 
+    t->proc->setParent(nullptr);
     t->proc->deleteLater();
     t->proc = nullptr;
 
@@ -205,7 +207,7 @@ void SubmoduleStatusFetcher::onTaskFinished(Task *t, int exitCode)
         m_pending.clear();
         // Free the task storage before emitting so subscribers calling
         // fetch() again from the slot see a clean state.
-        for (Task *task : m_tasks) delete task;
+        for (Task *task : m_tasks) task->deleteLater();
         m_tasks.clear();
         emit entriesReady(out);
     }

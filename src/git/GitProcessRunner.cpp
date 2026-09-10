@@ -109,10 +109,13 @@ void GitProcessRunner::cancelAsync()
     if (m_proc->state() != QProcess::NotRunning) {
         m_proc->kill();
     }
-    // Hand ownership of the dying QProcess to the event loop. Its destructor
-    // closes file descriptors / pipes when Qt reaps it on the next iteration.
+    // Unparent before deleteLater: run() parents QProcess to this runner, so
+    // ~GitProcessRunner (CatFileBlobFetcher/GitBlameFetcher cancel then
+    // runner->deleteLater, or WorkspaceFileEnumerator dtor) would otherwise
+    // destroy a still-running child. Same hole SubmoduleStatusFetcher closed.
     QProcess *dying = m_proc;
     m_proc = nullptr;
+    dying->setParent(nullptr);
     dying->deleteLater();
     m_cb = nullptr;
     m_stdoutBuf.clear();
@@ -128,6 +131,7 @@ void GitProcessRunner::reset()
 {
     if (m_proc) {
         m_proc->disconnect(this);
+        m_proc->setParent(nullptr);
         m_proc->deleteLater();
         m_proc = nullptr;
     }

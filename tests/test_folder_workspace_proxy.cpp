@@ -81,10 +81,17 @@ bool TestFolderWorkspaceProxy::waitForLoaded(FolderAsWorkspaceFsModel *model, co
     const QModelIndex srcIdx = model->index(dir);
     if (!srcIdx.isValid())
         return false;
-    // QFileSystemModel populates on a gatherer thread; spin the event loop until
-    // the directory's children materialize.
+    // QFileSystemModel only lists a directory after fetchMore (the view does this
+    // on expand). Tests have no view, so kick the gatherer ourselves.
+    if (model->canFetchMore(srcIdx))
+        model->fetchMore(srcIdx);
     bool ok = QTest::qWaitFor([&]() {
-        return model->rowCount(model->index(dir)) > 0;
+        const QModelIndex idx = model->index(dir);
+        if (!idx.isValid())
+            return false;
+        if (model->canFetchMore(idx))
+            model->fetchMore(idx);
+        return model->rowCount(idx) > 0;
     }, 5000);
     return ok;
 }

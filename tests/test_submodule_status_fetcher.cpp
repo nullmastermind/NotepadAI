@@ -18,6 +18,7 @@
 // assert: no crash, entriesReady emitted exactly once, inflight never stranded.
 
 #include <QtTest>
+#include <QDir>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 
@@ -49,6 +50,7 @@ private slots:
     void killedSingleTask_emitsOnceNoCrash();
     void killedMultipleTasks_inflightExactlyOnceEach();
     void refetchDuringInflight_noCrash();
+    void cwdDeletedDuringInflight_noCrash();
 };
 
 void TestSubmoduleStatusFetcher::initTestCase()
@@ -148,6 +150,40 @@ void TestSubmoduleStatusFetcher::refetchDuringInflight_noCrash()
     QVERIFY(spy.wait(5000));
     // Only the second round should emit; the first was cancelled. Wait past the
     // first round's timeout window to prove no stale timer crashes us.
+    QTest::qWait(300);
+    QCOMPARE(spy.count(), 1);
+    QVERIFY(!fetcher.isRunning());
+}
+
+void TestSubmoduleStatusFetcher::cwdDeletedDuringInflight_noCrash()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString sub = dir.path() + QStringLiteral("/sub");
+    QVERIFY(QDir().mkpath(sub));
+
+    SubmoduleStatusFetcher fetcher;
+    QString prog;
+    QStringList args;
+    longLivedSpawn(prog, args);
+    fetcher.setSpawnOverrideForTesting(prog, args);
+    fetcher.setTimeoutMsForTesting(2000);
+
+    QSignalSpy spy(&fetcher, &SubmoduleStatusFetcher::entriesReady);
+
+    SubmoduleStatusFetcher::Submodule s;
+    s.absPath = sub;
+    s.relFromRoot = QStringLiteral("sub");
+    fetcher.fetch({ s });
+
+    // Agent rm -rf of the submodule working tree while git status is running.
+    QVERIFY(QDir(sub).removeRecursively());
+    fetcher.fetch({ s });
+
+    // Failed-to-start (deleted cwd) can emit entriesReady synchronously inside
+    // fetch(); spy.wait() would then hang waiting for a second emission.
+    if (spy.count() == 0)
+        QVERIFY(spy.wait(5000));
     QTest::qWait(300);
     QCOMPARE(spy.count(), 1);
     QVERIFY(!fetcher.isRunning());

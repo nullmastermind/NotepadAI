@@ -83,7 +83,10 @@ signals:
     void entriesReady(const GitStatusEntries &entries);
 
 private:
-    struct Task {
+    // QObject so lambdas can hold QPointer<Task> and cancelAll can deleteLater
+    // instead of `delete t` while a queued finished/readyRead still captures t.
+    struct Task : QObject {
+        using QObject::QObject;
         QProcess *proc = nullptr;
         QString  relFromRoot;
         QByteArray stdoutBuf;
