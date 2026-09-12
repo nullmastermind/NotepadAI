@@ -82,6 +82,16 @@ public:
                            bool recordAsLastUsed = false,
                            remote::ExecutionContext *context = nullptr);
 
+    // Spawn an agent with no dock (no chat UI). After initialize, sends `prompt`
+    // and tears the session down when the turn ends, the process exits, or an
+    // error occurs — so the child process does not linger and hold RAM.
+    // Permissions are auto-approved (there is no UI to confirm them). Does not
+    // record last-used and does not persist history. Returns the session id, or
+    // empty if the agent cannot be resolved.
+    QString runHeadlessPrompt(const QString &agentId, const QString &workingDirectory,
+                              const QString &prompt,
+                              remote::ExecutionContext *context = nullptr);
+
     // Inject the SSH exec-channel transport factory (D8). Set once by the app
     // layer (which links the SSH stack); the manager forwards it to every remote
     // AcpConnection so the connection never references SSH symbols directly. When
@@ -126,6 +136,10 @@ signals:
     // still parentless at this point; the receiver (MainWindow) docks it.
     void agentOpened(const QString &sessionId, AiAgentDock *dock);
 
+    // Fired once when a runHeadlessPrompt session ends, immediately before
+    // closeSession. `ok` is true only for a completed prompt turn.
+    void headlessSessionFinished(const QString &sessionId, bool ok);
+
 private slots:
     void onIdleReaperTick();
     void onDockDestroyed(QObject *obj);
@@ -137,10 +151,13 @@ private:
         AcpSessionModel *model = nullptr;
         QPointer<AiAgentDock> dock;
         qint64 lastDockDetachedAtMs = 0;
+        bool headless = false;
+        bool headlessFinished = false;
     };
 
     void wireConnectionToModel(AcpConnection *conn, AcpSessionModel *model);
     void teardownSession(Session &session);
+    void finishHeadlessSession(const QString &sessionId, bool ok);
 
     AcpAgentRegistry *m_registry = nullptr;
     ApplicationSettings *m_settings = nullptr;

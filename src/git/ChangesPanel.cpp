@@ -19,6 +19,7 @@
 #include "ChangesPanel.h"
 
 #include "CommitComposer.h"
+#include "CommitSubmitPolicy.h"
 #include "GitStatusItemDelegate.h"
 #include "GitStatusModel.h"
 #include "NotepadNextApplication.h"
@@ -226,12 +227,9 @@ void ChangesPanel::refreshActionEnabled()
     m_stageAllBtn->setEnabled(m_hasRepo && m_anyEntries);
     m_unstageAllBtn->setEnabled(m_hasRepo && m_anyStaged);
 
-    const QString msg = m_composer ? m_composer->message().trimmed() : QString();
     const bool amend = m_composer && m_composer->amendChecked();
     const bool somethingToCommit = m_anyStaged || amend || m_anyEntries;
-    const bool canCommit = m_hasRepo && !m_hasConflicts
-                           && (!msg.isEmpty() || amend)
-                           && somethingToCommit;
+    const bool canCommit = commitSubmitEnabled(m_hasRepo, m_hasConflicts, somethingToCommit);
     if (m_composer) m_composer->setSubmitEnabled(canCommit);
 }
 

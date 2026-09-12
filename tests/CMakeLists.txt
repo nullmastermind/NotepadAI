@@ -74,6 +74,15 @@ target_include_directories(test_dark_palette PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_dark_palette PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME DarkPalette COMMAND test_dark_palette)
 
+# --- CommitSubmitPolicy: empty-message ACP picker vs normal commit enable ---
+qt_add_executable(test_commit_submit_policy test_commit_submit_policy.cpp)
+target_include_directories(test_commit_submit_policy PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/git
+)
+target_link_libraries(test_commit_submit_policy PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME CommitSubmitPolicy COMMAND test_commit_submit_policy)
+
 # --- TerminalCwdResolver: pure path-resolution logic for the Terminal menu actions ---
 qt_add_executable(test_terminal_cwd_resolver test_terminal_cwd_resolver.cpp)
 target_include_directories(test_terminal_cwd_resolver PRIVATE ${CMAKE_SOURCE_DIR}/src)

@@ -75,6 +75,7 @@ private slots:
     void onMenuButtonClicked();
     void onCommitRequested(const QString &message, bool amend,
                            bool signoff, bool trackedOnly);
+    void onHeadlessCommitFinished(const QString &sessionId, bool ok);
     void onChangesFileActivated(const QString &relPath);
     void onChangesOpenSubmoduleRequested(const QString &relPath);
 
@@ -110,6 +111,8 @@ private:
     void updateBranchButtonText();
     void persistCommitDraft();
     void restoreCommitDraft();
+    void popupAgentCommitMenu();
+    void startHeadlessAgentCommit(const QString &agentId);
     void showError(const QString &text, const QString &hint = {}, const QString &details = {});
     void clearError();
     void appendStatus(const QString &msg);
@@ -127,6 +130,7 @@ private:
     bool m_suppressRepoCombo = false;
     bool m_committing = false;
     bool m_pushAfterPull = false;
+    QString m_headlessCommitSessionId;
 
     GitController *m_controller = nullptr;
     GitOperationManager *m_opMgr = nullptr;

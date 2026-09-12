@@ -81,6 +81,9 @@ public:
     // footer, next to the Commit button). nullptr until built.
     QToolButton *aiButton() const { return m_aiBtn; }
 
+    // Commit button — used to anchor the empty-message ACP agent picker menu.
+    QPushButton *commitButton() const { return m_commitBtn; }
+
     // Forward generation-active state into the inner QPlainTextEdit so Esc
     // gets intercepted only while a stream is in flight.
     void setGenerationActive(bool active);

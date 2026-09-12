@@ -21,6 +21,7 @@
 #include "AcpAgentDefinition.h"
 #include "AcpAgentRegistry.h"
 #include "AcpConnection.h"
+#include "AcpErrorClassifier.h"
 #include "AcpHistoryStore.h"
 #include "AcpSessionModel.h"
 #include "AiAgentDock.h"
@@ -35,6 +36,7 @@
 #include <QJsonObject>
 #include <QMetaObject>
 #include <QPointer>
+#include <QProcess>
 #include <QThread>
 #include <QTimer>
 #include <QUuid>
@@ -158,6 +160,99 @@ AiAgentDock *AcpAgentManager::openAgent(const QString &agentId, const QString &w
                          << "cwd" << projectId
                          << "remote" << isRemote;
     return dock;
+}
+
+QString AcpAgentManager::runHeadlessPrompt(const QString &agentId, const QString &workingDirectory,
+                                           const QString &prompt, remote::ExecutionContext *context)
+{
+    AcpAgentDefinition agent = m_registry->agent(agentId);
+    if (agent.id.isEmpty()) {
+        const QString fallbackId = m_registry->defaultAgentId();
+        if (fallbackId != agentId) {
+            agent = m_registry->agent(fallbackId);
+        }
+    }
+    if (agent.id.isEmpty()) {
+        qCWarning(lcAcpManager) << "runHeadlessPrompt: no agent matched id" << agentId
+                                << "and default id was not resolvable";
+        return {};
+    }
+
+    const QString sessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const bool isRemote = context && context->isRemote() && m_remoteChannelBuilder;
+
+    QString projectId;
+    if (isRemote) {
+        projectId = workingDirectory;
+    } else {
+        projectId = QFileInfo(workingDirectory).canonicalFilePath();
+        if (projectId.isEmpty()) {
+            projectId = workingDirectory;
+        }
+    }
+
+    auto *conn = new AcpConnection(this);
+    // No permission UI on a headless session — auto-approve every request.
+    conn->setAutoApprovePolicyProvider([]() {
+        return QStringLiteral("allowAll");
+    });
+    if (isRemote) {
+        conn->setRemoteSpawn(context, m_remoteChannelBuilder);
+    }
+
+    auto *model = new AcpSessionModel(sessionId, projectId, /*historyDirOverride=*/QString(), this);
+    // Fire-and-forget: skip history persistence so teardown leaves no disk residue.
+    model->setHistoryStore(nullptr);
+    wireConnectionToModel(conn, model);
+
+    Session session;
+    session.connection = conn;
+    session.model = model;
+    session.headless = true;
+    // Stamp as detached so the idle reaper is a backstop if the turn never ends.
+    session.lastDockDetachedAtMs = QDateTime::currentMSecsSinceEpoch();
+    m_sessions.insert(sessionId, session);
+
+    connect(conn, &AcpConnection::initialized, this, [this, sessionId, prompt]() {
+        AcpConnection *c = connectionFor(sessionId);
+        if (!c) {
+            return;
+        }
+        c->sendPrompt(prompt, {});
+    });
+    connect(conn, &AcpConnection::promptEnded, this, [this, sessionId]() {
+        finishHeadlessSession(sessionId, true);
+    });
+    connect(conn, &AcpConnection::errorOccurred, this,
+            [this, sessionId](AcpErrorClassifier::AcpErrorKind, const QString &) {
+                finishHeadlessSession(sessionId, false);
+            });
+    connect(conn, &AcpConnection::requestFailed, this, [this, sessionId](const QString &) {
+        finishHeadlessSession(sessionId, false);
+    });
+    connect(conn, &AcpConnection::agentExited, this,
+            [this, sessionId](int, QProcess::ExitStatus) {
+                finishHeadlessSession(sessionId, false);
+            });
+
+    conn->spawn(agent, projectId);
+
+    qCInfo(lcAcpManager) << "runHeadlessPrompt: spawned session" << sessionId
+                         << "agent" << agent.id
+                         << "cwd" << projectId
+                         << "remote" << isRemote;
+    return sessionId;
+}
+
+void AcpAgentManager::finishHeadlessSession(const QString &sessionId, bool ok)
+{
+    auto it = m_sessions.find(sessionId);
+    if (it == m_sessions.end() || !it->headless || it->headlessFinished) {
+        return;
+    }
+    it->headlessFinished = true;
+    emit headlessSessionFinished(sessionId, ok);
+    closeSession(sessionId);
 }
 
 void AcpAgentManager::closeSession(const QString &sessionId)

@@ -129,6 +129,7 @@
 #include "PreferencesDialog.h"
 #include "AcpAgentSettingsDialog.h"
 #include "AcpAgentRegistry.h"
+#include "AcpAgentPicker.h"
 #include "AcpAgentManager.h"
 #include "AiAgentDock.h"
 #include "ScheduledTaskDialog.h"
@@ -247,46 +248,6 @@ protected:
         return QObject::eventFilter(obj, ev);
     }
 };
-
-QList<AcpAgentDefinition> acpAgentsDefaultFirst(AcpAgentRegistry *registry, QString *defaultIdOut)
-{
-    QList<AcpAgentDefinition> agents = registry ? registry->agents() : QList<AcpAgentDefinition>();
-    const QString defaultId = registry ? registry->defaultAgentId() : QString();
-    if (defaultIdOut)
-        *defaultIdOut = defaultId;
-    std::stable_partition(agents.begin(), agents.end(),
-        [&defaultId](const AcpAgentDefinition &a) { return a.id == defaultId; });
-    return agents;
-}
-
-void fillAcpAgentPickerMenu(QMenu *menu,
-                            const QList<AcpAgentDefinition> &agents,
-                            const QString &defaultId,
-                            bool enabled,
-                            QObject *receiver,
-                            const std::function<void(const QString &)> &onPicked)
-{
-    if (!menu)
-        return;
-    menu->clear();
-    const bool hasAgents = !agents.isEmpty();
-    menu->setEnabled(enabled && hasAgents);
-    if (!enabled || !hasAgents || !onPicked)
-        return;
-    for (const AcpAgentDefinition &agent : agents) {
-        QAction *action = menu->addAction(agent.name);
-        if (agent.id == defaultId) {
-            QFont f = action->font();
-            f.setBold(true);
-            action->setFont(f);
-        }
-        const QString agentId = agent.id;
-        QObject::connect(action, &QAction::triggered, receiver, [onPicked, agentId]() {
-            if (!agentId.isEmpty())
-                onPicked(agentId);
-        });
-    }
-}
 
 remote::ExecutionContext *executionContextForRoot(NotepadNextApplication *app, const QString &rootPath)
 {

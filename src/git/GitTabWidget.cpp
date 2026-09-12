@@ -34,12 +34,24 @@
 #include "../NotepadNextApplication.h"
 #include "../dialogs/MainWindow.h"
 #include "../docks/FolderAsWorkspaceDock.h"
+#include "AcpAgentManager.h"
+#include "AcpAgentPicker.h"
+#include "AcpAgentRegistry.h"
+#include "CommitSubmitPolicy.h"
+#include "remote/ExecutionContext.h"
+#include "remote/ExecutionContextRegistry.h"
+#include "remote/LocalExecutionContext.h"
+#include "remote/RemoteExecutionContext.h"
+#include "remote/SshProfile.h"
 
 #include <QAction>
 #include <QClipboard>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QCursor>
 #include <QDir>
+#include <QFileInfo>
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -50,6 +62,7 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
+#include <QPoint>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QStackedWidget>
@@ -110,6 +123,10 @@ GitTabWidget::GitTabWidget(const QString &workspaceRoot, QWidget *parent)
             connect(gen, &ai::CommitMessageGenerator::errorOccurred,
                     this, &GitTabWidget::onGeneratorError);
         }
+        if (auto *mgr = app->getAiAgentManager()) {
+            connect(mgr, &AcpAgentManager::headlessSessionFinished,
+                    this, &GitTabWidget::onHeadlessCommitFinished);
+        }
         if (auto *mw = qobject_cast<MainWindow *>(app->activeWindow())) {
             connect(mw, &MainWindow::activeWorkspaceChanged, this,
                     [this](FolderAsWorkspaceDock *, FolderAsWorkspaceDock *) {
@@ -128,6 +145,14 @@ GitTabWidget::~GitTabWidget()
 {
     persistCommitDraft();
     teardownController();
+    if (!m_headlessCommitSessionId.isEmpty()) {
+        if (auto *app = qobject_cast<NotepadNextApplication *>(QCoreApplication::instance())) {
+            if (AcpAgentManager *mgr = app->getAiAgentManager()) {
+                mgr->closeSession(m_headlessCommitSessionId);
+            }
+        }
+        m_headlessCommitSessionId.clear();
+    }
 }
 
 void GitTabWidget::buildUi()
@@ -948,8 +973,8 @@ void GitTabWidget::onCommitRequested(const QString &message, bool amend,
 {
     if (!m_controller) return;
     const QString trimmedMsg = message.trimmed();
-    if (trimmedMsg.isEmpty() && !amend) {
-        showError(tr("Commit message is empty."));
+    if (commitUsesAgentPicker(trimmedMsg, amend)) {
+        popupAgentCommitMenu();
         return;
     }
 
@@ -962,6 +987,101 @@ void GitTabWidget::onCommitRequested(const QString &message, bool amend,
 
     m_committing = true;
     m_controller->commit(message, amend, signoff, trackedOnly);
+}
+
+void GitTabWidget::popupAgentCommitMenu()
+{
+    if (!m_headlessCommitSessionId.isEmpty()) {
+        return;
+    }
+
+    auto *app = qobject_cast<NotepadNextApplication *>(QCoreApplication::instance());
+    AcpAgentManager *manager = app ? app->getAiAgentManager() : nullptr;
+    AcpAgentRegistry *registry = manager ? manager->registry() : nullptr;
+    QString defaultId;
+    const QList<AcpAgentDefinition> agents = acpAgentsDefaultFirst(registry, &defaultId);
+    if (agents.isEmpty()) {
+        showError(tr("No ACP agents configured."));
+        return;
+    }
+
+    auto *menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    fillAcpAgentPickerMenu(menu, agents, defaultId, true, this,
+        [this](const QString &agentId) { startHeadlessAgentCommit(agentId); });
+
+    CommitComposer *composer = m_changesPanel ? m_changesPanel->composer() : nullptr;
+    QPushButton *btn = composer ? composer->commitButton() : nullptr;
+    if (btn) {
+        menu->popup(btn->mapToGlobal(QPoint(0, btn->height())));
+    } else {
+        menu->popup(QCursor::pos());
+    }
+}
+
+void GitTabWidget::startHeadlessAgentCommit(const QString &agentId)
+{
+    if (!m_headlessCommitSessionId.isEmpty()) {
+        return;
+    }
+
+    auto *app = qobject_cast<NotepadNextApplication *>(QCoreApplication::instance());
+    AcpAgentManager *manager = app ? app->getAiAgentManager() : nullptr;
+    if (!manager) {
+        showError(tr("Could not start the agent — AI agent manager is unavailable."));
+        return;
+    }
+
+    QString cwd = m_controller ? m_controller->currentRepo() : m_workspaceRoot;
+    if (cwd.isEmpty()) {
+        cwd = m_workspaceRoot;
+    }
+    if (cwd.isEmpty()) {
+        showError(tr("No repository selected."));
+        return;
+    }
+
+    remote::ExecutionContext *ctx = nullptr;
+    if (auto *reg = app->getExecutionContextRegistry()) {
+        if (remote::isSshUri(m_workspaceRoot)) {
+            const remote::SshUri uri = remote::parseSshUri(m_workspaceRoot);
+            ctx = uri.valid ? reg->remoteContext(uri.profileId) : nullptr;
+        } else {
+            ctx = reg->localContext();
+        }
+    }
+    if (ctx && ctx->isRemote() && remote::isSshUri(cwd)) {
+        const remote::SshUri uri = remote::parseSshUri(cwd);
+        if (uri.valid) {
+            cwd = uri.remotePath;
+        }
+    }
+
+    const QString sid = manager->runHeadlessPrompt(agentId, cwd, QStringLiteral("commit"), ctx);
+    if (sid.isEmpty()) {
+        showError(tr("Could not start the agent — check that the command is installed."));
+        return;
+    }
+    m_headlessCommitSessionId = sid;
+    if (CommitComposer *composer = m_changesPanel ? m_changesPanel->composer() : nullptr) {
+        composer->setSubmitEnabled(false);
+    }
+    setStatusBusy(BusyOwner::Ai, tr("AI: Committing"));
+}
+
+void GitTabWidget::onHeadlessCommitFinished(const QString &sessionId, bool ok)
+{
+    if (sessionId != m_headlessCommitSessionId) {
+        return;
+    }
+    m_headlessCommitSessionId.clear();
+    clearStatusBusy(BusyOwner::Ai);
+    updateActionsEnabled();
+    if (ok) {
+        flashStatusSuccess(tr("Agent commit finished"));
+    } else {
+        showError(tr("Agent commit failed."));
+    }
 }
 
 void GitTabWidget::onChangesFileActivated(const QString &relPath)

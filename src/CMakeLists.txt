@@ -3,6 +3,7 @@ qt_add_executable(NotepadAI
 	MACOSX_BUNDLE
 	AcpAgentDefinition.h
 	AcpAgentManager.h
+	AcpAgentPicker.h
 	AcpAgentRegistry.h
 	AcpConnection.h
 	AcpErrorClassifier.h
@@ -315,6 +316,7 @@ qt_add_executable(NotepadAI
 	git/ChangesPanel.h
 	git/CommitComposer.cpp
 	git/CommitComposer.h
+	git/CommitSubmitPolicy.h
 	git/FileEncodingDetector.cpp
 	git/FileEncodingDetector.h
 	git/GitBlameParser.cpp

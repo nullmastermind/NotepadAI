@@ -37,6 +37,8 @@ private slots:
     void shutdown_joinsWorkerThread();
     void registry_pointerIsStableAcrossCalls();
     void deleteSessionHistory_removesFile();
+    void runHeadlessPrompt_tearsDownWhenProcessFails();
+    void runHeadlessPrompt_doesNotOpenDock_closeSessionFreesImmediately();
 
 private:
     QTemporaryDir tempDir;
@@ -137,6 +139,53 @@ void TestAcpAgentManager::deleteSessionHistory_removesFile()
 
     QVERIFY(deletedSpy.wait(2000));
     QVERIFY(!QFile::exists(filePath));
+}
+
+void TestAcpAgentManager::runHeadlessPrompt_tearsDownWhenProcessFails()
+{
+    ApplicationSettings settings;
+    AcpAgentManager manager(&settings);
+
+    AcpAgentDefinition def;
+    def.id = QStringLiteral("test-headless");
+    def.name = QStringLiteral("Headless");
+    def.command = QStringLiteral("definitely-not-a-real-binary-xyz");
+    QVERIFY(manager.registry()->addAgent(def));
+
+    QTemporaryDir workDir;
+    QVERIFY(workDir.isValid());
+
+    QSignalSpy finishedSpy(&manager, &AcpAgentManager::headlessSessionFinished);
+    const QString sid = manager.runHeadlessPrompt(def.id, workDir.path(), QStringLiteral("commit"));
+    QVERIFY(!sid.isEmpty());
+
+    QTRY_VERIFY_WITH_TIMEOUT(finishedSpy.count() >= 1, 5000);
+    QCOMPARE(finishedSpy.first().at(0).toString(), sid);
+    QCOMPARE(finishedSpy.first().at(1).toBool(), false);
+    QVERIFY(manager.connectionFor(sid) == nullptr);
+}
+
+void TestAcpAgentManager::runHeadlessPrompt_doesNotOpenDock_closeSessionFreesImmediately()
+{
+    ApplicationSettings settings;
+    AcpAgentManager manager(&settings);
+
+    AcpAgentDefinition def;
+    def.id = QStringLiteral("test-headless-close");
+    def.name = QStringLiteral("Headless");
+    def.command = QStringLiteral("definitely-not-a-real-binary-xyz");
+    QVERIFY(manager.registry()->addAgent(def));
+
+    QTemporaryDir workDir;
+    QVERIFY(workDir.isValid());
+
+    QSignalSpy openedSpy(&manager, &AcpAgentManager::agentOpened);
+    const QString sid = manager.runHeadlessPrompt(def.id, workDir.path(), QStringLiteral("commit"));
+    QVERIFY(!sid.isEmpty());
+    QCOMPARE(openedSpy.count(), 0);
+
+    manager.closeSession(sid);
+    QVERIFY(manager.connectionFor(sid) == nullptr);
 }
 
 QTEST_MAIN(TestAcpAgentManager)
