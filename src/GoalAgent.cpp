@@ -95,6 +95,23 @@ bool GoalAgent::start(const StartRequest &req)
         return false;
     }
 
+    if (req.attachToExistingConversation && m_originalUserMessage.isEmpty()) {
+        const auto &msgs = m_targetModel->messages();
+        for (int i = msgs.size() - 1; i >= 0; --i) {
+            const auto &msg = msgs[i];
+            if (msg.role != QLatin1String("user") || msg.fromGoalAgent)
+                continue;
+            QString text;
+            for (const auto &block : msg.content) {
+                if (block.kind == AcpProtocol::AcpContentBlock::Kind::Text)
+                    text += block.text;
+            }
+            m_originalUserMessage = text.trimmed();
+            if (!m_originalUserMessage.isEmpty())
+                break;
+        }
+    }
+
     // Subscribe to target's promptEnded signal.
     connect(m_targetConnection, &AcpConnection::promptEnded,
             this, &GoalAgent::onTargetPromptEnded);
@@ -112,10 +129,30 @@ bool GoalAgent::start(const StartRequest &req)
     }
 
     setStatus(Active);
-    m_lastSeenTargetMessageCount = m_targetModel->messages().size();
-    logDebug(QStringLiteral("start: OK, %1 criteria, agent=%2, maxIter=%3")
-                 .arg(m_criteria.size()).arg(m_agentId).arg(m_maxIterations));
+    if (req.attachToExistingConversation) {
+        // Include the already-sent turn in the first judge prompt. When the
+        // target is still streaming, wait for promptEnded instead of judging
+        // a partial reply.
+        m_lastSeenTargetMessageCount = 0;
+        logDebug(QStringLiteral("start: OK, %1 criteria, agent=%2, maxIter=%3, attach")
+                     .arg(m_criteria.size()).arg(m_agentId).arg(m_maxIterations));
+        if (!m_targetModel->isProcessing())
+            evaluateCurrentCriterion();
+    } else {
+        m_lastSeenTargetMessageCount = m_targetModel->messages().size();
+        logDebug(QStringLiteral("start: OK, %1 criteria, agent=%2, maxIter=%3")
+                     .arg(m_criteria.size()).arg(m_agentId).arg(m_maxIterations));
+    }
     return true;
+}
+
+GoalAgent::LaunchAction GoalAgent::launchAction(bool hasComposer, bool sessionHasHistory, bool processing)
+{
+    if (hasComposer && !processing)
+        return LaunchAction::Send;
+    if (sessionHasHistory || processing)
+        return LaunchAction::Attach;
+    return LaunchAction::NeedComposer;
 }
 
 void GoalAgent::setTargetSession(AcpConnection *conn, AcpSessionModel *model)

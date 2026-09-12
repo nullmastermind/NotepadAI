@@ -60,6 +60,14 @@ private slots:
     void restartAction_oldConnectionDestroyedDuringRestart_staysActive();
     void continueAction_stillForwardsToTarget();
     void completeAction_stillAchievesSingleCriterion();
+    void start_attachToExistingConversation_whenIdle_evaluatesImmediately();
+    void start_attachToExistingConversation_whenProcessing_waitsForPromptEnded();
+    void start_attachToExistingConversation_usesLastUserMessageAsOriginal();
+    void launchAction_emptyIdleNoHistory_needsComposer();
+    void launchAction_emptyWithHistory_attaches();
+    void launchAction_emptyWhileProcessing_attaches();
+    void launchAction_composerIdle_sends();
+    void launchAction_composerWhileProcessing_attaches();
 };
 
 void TestGoalAgent::stop_doesNotCancelTargetAcpPrompt()
@@ -456,6 +464,135 @@ void TestGoalAgent::completeAction_stillAchievesSingleCriterion()
     goal.applyJudgeAction(action);
 
     QCOMPARE(goal.status(), GoalAgent::Achieved);
+}
+
+void TestGoalAgent::start_attachToExistingConversation_whenIdle_evaluatesImmediately()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    model.appendUserMessage(QStringLiteral("fix the crash"), {});
+    goal.setTargetSession(&target, &model);
+
+    QSignalSpy logs(&goal, &GoalAgent::debugLogEntry);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.attachToExistingConversation = true;
+    QVERIFY(goal.start(req));
+
+    bool evaluated = false;
+    bool includedExisting = false;
+    for (const auto &row : logs) {
+        const QString entry = row.at(0).toString();
+        if (entry.contains(QLatin1String("evaluateViaHttp")))
+            evaluated = true;
+        if (entry.contains(QLatin1String("startIdx=0")))
+            includedExisting = true;
+    }
+    QVERIFY(evaluated);
+    QVERIFY(includedExisting);
+}
+
+void TestGoalAgent::start_attachToExistingConversation_whenProcessing_waitsForPromptEnded()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    model.appendUserMessage(QStringLiteral("fix the crash"), {});
+    model.onPromptStarted();
+    goal.setTargetSession(&target, &model);
+
+    QSignalSpy logs(&goal, &GoalAgent::debugLogEntry);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.attachToExistingConversation = true;
+    QVERIFY(goal.start(req));
+    QCOMPARE(goal.status(), GoalAgent::Active);
+
+    auto logHas = [](const QSignalSpy &spy, const char *needle) {
+        for (const auto &row : spy) {
+            if (row.at(0).toString().contains(QLatin1String(needle)))
+                return true;
+        }
+        return false;
+    };
+    QVERIFY(!logHas(logs, "evaluateViaHttp"));
+
+    QVERIFY(QMetaObject::invokeMethod(&target, "promptEnded", Qt::DirectConnection));
+    QVERIFY(logHas(logs, "evaluateViaHttp"));
+}
+
+void TestGoalAgent::start_attachToExistingConversation_usesLastUserMessageAsOriginal()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    model.appendUserMessage(QStringLiteral("fix the crash"), {});
+    model.onPromptStarted();
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.attachToExistingConversation = true;
+    QVERIFY(goal.start(req));
+    QCOMPARE(goal.m_originalUserMessage, QStringLiteral("fix the crash"));
+}
+
+void TestGoalAgent::launchAction_emptyIdleNoHistory_needsComposer()
+{
+    QCOMPARE(GoalAgent::launchAction(false, false, false), GoalAgent::LaunchAction::NeedComposer);
+}
+
+void TestGoalAgent::launchAction_emptyWithHistory_attaches()
+{
+    QCOMPARE(GoalAgent::launchAction(false, true, false), GoalAgent::LaunchAction::Attach);
+}
+
+void TestGoalAgent::launchAction_emptyWhileProcessing_attaches()
+{
+    QCOMPARE(GoalAgent::launchAction(false, false, true), GoalAgent::LaunchAction::Attach);
+}
+
+void TestGoalAgent::launchAction_composerIdle_sends()
+{
+    QCOMPARE(GoalAgent::launchAction(true, false, false), GoalAgent::LaunchAction::Send);
+}
+
+void TestGoalAgent::launchAction_composerWhileProcessing_attaches()
+{
+    QCOMPARE(GoalAgent::launchAction(true, true, true), GoalAgent::LaunchAction::Attach);
 }
 
 QTEST_MAIN(TestGoalAgent)

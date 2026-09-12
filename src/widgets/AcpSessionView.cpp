@@ -671,7 +671,7 @@ void AcpSessionView::buildUi()
     m_sendWithGoalBtn->setText(tr("Goal"));
     m_sendWithGoalBtn->setAutoRaise(true);
     m_sendWithGoalBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    m_sendWithGoalBtn->setToolTip(tr("Send with Goal — evaluate success criteria automatically"));
+    m_sendWithGoalBtn->setToolTip(tr("Start Goal on this session — sends the composer text if you typed one"));
     m_sendWithGoalBtn->setStyleSheet(QStringLiteral(
         "QToolButton { color: rgb(180, 140, 50); padding: 1px 6px; border: 1px solid rgba(180, 140, 50, 80); border-radius: 3px; }"
         "QToolButton:hover { color: rgb(200, 160, 60); background: rgba(180, 140, 50, 32); border: 1px solid rgba(180, 140, 50, 120); }"));
@@ -1444,12 +1444,24 @@ void AcpSessionView::insertTextToInput(const QString &text)
     m_input->setFocus();
 }
 
+QString AcpSessionView::peekInputText() const
+{
+    if (!m_input) return {};
+    return m_input->toPlainText().trimmed();
+}
+
 QString AcpSessionView::takeInputText()
 {
     if (!m_input) return {};
     const QString text = m_input->toPlainText().trimmed();
     m_input->clear();
     return text;
+}
+
+QVector<QPair<QByteArray, QString>> AcpSessionView::peekInputImages() const
+{
+    if (!m_attachmentList) return {};
+    return m_attachmentList->peekAll();
 }
 
 QVector<QPair<QByteArray, QString>> AcpSessionView::takeInputImages()

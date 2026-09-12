@@ -456,18 +456,28 @@ void AiAgentDock::sendWithGoal()
     if (res.successCriteriaList.isEmpty())
         return;
 
-    // Capture composer text BEFORE starting the goal — if empty, abort early
-    // without spawning the judge process.
+    // Peek first so Attach leaves the composer intact (no stacked send, no
+    // dropped follow-up text/images while a turn is in flight).
     QString composerText;
     QVector<QPair<QByteArray, QString>> composerImages;
     if (m_view) {
-        composerText = m_view->takeInputText();
-        composerImages = m_view->takeInputImages();
+        composerText = m_view->peekInputText();
+        composerImages = m_view->peekInputImages();
     }
-    if (composerText.isEmpty() && composerImages.isEmpty()) {
+    const bool hasComposer = !composerText.isEmpty() || !composerImages.isEmpty();
+    const bool processing = m_model && m_model->isProcessing();
+    const bool hasHistory = m_model && !m_model->isEmpty();
+    const auto action = GoalAgent::launchAction(hasComposer, hasHistory, processing);
+    if (action == GoalAgent::LaunchAction::NeedComposer) {
         QMessageBox::information(this, tr("Send with Goal"),
                                  tr("Type a message before sending with a goal."));
         return;
+    }
+
+    const bool attach = action == GoalAgent::LaunchAction::Attach;
+    if (!attach && m_view) {
+        composerText = m_view->takeInputText();
+        composerImages = m_view->takeInputImages();
     }
 
     auto *goal = new GoalAgent(m_agentManager, m_appSettings, this);
@@ -480,7 +490,8 @@ void AiAgentDock::sendWithGoal()
     req.agentId = res.agentId;
     req.maxIterations = res.maxIterations;
     req.promptTemplateId = res.promptTemplateId;
-    req.originalUserMessage = composerText;
+    req.originalUserMessage = attach ? QString() : composerText;
+    req.attachToExistingConversation = attach;
 
     if (!m_goalAgent->start(req)) {
         QMessageBox::warning(this, tr("Send with Goal"),
@@ -488,10 +499,14 @@ void AiAgentDock::sendWithGoal()
                                 "is connected and the goal-agent is available."));
         m_goalAgent->deleteLater();
         m_goalAgent = nullptr;
-        // Restore the text we took from the composer.
-        if (m_view) {
+        if (!attach && m_view) {
             m_view->insertTextToInput(composerText);
         }
+        return;
+    }
+
+    if (attach) {
+        emit inputFocused();
         return;
     }
 

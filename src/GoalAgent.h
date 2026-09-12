@@ -56,11 +56,20 @@ public:
         int maxIterations = GoalAgentSettings::kDefaultMaxIterations;
         QString promptTemplateId;
         QString originalUserMessage;
+        // True when Goal is attached to a session that already has a turn
+        // (user clicked Send, then Goal). Includes existing messages in the
+        // first evaluation and evaluates immediately if the target is idle.
+        bool attachToExistingConversation = false;
     };
 
     bool start(const StartRequest &req);
     void stop();
     void setTargetSession(AcpConnection *conn, AcpSessionModel *model);
+
+    // Composer + session state → whether Goal sends a new prompt, attaches to
+    // the existing turn, or refuses. Processing never sends (no stacked prompt).
+    enum class LaunchAction : std::uint8_t { NeedComposer, Attach, Send };
+    static LaunchAction launchAction(bool hasComposer, bool sessionHasHistory, bool processing);
 
     struct RestartedSession {
         QString sessionId;

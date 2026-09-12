@@ -78,7 +78,9 @@ public:
     void setBanner(const QString &text, BannerKind kind);
     void clearBanner();
     void insertTextToInput(const QString &text);
+    QString peekInputText() const;
     QString takeInputText();
+    QVector<QPair<QByteArray, QString>> peekInputImages() const;
     QVector<QPair<QByteArray, QString>> takeInputImages();
     QStringList goalDebugLog() const;
 

@@ -10,7 +10,7 @@ You shouldn't have to leave your editor to talk to an AI, run git, or open a she
 
 NotepadAI speaks the Agent Client Protocol (ACP) over stdio. Claude Code and Codex are built in. From Settings you can add any other ACP-compatible agent, including Gemini, Auggie, or your own command. Agents read and write files, run terminal commands, and see your workspace context, so they work on the same code you do. Start a session from the AI menu or by right-clicking a folder in the file tree.
 
-There is also a Goal Agent: pick an ACP judge (Claude Code, Codex, Opencode) or a Custom API endpoint that speaks Anthropic's Messages API. You set success criteria and it drives the working agent until those criteria hold. When you commit, AI can write the commit message from your staged diff. That generator (and other LLM calls) can talk to an OpenAI-compatible endpoint or Anthropic's Messages API. Protocol details and how to wire up a custom ACP agent are in [doc/AcpAgents.md](doc/AcpAgents.md).
+There is also a Goal Agent: pick an ACP judge (Claude Code, Codex, Opencode) or a Custom API endpoint that speaks Anthropic's Messages API. You set success criteria and it drives the working agent until those criteria hold. When you commit, AI can write the commit message from your staged diff. That generator (and other LLM calls) can talk to an OpenAI-compatible endpoint or Anthropic's Messages API. Leave the commit box empty (when not amending) and Commit lets you pick an ACP agent to do the commit. Protocol details and how to wire up a custom ACP agent are in [doc/AcpAgents.md](doc/AcpAgents.md).
 
 ### Git
 

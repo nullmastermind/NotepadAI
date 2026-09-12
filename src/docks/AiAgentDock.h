@@ -70,7 +70,9 @@ public:
     bool isBusy() const;
 
     // Open the Send with Goal dialog and start a goal on this session.
-    // No-op if a goal is already active.
+    // Empty composer attaches to the existing conversation (Send-then-Goal);
+    // otherwise sends the composer text as the first prompt. No-op if a goal
+    // is already active.
     void sendWithGoal();
 
     // Attach an externally-created GoalAgent and wire its signals for UI
