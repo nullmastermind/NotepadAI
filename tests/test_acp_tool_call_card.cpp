@@ -20,6 +20,7 @@ private slots:
     void expanded_card_coalesces_running_updates();
     void diff_card_auto_expands_at_terminal_status();
     void running_diff_card_stays_collapsed();
+    void collapsed_multiline_title_autosizes_to_two_lines();
 };
 
 namespace {
@@ -154,6 +155,47 @@ void TestAcpToolCallCard::running_diff_card_stays_collapsed()
 
     QVERIFY(!card.isCollapsed());
     QTRY_VERIFY(body->toPlainText().contains(QStringLiteral("a.cpp")));
+}
+
+void TestAcpToolCallCard::collapsed_multiline_title_autosizes_to_two_lines()
+{
+    // A one-line command keeps the original collapsed height. Two (or more)
+    // lines must grow the header so the second line is not clipped — including
+    // on first paint, not only after expand→collapse.
+    AcpProtocol::AcpToolCall oneLine = baseCall();
+    oneLine.title = QStringLiteral("python3 script.py");
+    AcpToolCallCard one(oneLine);
+    one.resize(480, 40);
+    QVERIFY(one.isCollapsed());
+    const int h1 = one.height();
+
+    AcpProtocol::AcpToolCall twoLine = baseCall();
+    twoLine.title = QStringLiteral("python3 -c \"\nimport hashlib");
+    AcpToolCallCard two(twoLine);
+    two.resize(480, 40);
+    QVERIFY(two.isCollapsed());
+    const int h2 = two.height();
+    QVERIFY(h2 > h1);
+
+    AcpProtocol::AcpToolCall threeLine = baseCall();
+    threeLine.title = QStringLiteral("python3 -c \"\nimport hashlib\nprint(1)");
+    AcpToolCallCard three(threeLine);
+    three.resize(480, 40);
+    QCOMPARE(three.height(), h2);
+
+    // Title arriving via apply() must grow a card that started as one line.
+    AcpProtocol::AcpToolCallUpdate update;
+    update.id = oneLine.id;
+    update.title = twoLine.title;
+    one.apply(update);
+    QVERIFY(one.height() > h1);
+
+    // Expand→collapse must not change the two-line height (the previously-
+    // working path).
+    const int beforeToggle = two.height();
+    two.setCollapsed(false);
+    two.setCollapsed(true);
+    QCOMPARE(two.height(), beforeToggle);
 }
 
 QTEST_MAIN(TestAcpToolCallCard)

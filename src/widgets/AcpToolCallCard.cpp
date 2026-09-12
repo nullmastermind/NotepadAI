@@ -299,6 +299,30 @@ QString firstLine(QString text)
     return text;
 }
 
+// First `maxLines` lines of `text`. Trailing newlines do not count as extra
+// lines, so a one-line command that happens to end with `\n` stays one line.
+QString firstLines(QString text, int maxLines)
+{
+    text.replace(QLatin1String("\r\n"), QStringLiteral("\n"));
+    text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    while (text.endsWith(QLatin1Char('\n'))) {
+        text.chop(1);
+    }
+    if (maxLines <= 0 || text.isEmpty()) {
+        return text;
+    }
+    int seen = 0;
+    for (int i = 0; i < text.size(); ++i) {
+        if (text.at(i) == QLatin1Char('\n')) {
+            ++seen;
+            if (seen == maxLines) {
+                return text.left(i);
+            }
+        }
+    }
+    return text;
+}
+
 QString truncateForUi(QString text)
 {
     if (text.size() <= kMaxRawOutputChars) {
@@ -756,7 +780,7 @@ QString AcpToolCallCard::computeEnrichedTitle() const
         || m_kind == QLatin1String("execute")
         || (!rawCommand.isEmpty() && m_rawInput.contains(QStringLiteral("cwd")))) {
         if (!rawCommand.isEmpty()) {
-            return QStringLiteral("Command: %1").arg(firstLine(rawCommand));
+            return QStringLiteral("Command: %1").arg(firstLines(rawCommand.trimmed(), 2));
         }
         const QString desc = m_rawInput.value(QStringLiteral("description")).toString();
         if (!desc.isEmpty())
@@ -822,14 +846,34 @@ QString AcpToolCallCard::computeEnrichedTitle() const
 void AcpToolCallCard::refreshHeader()
 {
     m_statusIcon->setText(statusGlyph());
-    const QString enriched = computeEnrichedTitle();
+    const QString shown = firstLines(computeEnrichedTitle(), 2);
+
     const int availableWidth = m_titleLabel->width();
+    const QFontMetrics fm(m_titleLabel->font());
     if (availableWidth > 0) {
-        const QFontMetrics fm(m_titleLabel->font());
-        m_titleLabel->setText(fm.elidedText(enriched, Qt::ElideRight, availableWidth));
+        // Elide each line on its own. QFontMetrics::elidedText is single-line:
+        // running it over a `\n`-joined string keeps the newline and the card
+        // then clips the second line inside a one-line frame.
+        const QStringList rawLines = shown.split(QLatin1Char('\n'));
+        QStringList elided;
+        elided.reserve(rawLines.size());
+        for (const QString &line : rawLines) {
+            elided.append(fm.elidedText(line, Qt::ElideRight, availableWidth));
+        }
+        m_titleLabel->setText(elided.join(QLatin1Char('\n')));
     } else {
-        m_titleLabel->setText(enriched);
+        m_titleLabel->setText(shown);
     }
+
+    // QLabel + TextSelectableByMouse under-reports sizeHint until a full
+    // layout pass (the expand→collapse path). Pin the min height from font
+    // metrics so a collapsed card autosizes to 1 or 2 lines on first paint.
+    if (shown.contains(QLatin1Char('\n'))) {
+        m_titleLabel->setMinimumHeight(fm.size(0, shown).height());
+    } else {
+        m_titleLabel->setMinimumHeight(0);
+    }
+    refitBodyHeight();
 }
 
 void AcpToolCallCard::scheduleBodyRender()
