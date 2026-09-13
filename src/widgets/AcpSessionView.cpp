@@ -481,10 +481,13 @@ void AcpSessionView::buildUi()
     m_autoApproveCheck->setToolTip(tr("Automatically allow all tool calls this agent requests"));
     m_autoApproveCheck->setStyleSheet(QStringLiteral(
         "QCheckBox:checked { color: #856404; font-weight: 600; }"));
+    m_newWorktreeCheck = new QCheckBox(tr("New worktree"), this);
+    m_newWorktreeCheck->setToolTip(tr("Do this turn in a new git worktree, then merge and clean up"));
     auto *autoApproveRow = new QHBoxLayout();
     autoApproveRow->setContentsMargins(0, 0, 0, 0);
     autoApproveRow->setSpacing(6);
     autoApproveRow->addWidget(m_autoApproveCheck);
+    autoApproveRow->addWidget(m_newWorktreeCheck);
     autoApproveRow->addStretch();
     m_usageIndicator = new AcpUsageIndicator(this);
     autoApproveRow->addWidget(m_usageIndicator);
@@ -690,6 +693,11 @@ void AcpSessionView::buildUi()
     }
     connect(m_autoApproveCheck, &QCheckBox::toggled,
             this, &AcpSessionView::onAutoApproveToggled);
+    // clicked, not toggled: send/rebind call setChecked(false) and must not
+    // yank focus away from the transcript or a permission prompt.
+    connect(m_newWorktreeCheck, &QCheckBox::clicked, this, [this]() {
+        if (m_input) m_input->setFocus();
+    });
 
     // Send-button enable state tracks attachment list non-empty / input text.
     connect(m_input, &QPlainTextEdit::textChanged, this, [this]() {
@@ -923,6 +931,9 @@ void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)
     m_model = model;
     m_connection = connection;
     m_savedPrefsApplied = false;
+    if (m_newWorktreeCheck) {
+        m_newWorktreeCheck->setChecked(false);
+    }
 
     // Clear the transcript: drop bubbles, cards, plan, permission prompts.
     // Leave the trailing stretch in place, and skip the inline heartbeat
@@ -1549,6 +1560,21 @@ void AcpSessionView::clearGoalStatus()
     if (m_goalElapsedLabel) m_goalElapsedLabel->hide();
 }
 
+QString AcpSessionView::applyNewWorktreeInstruction(const QString &displayText)
+{
+    if (!m_newWorktreeCheck || !m_newWorktreeCheck->isChecked()) {
+        return displayText;
+    }
+    m_newWorktreeCheck->setChecked(false);
+    QString instruction = QStringLiteral(
+        "Create a new git worktree for this task. When finished, merge the result "
+        "into the current branch and remove the worktree to free disk space.");
+    if (displayText.isEmpty()) {
+        return instruction;
+    }
+    return displayText + QLatin1String("\n\n") + instruction;
+}
+
 void AcpSessionView::onSendClicked()
 {
     if (!m_connection || !m_model) return;
@@ -1558,12 +1584,13 @@ void AcpSessionView::onSendClicked()
     QVector<QPair<QByteArray, QString>> images = m_attachmentList->takeAll();
     if (text.isEmpty() && images.isEmpty()) return;
 
+    const QString wireText = applyNewWorktreeInstruction(text);
     m_model->appendUserMessage(text, images);
 
     QList<QPair<QByteArray, QString>> imageList;
     imageList.reserve(images.size());
     for (const auto &p : images) imageList.append(p);
-    m_connection->sendPrompt(text, imageList);
+    m_connection->sendPrompt(wireText, imageList);
 
     m_input->clear();
     m_currentGroupCards.clear();

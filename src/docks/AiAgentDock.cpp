@@ -517,6 +517,9 @@ void AiAgentDock::sendWithGoal()
     imageList.reserve(composerImages.size());
     for (const auto &p : composerImages) imageList.append(p);
     m_model->appendUserMessage(composerText, composerImages);
-    m_connection->sendPrompt(composerText, imageList);
+    const QString wireText = m_view
+                                 ? m_view->applyNewWorktreeInstruction(composerText)
+                                 : composerText;
+    m_connection->sendPrompt(wireText, imageList);
     emit inputFocused();
 }

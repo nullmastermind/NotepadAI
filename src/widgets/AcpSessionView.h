@@ -84,6 +84,11 @@ public:
     QVector<QPair<QByteArray, QString>> takeInputImages();
     QStringList goalDebugLog() const;
 
+    // If "New worktree" is checked, uncheck it and return displayText plus a
+    // hidden instruction for the agent. The transcript should keep displayText.
+    // Session-local: never persisted; also cleared on rebind().
+    QString applyNewWorktreeInstruction(const QString &displayText);
+
     // Goal status feedback — called by the owning dock when goal state changes.
     void setGoalActive(int criterionIndex, int totalCriteria, int iteration, int maxIterations);
     void setGoalTerminal(const QString &statusText);
@@ -255,6 +260,8 @@ private:
 
     // Auto-approve
     QCheckBox *m_autoApproveCheck = nullptr;
+    // Session-local one-shot; never persisted.
+    QCheckBox *m_newWorktreeCheck = nullptr;
 
     // Attachments
     AcpImageAttachmentList *m_attachmentList = nullptr;
