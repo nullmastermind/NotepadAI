@@ -9,7 +9,6 @@
  */
 
 #include <QtTest>
-#include <QCoreApplication>
 #include <QDockWidget>
 #include <QMainWindow>
 #include <QPointer>
@@ -83,12 +82,6 @@ QTabBar *areaTabBarForDock(QMainWindow *mw, QDockWidget *dock, int *tabIndex)
     return nullptr;
 }
 
-QString projectTooltipText(const QString &cwd, int n)
-{
-    return QStringLiteral("%1\n%2")
-        .arg(cwd, QCoreApplication::translate("AiAgentDock", "%n session(s)", "", n));
-}
-
 } // namespace
 
 class TestAcpDockCloseEvent : public QObject
@@ -104,7 +97,7 @@ private slots:
     void close_whenTwoSlots_closesCurrentKeepsDock();
     void closeGroup_destroysMultiSlotDock();
     void title_singletonIsBasename_groupedAppendsColon();
-    void tooltip_isCwdAndSessionCount_notWindowTitle();
+    void tooltip_isEmpty_notWindowTitle();
     void tooltip_numberShowsLastUserMessage();
     void singleton_showsBottomTab_evenWhenAloneInArea();
     void siblingTabify_inactiveDockStillHasStripOnAreaBar();
@@ -241,15 +234,13 @@ void TestAcpDockCloseEvent::title_singletonIsBasename_groupedAppendsColon()
     QTRY_VERIFY_WITH_TIMEOUT(dockPtr.isNull(), 2000);
 }
 
-void TestAcpDockCloseEvent::tooltip_isCwdAndSessionCount_notWindowTitle()
+void TestAcpDockCloseEvent::tooltip_isEmpty_notWindowTitle()
 {
     AcpSessionModel model(QStringLiteral("sess-tip"),
                           QStringLiteral("/proj"),
                           m_historyDir.path());
     auto *dock = new TestableAiAgentDock(QStringLiteral("sess-tip"), &model, /*confirm=*/false);
-    const QString cwd = QStringLiteral("/tmp");
-    const QString one = projectTooltipText(cwd, 1);
-    QCOMPARE(dock->toolTip(), one);
+    QVERIFY(dock->toolTip().isEmpty());
     QVERIFY(dock->toolTip() != dock->windowTitle());
 
     QMainWindow mw;
@@ -263,17 +254,16 @@ void TestAcpDockCloseEvent::tooltip_isCwdAndSessionCount_notWindowTitle()
     int tabIndex = -1;
     QTabBar *bar = nullptr;
     QTRY_VERIFY((bar = areaTabBarForDock(&mw, dock, &tabIndex)) != nullptr);
-    QTRY_COMPARE(bar->tabToolTip(tabIndex), one);
+    QTRY_VERIFY(bar->tabToolTip(tabIndex).isEmpty());
     QVERIFY(bar->tabToolTip(tabIndex) != dock->windowTitle());
 
     AcpSessionModel model2(QStringLiteral("sess-tip-2"),
                            QStringLiteral("/proj"),
                            m_historyDir.path());
     dock->addSlot(QStringLiteral("sess-tip-2"), QStringLiteral("test-agent"), &model2, nullptr, true);
-    const QString two = projectTooltipText(cwd, 2);
-    QCOMPARE(dock->toolTip(), two);
+    QVERIFY(dock->toolTip().isEmpty());
     QTRY_VERIFY((bar = areaTabBarForDock(&mw, dock, &tabIndex)) != nullptr);
-    QTRY_COMPARE(bar->tabToolTip(tabIndex), two);
+    QTRY_VERIFY(bar->tabToolTip(tabIndex).isEmpty());
     QVERIFY(bar->tabToolTip(tabIndex) != dock->windowTitle());
 
     QPointer<TestableAiAgentDock> dockPtr(dock);

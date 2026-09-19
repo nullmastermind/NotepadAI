@@ -590,25 +590,21 @@ void AiAgentDock::refreshTitle()
     if (m_localTabBar && m_localTabBar->isVisible() && m_localTabBar->count() > 0)
         m_localTabBar->setTabText(0, windowTitle());
     // QDockAreaLayoutInfo::updateTabBar copies windowTitle into tabToolTip
-    // on every title change. Restore cwd + N immediately after that copy.
+    // on every title change. Clear it — the tab already shows the title.
     refreshProjectTooltip();
 }
 
 void AiAgentDock::refreshProjectTooltip()
 {
-    const int n = m_slots.size();
-    const QString text = QStringLiteral("%1\n%2")
-                             .arg(m_workingDirectory,
-                                  tr("%n session(s)", "", n));
-    setToolTip(text);
+    setToolTip(QString());
     // Qt's dock tab bar copies windowTitle into tabToolTip on every title
     // change (qdockarealayout.cpp). Hover on the project name is the tab
-    // text, so we overwrite with cwd + N after that copy.
+    // text, so keep the tooltip empty after that copy.
     int tabIndex = -1;
     if (QTabBar *bar = hostTabBar(&tabIndex); bar && tabIndex >= 0)
-        bar->setTabToolTip(tabIndex, text);
+        bar->setTabToolTip(tabIndex, QString());
     else if (m_localTabBar && m_localTabBar->isVisible() && m_localTabBar->count() > 0)
-        m_localTabBar->setTabToolTip(0, text);
+        m_localTabBar->setTabToolTip(0, QString());
 }
 
 void AiAgentDock::insertTextToInput(const QString &text)
