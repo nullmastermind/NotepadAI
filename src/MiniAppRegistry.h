@@ -32,6 +32,9 @@ public:
     // global entries with the same id).
     QList<MiniAppDefinition> mergedApps(const QString &workspacePath) const;
 
+    // Global first, then every workspace list. Empty id if not found.
+    MiniAppDefinition findById(const QString &id) const;
+
     static QString normalizeWorkspacePath(const QString &path);
 
 private:

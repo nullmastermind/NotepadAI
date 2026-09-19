@@ -37,6 +37,7 @@
 #include <QWindow>
 #include <QPushButton>
 #include <QTimer>
+#include <QCoreApplication>
 #include <QInputDialog>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -102,6 +103,7 @@
 #include "EditTasksDialog.h"
 #include "MiniAppManager.h"
 #include "MiniAppRegistry.h"
+#include "QuickBrowseUrl.h"
 #include "EmbeddedWindowManager.h"
 #include "EditMiniAppsDialog.h"
 
@@ -1997,8 +1999,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         QString input = urlEdit->text().trimmed();
         if (input.isEmpty())
             return;
-        if (!input.contains(QStringLiteral("://")))
-            input = QStringLiteral("https://") + input;
+        input = normalizeQuickBrowseInput(input);
         QUrl url(input, QUrl::TolerantMode);
         if (!url.isValid())
             return;
@@ -2787,8 +2788,9 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             [this, dock](QMenu *menu, const QString &absPath, bool isDir) {
         const QString wsRoot = currentWorkspaceRoot();
 
-        // --- Preview (rendered preview for supported file types) ---
+        // --- Preview / Open in Browser ---
         if (!isDir) {
+            bool addedOpenAction = false;
             auto *mgr = this->app->getPreviewTabManager();
             if (mgr && mgr->canPreview(absPath)) {
                 // For SSH workspaces absPath is now a full ssh:// URI (after resolvedFilePath fix).
@@ -2809,9 +2811,21 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                         });
                     }
                     menu->addAction(previewAction);
-                    menu->addSeparator();
+                    addedOpenAction = true;
                 }
             }
+            if (!remote::isSshUri(absPath) && isHtmlFilePath(absPath) && m_miniAppManager) {
+                auto *openInBrowser = new QAction(tr("Open in Browser"), menu);
+                connect(openInBrowser, &QAction::triggered, this, [this, absPath]() {
+                    const QUrl url(normalizeQuickBrowseInput(absPath), QUrl::TolerantMode);
+                    if (url.isValid())
+                        m_miniAppManager->launchQuickBrowser(url);
+                });
+                menu->addAction(openInBrowser);
+                addedOpenAction = true;
+            }
+            if (addedOpenAction)
+                menu->addSeparator();
         }
 
         // --- Copy Path / Copy Relative Path ---
@@ -5559,6 +5573,23 @@ void MainWindow::openAiAgentAt(const QString &agentId, const QString &cwd, remot
 
 void MainWindow::attachAiAgentDock(AiAgentDock *dock, bool raise)
 {
+    if (!dock)
+        return;
+
+    // Already docked (second session on an existing project group): do not
+    // addDockWidget/tabify again; still honor raise. Parent is not a reliable
+    // test — a floating dock's parent is the group window, not this.
+    static const char kAiDockAttachedProperty[] = "nn_aiAttached";
+    if (dock->property(kAiDockAttachedProperty).toBool()) {
+        if (raise) {
+            dock->setVisible(true);
+            dock->raise();
+            m_activeAiDock = dock;
+        }
+        return;
+    }
+    dock->setProperty(kAiDockAttachedProperty, true);
+
     AiAgentDock *existing = nullptr;
     const auto children = findChildren<AiAgentDock *>();
     for (auto *d : children) {
@@ -5609,6 +5640,15 @@ void MainWindow::attachAiAgentDock(AiAgentDock *dock, bool raise)
         dock->raise();
         m_activeAiDock = dock;
     }
+    // Tabify rebuilds the area QTabBar. Inactive siblings skip visibilityChanged(true)
+    // and would otherwise keep their strip on the old (or local) bar.
+    QTimer::singleShot(0, this, [this]() {
+        if (QCoreApplication::closingDown())
+            return;
+        const auto docks = findChildren<AiAgentDock *>();
+        for (auto *d : docks)
+            d->refreshSessionStripPlacement();
+    });
 }
 
 AiAgentDock *MainWindow::activeAiDock() const

@@ -31,6 +31,11 @@ typedef enum COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT {
     COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_JPEG = 1,
 } COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT;
 
+typedef enum COREWEBVIEW2_FAVICON_IMAGE_FORMAT {
+    COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG = 0,
+    COREWEBVIEW2_FAVICON_IMAGE_FORMAT_JPEG = 1,
+} COREWEBVIEW2_FAVICON_IMAGE_FORMAT;
+
 typedef enum COREWEBVIEW2_WEB_RESOURCE_CONTEXT {
     COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL = 0,
 } COREWEBVIEW2_WEB_RESOURCE_CONTEXT;
@@ -72,6 +77,9 @@ typedef interface ICoreWebView2WebMessageReceivedEventHandler ICoreWebView2WebMe
 typedef interface ICoreWebView2CallDevToolsProtocolMethodCompletedHandler ICoreWebView2CallDevToolsProtocolMethodCompletedHandler;
 typedef interface ICoreWebView2NewWindowRequestedEventHandler ICoreWebView2NewWindowRequestedEventHandler;
 typedef interface ICoreWebView2DocumentTitleChangedEventHandler ICoreWebView2DocumentTitleChangedEventHandler;
+typedef interface ICoreWebView2FaviconChangedEventHandler ICoreWebView2FaviconChangedEventHandler;
+typedef interface ICoreWebView2GetFaviconCompletedHandler ICoreWebView2GetFaviconCompletedHandler;
+typedef interface ICoreWebView2_15 ICoreWebView2_15;
 typedef interface ICoreWebView2ContainsFullScreenElementChangedEventHandler ICoreWebView2ContainsFullScreenElementChangedEventHandler;
 typedef interface ICoreWebView2WebResourceRequestedEventHandler ICoreWebView2WebResourceRequestedEventHandler;
 typedef interface ICoreWebView2WindowCloseRequestedEventHandler ICoreWebView2WindowCloseRequestedEventHandler;
@@ -262,6 +270,70 @@ public:
     virtual HRESULT STDMETHODCALLTYPE remove_WindowCloseRequested(EventRegistrationToken token) = 0;
 };
 
+
+// ICoreWebView2_15: QI from ICoreWebView2. 48 unused slots are ICoreWebView2_2.._14
+// so add_FaviconChanged lands at the frozen vtable index.
+MIDL_INTERFACE("517B2D1D-7DAE-4A66-A4F4-10352FFB9518")
+ICoreWebView2_15 : public ICoreWebView2
+{
+public:
+    virtual HRESULT STDMETHODCALLTYPE _Unused_0() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_1() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_2() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_3() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_4() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_5() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_6() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_7() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_8() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_9() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_10() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_11() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_12() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_13() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_14() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_15() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_16() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_17() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_18() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_19() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_20() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_21() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_22() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_23() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_24() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_25() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_26() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_27() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_28() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_29() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_30() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_31() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_32() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_33() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_34() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_35() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_36() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_37() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_38() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_39() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_40() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_41() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_42() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_43() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_44() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_45() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_46() = 0;
+    virtual HRESULT STDMETHODCALLTYPE _Unused_47() = 0;
+    virtual HRESULT STDMETHODCALLTYPE add_FaviconChanged(
+        ICoreWebView2FaviconChangedEventHandler *eventHandler, EventRegistrationToken *token) = 0;
+    virtual HRESULT STDMETHODCALLTYPE remove_FaviconChanged(EventRegistrationToken token) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_FaviconUri(LPWSTR *value) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetFavicon(
+        COREWEBVIEW2_FAVICON_IMAGE_FORMAT format,
+        ICoreWebView2GetFaviconCompletedHandler *completedHandler) = 0;
+};
+
 MIDL_INTERFACE("0c733a30-2a1c-11ce-ade5-0000aa0044774")
 ICoreWebView2Controller : public IUnknown
 {
@@ -312,6 +384,21 @@ public:
     virtual HRESULT STDMETHODCALLTYPE Invoke(ICoreWebView2 *sender, ICoreWebView2ProcessFailedEventArgs *args) = 0;
 };
 
+
+MIDL_INTERFACE("2913da94-833d-4de0-8dca-900fc524a1a4")
+ICoreWebView2FaviconChangedEventHandler : public IUnknown
+{
+public:
+    virtual HRESULT STDMETHODCALLTYPE Invoke(ICoreWebView2 *sender, IUnknown *args) = 0;
+};
+
+MIDL_INTERFACE("a2508329-7da8-49d7-8c05-fa125e4aee8d")
+ICoreWebView2GetFaviconCompletedHandler : public IUnknown
+{
+public:
+    virtual HRESULT STDMETHODCALLTYPE Invoke(HRESULT errorCode, IStream *result) = 0;
+};
+
 MIDL_INTERFACE("0c733a30-2a1c-11ce-ade5-0000aa004477a")
 ICoreWebView2DocumentTitleChangedEventHandler : public IUnknown
 {
@@ -330,6 +417,13 @@ static const IID IID_ICoreWebView2ProcessFailedEventHandler =
     {0x0c733a30,0x2a1c,0x11ce,{0xad,0xe5,0x00,0x00,0xaa,0x00,0x44,0x79}};
 static const IID IID_ICoreWebView2DocumentTitleChangedEventHandler =
     {0x0c733a30,0x2a1c,0x11ce,{0xad,0xe5,0x00,0x00,0xaa,0x00,0x44,0x7a}};
+static const IID IID_ICoreWebView2_15 =
+    {0x517B2D1D,0x7DAE,0x4A66,{0xA4,0xF4,0x10,0x35,0x2F,0xFB,0x95,0x18}};
+static const IID IID_ICoreWebView2FaviconChangedEventHandler =
+    {0x2913da94,0x833d,0x4de0,{0x8d,0xca,0x90,0x0f,0xc5,0x24,0xa1,0xa4}};
+static const IID IID_ICoreWebView2GetFaviconCompletedHandler =
+    {0xa2508329,0x7da8,0x49d7,{0x8c,0x05,0xfa,0x12,0x5e,0x4a,0xee,0x8d}};
+
 
 // Global function: creates a WebView2 environment with options.
 STDAPI CreateCoreWebView2EnvironmentWithOptions(

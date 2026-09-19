@@ -70,6 +70,7 @@ bool GoalAgent::start(const StartRequest &req)
     m_agentId = req.agentId;
     m_maxIterations = req.maxIterations;
     m_promptTemplateId = req.promptTemplateId;
+    m_autoCompact = req.autoCompact;
     m_originalUserMessage = req.originalUserMessage;
     m_currentCriterionIndex = 0;
     m_lastActionText.clear();
@@ -184,6 +185,22 @@ void GoalAgent::markTerminal(Status s, const QString &reason)
                    this, &GoalAgent::onTargetPromptEnded);
     }
     setStatus(s);
+    if (s == Achieved)
+        maybeSendAutoCompact();
+}
+
+void GoalAgent::maybeSendAutoCompact()
+{
+    if (!m_autoCompact)
+        return;
+    if (!m_targetConnection) {
+        logDebug(QStringLiteral("auto compact skipped: no target connection"));
+        return;
+    }
+    logDebug(QStringLiteral("auto compact: sending /compact to target"));
+    if (m_targetModel)
+        m_targetModel->appendUserMessage(QStringLiteral("/compact"), {}, /*fromGoalAgent=*/true);
+    m_targetConnection->sendPrompt(QStringLiteral("/compact"), {});
 }
 
 void GoalAgent::destroyJudgeConnection()

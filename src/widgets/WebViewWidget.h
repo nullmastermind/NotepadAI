@@ -9,6 +9,7 @@
 
 #include <QDialog>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QNetworkAccessManager>
@@ -71,6 +72,7 @@ signals:
     void loadingStateChanged(bool loading);
     void cdpReady(const QString &httpUrl, const QString &wsUrl);
     void titleChanged(const QString &title);
+    void faviconChanged(const QIcon &icon);
     void urlChanged(const QString &url);
     void copilotCommandRequested(const QString &command);
     void copilotResult(bool success, const QString &data);

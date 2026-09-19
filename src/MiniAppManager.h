@@ -19,6 +19,7 @@ class DockedEditor;
 class MiniAppInstance;
 class MiniAppRegistry;
 class NotepadNextApplication;
+class QMenu;
 class WebViewWidget;
 
 namespace ads { class CDockWidget; }
@@ -57,7 +58,16 @@ private:
     void onInstanceFinished(MiniAppInstance *instance);
     void retintAllIcons();
     QIcon tintedGlobeIcon() const;
+    void applyTabFavicon(ads::CDockWidget *dw, const QIcon &icon);
     void sweepStaleQuickBrowserData();
+    void setDockTabPinned(ads::CDockWidget *dw, bool pinned);
+    void addPinMenuAction(QMenu *menu, ads::CDockWidget *dw);
+    void moveDockTabToPinCluster(ads::CDockWidget *dw, bool pinning);
+    QString pinKeyFor(ads::CDockWidget *dw) const;
+    void persistPinKey(const QString &key, bool pinned);
+    void forgetPinKey(ads::CDockWidget *dw);
+    void prunePinnedMiniAppKeys();
+    void restorePinnedTabs();
 
     NotepadNextApplication *m_app;
     MiniAppRegistry *m_registry;
@@ -65,4 +75,6 @@ private:
     QList<MiniAppInstance *> m_instances;
     QList<QuickBrowserTab> m_quickBrowserTabs;
     QString m_iconPath;
+    bool m_restoringPins = false;
+    bool m_shuttingDown = false;
 };

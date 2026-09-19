@@ -24,6 +24,7 @@
 #include <QHash>
 #include <QDateTime>
 #include <QPointer>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -33,6 +34,7 @@
 
 #include "AcpErrorClassifier.h"
 #include "AcpProtocol.h"
+#include "AcpTranscriptTruncation.h"
 
 class AcpAgentRegistry;
 class AcpConnection;
@@ -167,7 +169,13 @@ private:
     // the inline heartbeat indicator (if present) and the trailing stretch.
     // All bubbles, tool-call cards, plan widgets, and permission prompts go
     // through here so the heartbeat always trails the freshest content.
-    void insertTimelineWidget(QWidget *w);
+    void insertTimelineWidget(QWidget *w, bool syncWidth = true);
+    void maybeTruncateTranscript();
+    void removeTranscriptWidget(QWidget *w);
+    QWidget *widgetForTimelineEntry(const AcpTimelineEntry &entry) const;
+    QLabel *makeTruncationPlaceholder(int hiddenCount);
+    void rebuildTruncationPlaceholders(const AcpTranscriptTruncation::Plan &plan);
+    void recordTruncation(const AcpTranscriptTruncation::Plan &plan);
     void syncTranscriptHostWidth();
     void scrollToBottomDeferred();
     void updateJumpButtonVisibility();
@@ -306,6 +314,9 @@ private:
     QHash<int, AcpMessageWidget *> m_messageWidgets;
     QHash<QString, AcpToolCallCard *> m_toolCallCards;
     QVector<AcpToolCallCard *> m_currentGroupCards;
+    QSet<int> m_truncatedMessageIndices;
+    QSet<QString> m_truncatedToolCallIds;
+    QVector<QLabel *> m_truncationPlaceholders;
     AcpPlanWidget *m_planWidget = nullptr;
     QPointer<AcpMessageWidget> m_activeThought;
     QPointer<AcpPermissionPrompt> m_activePermissionPrompt;

@@ -22,7 +22,6 @@
 #include <QDateTime>
 #include <QHash>
 #include <QObject>
-#include <QPointer>
 #include <QTimer>
 
 class AcpAgentManager;
@@ -66,7 +65,7 @@ private:
     remote::ExecutionContextRegistry *m_contextRegistry;
     QTimer m_timer;
 
-    QHash<QString, QPointer<AiAgentDock>> m_activeSessions;
+    QHash<QString, QString> m_activeSessions;
     QHash<QString, QDateTime> m_nextFireTimes;
 };
 

@@ -1,5 +1,6 @@
 #include "SendWithGoalDialog.h"
 
+#include <QCheckBox>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -8,6 +9,7 @@
 #include <QVBoxLayout>
 
 #include "ApplicationSettings.h"
+#include "GoalAgentSettings.h"
 #include "GoalConfigWidget.h"
 
 SendWithGoalDialog::SendWithGoalDialog(AcpAgentRegistry *registry,
@@ -31,6 +33,35 @@ SendWithGoalDialog::SendWithGoalDialog(AcpAgentRegistry *registry,
     mainLayout->addWidget(m_errorLabel);
 
     auto *footerLayout = new QHBoxLayout;
+    m_autoCompactCheck = new QCheckBox(tr("Auto compact"), this);
+    m_autoCompactCheck->setObjectName(QStringLiteral("autoCompactCheck"));
+    m_autoCompactCheck->setToolTip(
+        tr("After the goal is achieved, send /compact to the target agent."));
+    if (m_settings) {
+        const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
+        if (!settingsJson.isEmpty()) {
+            const GoalAgentSettings goalSettings = GoalAgentSettings::fromJson(
+                QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+            m_autoCompactCheck->setChecked(goalSettings.autoCompact);
+        }
+    }
+    connect(m_autoCompactCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        if (!m_settings)
+            return;
+        const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
+        GoalAgentSettings goalSettings;
+        if (!settingsJson.isEmpty()) {
+            goalSettings = GoalAgentSettings::fromJson(
+                QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+        }
+        if (goalSettings.autoCompact == checked)
+            return;
+        goalSettings.autoCompact = checked;
+        m_settings->setValue(
+            QStringLiteral("Ai/GoalAgentSettings"),
+            QString::fromUtf8(QJsonDocument(goalSettings.toJson()).toJson(QJsonDocument::Compact)));
+    });
+    footerLayout->addWidget(m_autoCompactCheck);
     footerLayout->addStretch();
     auto *cancelBtn = new QPushButton(tr("Cancel"), this);
     connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
@@ -97,5 +128,6 @@ SendWithGoalResult SendWithGoalDialog::goalResult() const
     r.agentId = gcr.agentId;
     r.maxIterations = gcr.maxIterations;
     r.promptTemplateId = gcr.promptTemplateId;
+    r.autoCompact = m_autoCompactCheck && m_autoCompactCheck->isChecked();
     return r;
 }

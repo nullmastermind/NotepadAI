@@ -21,6 +21,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QLoggingCategory>
+#include <QPointer>
+#include <QTimer>
 
 #include "AcpAgentManager.h"
 #include "AcpConnection.h"
@@ -136,14 +138,18 @@ void ScheduledTaskRunner::fireTask(const QString &taskId)
         return;
     }
 
-    // Check skipIfRunning (cron-timer guard)
+    // Check skipIfRunning (cron-timer guard) — keyed by session id so a
+    // sibling slot on the same project dock is not mistaken for this task.
     auto it = m_activeSessions.find(taskId);
-    if (it != m_activeSessions.end() && !it.value().isNull()) {
-        if (it.value()->isBusy() && task.skipIfRunning) {
+    if (it != m_activeSessions.end()) {
+        const QString &previousId = it.value();
+        if (m_manager->modelFor(previousId) == nullptr) {
+            m_activeSessions.erase(it);
+        } else if (m_manager->sessionIsBusy(previousId) && task.skipIfRunning) {
             return;
-        }
-        if (!it.value()->isBusy()) {
-            it.value()->close();
+        } else if (!m_manager->sessionIsBusy(previousId)) {
+            m_manager->closeSession(previousId);
+            m_activeSessions.remove(taskId);
         }
     }
 
@@ -183,19 +189,21 @@ void ScheduledTaskRunner::fireTask(const QString &taskId)
         }
     }
 
-    // Open agent with the resolved context (remote or nullptr for local)
+    // Open agent with the resolved context (remote or nullptr for local).
+    // Background spawn: join the project group without stealing current.
     AiAgentDock *dock = m_manager->openAgent(task.agentId, effectiveCwd,
-                                             false, context);
+                                             false, context, false);
     if (!dock) {
         return;
     }
 
-    m_activeSessions[taskId] = dock;
+    const QString sessionId = dock->newestSessionId();
+    m_activeSessions[taskId] = sessionId;
     emit taskFired(dock);
 
-    // Wait for initialized signal, then send prompt
-    AcpConnection *conn = dock->connection();
-    if (!conn) {
+    AcpConnection *conn = m_manager->connectionFor(sessionId);
+    AcpSessionModel *model = m_manager->modelFor(sessionId);
+    if (!conn || !model) {
         return;
     }
 
@@ -204,13 +212,20 @@ void ScheduledTaskRunner::fireTask(const QString &taskId)
     const ScheduledTaskGoalConfig goalCfg = task.goalConfig;
     const int timeoutMin = task.timeoutMinutes;
 
-    connect(conn, &AcpConnection::initialized, dock, [conn, prompt, hasGoal, goalCfg, dock, timeoutMin, this]() {
-        if (hasGoal) {
-            GoalAgent *goal = new GoalAgent(m_manager, m_settings, dock);
-            goal->setTargetSession(conn, dock->model());
-            dock->attachGoalAgent(goal);
+    connect(conn, &AcpConnection::initialized, this,
+            [this, sessionId, prompt, hasGoal, goalCfg, timeoutMin,
+             dockGuard = QPointer<AiAgentDock>(dock)]() {
+        AcpConnection *liveConn = m_manager->connectionFor(sessionId);
+        AcpSessionModel *liveModel = m_manager->modelFor(sessionId);
+        if (!liveConn || !liveModel)
+            return;
+
+        if (hasGoal && dockGuard) {
+            GoalAgent *goal = new GoalAgent(m_manager, m_settings, dockGuard.data());
+            goal->setTargetSession(liveConn, liveModel);
+            dockGuard->attachGoalAgent(goal, sessionId);
             GoalAgent::StartRequest req;
-            req.targetSessionId = dock->sessionId();
+            req.targetSessionId = sessionId;
             req.successCriteriaList = goalCfg.criteriaList;
             req.agentId = goalCfg.agentId;
             req.maxIterations = goalCfg.maxIterations;
@@ -219,16 +234,21 @@ void ScheduledTaskRunner::fireTask(const QString &taskId)
             goal->start(req);
         }
 
-        dock->model()->appendUserMessage(prompt, {});
-        conn->sendPrompt(prompt, {});
+        liveModel->appendUserMessage(prompt, {});
+        liveConn->sendPrompt(prompt, {});
 
         if (timeoutMin > 0) {
-            QTimer *timeout = new QTimer(dock);
+            constexpr int kMsPerMinute = 60000;
+            QTimer *timeout = new QTimer(this);
             timeout->setSingleShot(true);
-            timeout->setInterval(timeoutMin * 60000);
-            connect(timeout, &QTimer::timeout, dock, [dock]() {
-                dock->close();
-            });
+            timeout->setInterval(timeoutMin * kMsPerMinute);
+            connect(timeout, &QTimer::timeout, this,
+                    [this, sessionId, timeout, dockGuard]() {
+                        if (dockGuard)
+                            dockGuard->stopGoalForSession(sessionId);
+                        m_manager->closeSession(sessionId);
+                        timeout->deleteLater();
+                    });
             timeout->start();
         }
     }, Qt::SingleShotConnection);

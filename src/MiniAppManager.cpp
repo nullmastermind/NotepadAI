@@ -14,6 +14,8 @@
 #include "NotepadNextApplication.h"
 #include "ApplicationSettings.h"
 #include "WebViewWidget.h"
+#include "BrowserTabPin.h"
+#include "DockTabReorder.h"
 #include "ai/CredentialStore.h"
 
 #include <QApplication>
@@ -40,8 +42,11 @@
 #include <QTimer>
 #include <QUrl>
 #include <QUuid>
+#include <QVariant>
 #include <QVBoxLayout>
+#include <QVector>
 
+#include <DockAreaWidget.h>
 #include <DockWidget.h>
 #include <DockWidgetTab.h>
 
@@ -86,6 +91,31 @@ static QString fetchCdpPageId(const QString &cdpHttpUrl)
     return {};
 }
 
+static bool dockTabPinned(const ads::CDockWidget *dw)
+{
+    return dw && dw->property("nnPinned").toBool();
+}
+
+static void refreshDockTabPinChrome(ads::CDockWidget *dw)
+{
+    if (!dockTabPinned(dw) || !dw->tabWidget())
+        return;
+    // ADS updateCloseButtonVisibility() re-shows the close button on
+    // setActiveTab whenever DockWidgetClosable is set. Keep it cleared.
+    dw->setFeature(ads::CDockWidget::DockWidgetClosable, false);
+    applyBrowserTabPinChrome(dw->tabWidget(), true, dw->windowTitle());
+}
+
+static void wireDockTabPinRefresh(ads::CDockWidget *dw)
+{
+    ads::CDockWidgetTab *tab = dw->tabWidget();
+    if (!tab)
+        return;
+    QObject::connect(tab, &ads::CDockWidgetTab::activeTabChanged, dw, [dw]() {
+        refreshDockTabPinChrome(dw);
+    });
+}
+
 MiniAppManager::MiniAppManager(NotepadNextApplication *app,
                                MiniAppRegistry *registry,
                                DockedEditor *dockedEditor,
@@ -115,11 +145,187 @@ MiniAppManager::MiniAppManager(NotepadNextApplication *app,
                 tab.webView->notifyFocusLost(now);
         }
     });
+
+    if (ApplicationSettings *settings = app->getSettings()) {
+        connect(settings, &ApplicationSettings::miniAppsGlobalJsonChanged,
+                this, &MiniAppManager::prunePinnedMiniAppKeys);
+        connect(settings, &ApplicationSettings::miniAppsWorkspaceJsonChanged,
+                this, &MiniAppManager::prunePinnedMiniAppKeys);
+    }
+
+    // After session file restore (same event-loop turn as MainWindow setup),
+    // re-open pinned browser/mini-app tabs and jump them to the left cluster.
+    QTimer::singleShot(0, this, &MiniAppManager::restorePinnedTabs);
 }
 
 MiniAppManager::~MiniAppManager()
 {
     shutdown();
+}
+
+void MiniAppManager::setDockTabPinned(ads::CDockWidget *dw, bool pinned)
+{
+    if (!dw || !dw->tabWidget())
+        return;
+
+    const QString key = pinned ? pinKeyFor(dw) : dw->property("nnPinKey").toString();
+    dw->setProperty("nnPinned", pinned);
+    dw->setFeature(ads::CDockWidget::DockWidgetClosable, !pinned);
+    applyBrowserTabPinChrome(dw->tabWidget(), pinned, dw->windowTitle());
+    moveDockTabToPinCluster(dw, pinned);
+
+    if (m_restoringPins)
+        return;
+
+    persistPinKey(key, pinned);
+    dw->setProperty("nnPinKey", pinned ? QVariant(key) : QVariant());
+}
+
+void MiniAppManager::addPinMenuAction(QMenu *menu, ads::CDockWidget *dw)
+{
+    const bool pinned = dockTabPinned(dw);
+    QAction *pin = menu->addAction(pinned ? tr("Unpin") : tr("Pin"));
+    connect(pin, &QAction::triggered, dw, [this, dw, pinned]() {
+        setDockTabPinned(dw, !pinned);
+    });
+}
+
+void MiniAppManager::moveDockTabToPinCluster(ads::CDockWidget *dw, bool pinning)
+{
+    ads::CDockAreaWidget *area = dw->dockAreaWidget();
+    if (!area)
+        return;
+
+    const int n = area->dockWidgetsCount();
+    QVector<bool> flags;
+    flags.reserve(n);
+    int from = -1;
+    for (int i = 0; i < n; ++i) {
+        ads::CDockWidget *w = area->dockWidget(i);
+        flags.append(w && w->property("nnPinned").toBool());
+        if (w == dw)
+            from = i;
+    }
+    if (from < 0)
+        return;
+
+    const int to = browserTabPinMoveTarget(flags, from, pinning);
+    if (!moveDockWidgetToIndex(dw, to)) {
+        qWarning("MiniAppManager: pin-cluster move failed from=%d to=%d", from, to);
+    }
+}
+
+QString MiniAppManager::pinKeyFor(ads::CDockWidget *dw) const
+{
+    if (!dw)
+        return {};
+    QString existing = dw->property("nnPinKey").toString();
+    if (!existing.isEmpty())
+        return existing;
+
+    for (const QuickBrowserTab &tab : m_quickBrowserTabs) {
+        if (tab.dockWidget == dw && tab.webView)
+            return browserPinKeyForQuickBrowser(tab.webView->currentUrl());
+    }
+    for (MiniAppInstance *inst : m_instances) {
+        if (inst->dockWidget() == dw)
+            return browserPinKeyForMiniApp(inst->appId());
+    }
+    return {};
+}
+
+void MiniAppManager::persistPinKey(const QString &key, bool pinned)
+{
+    if (key.isEmpty() || !m_app || !m_app->getSettings())
+        return;
+    QStringList keys = m_app->getSettings()->value(
+        QLatin1String(kBrowserPinnedTabsSettingsKey)).toStringList();
+    keys = pinned ? addBrowserPinKey(keys, key) : removeBrowserPinKey(keys, key);
+    m_app->getSettings()->setValue(QLatin1String(kBrowserPinnedTabsSettingsKey), keys);
+}
+
+void MiniAppManager::forgetPinKey(ads::CDockWidget *dw)
+{
+    if (m_shuttingDown || m_restoringPins || !dw)
+        return;
+    const QString key = dw->property("nnPinKey").toString();
+    if (key.isEmpty())
+        return;
+    persistPinKey(key, false);
+    dw->setProperty("nnPinKey", QVariant());
+}
+
+void MiniAppManager::prunePinnedMiniAppKeys()
+{
+    if (m_shuttingDown || !m_app || !m_app->getSettings())
+        return;
+
+    ApplicationSettings *settings = m_app->getSettings();
+    const QStringList keys = settings->value(
+        QLatin1String(kBrowserPinnedTabsSettingsKey)).toStringList();
+    if (keys.isEmpty())
+        return;
+
+    QStringList knownIds;
+    if (m_registry) {
+        for (const QString &key : keys) {
+            if (!isMiniAppPinKey(key))
+                continue;
+            const MiniAppDefinition def = m_registry->findById(browserPinKeyIdentity(key));
+            if (def.isValid() && !def.id.isEmpty())
+                knownIds.append(def.id);
+        }
+    }
+
+    const QStringList pruned = pruneStaleMiniAppPinKeys(keys, knownIds);
+    if (pruned != keys)
+        settings->setValue(QLatin1String(kBrowserPinnedTabsSettingsKey), pruned);
+}
+
+void MiniAppManager::restorePinnedTabs()
+{
+    ApplicationSettings *settings = m_app ? m_app->getSettings() : nullptr;
+    if (!settings)
+        return;
+
+    prunePinnedMiniAppKeys();
+
+    const QStringList keys = settings->value(
+        QLatin1String(kBrowserPinnedTabsSettingsKey)).toStringList();
+    if (keys.isEmpty())
+        return;
+
+    m_restoringPins = true;
+    for (const QString &key : keys) {
+        if (isQuickBrowserPinKey(key)) {
+#ifndef Q_OS_LINUX
+            const QUrl url(browserPinKeyIdentity(key));
+            if (!url.isValid() || url.isEmpty())
+                continue;
+            launchQuickBrowser(url);
+            if (!m_quickBrowserTabs.isEmpty()) {
+                ads::CDockWidget *dw = m_quickBrowserTabs.last().dockWidget;
+                if (dw) {
+                    dw->setProperty("nnPinKey", key);
+                    setDockTabPinned(dw, true);
+                }
+            }
+#endif
+        } else if (isMiniAppPinKey(key) && m_registry) {
+            const MiniAppDefinition def = m_registry->findById(browserPinKeyIdentity(key));
+            if (!def.isValid())
+                continue;
+            launchApp(def);
+            if (!m_instances.isEmpty()) {
+                ads::CDockWidget *dw = m_instances.last()->dockWidget();
+                if (dw) {
+                    dw->setProperty("nnPinKey", key);
+                    setDockTabPinned(dw, true);
+                }
+            }
+        }
+    }
+    m_restoringPins = false;
 }
 
 void MiniAppManager::launchApp(const MiniAppDefinition &def)
@@ -133,9 +339,10 @@ void MiniAppManager::launchApp(const MiniAppDefinition &def)
         }
     }
 
-    // Warning at 4th instance (3 already running, counting quick browser tabs)
+    // Warning at 4th instance (3 already running, counting quick browser tabs).
+    // Skip during pin-restore so restart does not pop a dialog per extra app.
     const int totalWebViews = m_instances.size() + m_quickBrowserTabs.size();
-    if (totalWebViews >= 3) {
+    if (!m_restoringPins && totalWebViews >= 3) {
         QMessageBox::StandardButton btn = QMessageBox::warning(
             nullptr,
             tr("Mini Apps"),
@@ -170,8 +377,11 @@ void MiniAppManager::launchApp(const MiniAppDefinition &def)
         onInstanceFinished(instance);
     });
     connect(instance, &MiniAppInstance::titleChanged, this, [instance](const QString &title) {
-        if (instance->dockWidget())
-            instance->dockWidget()->setWindowTitle(title);
+        ads::CDockWidget *dw = instance->dockWidget();
+        if (!dw)
+            return;
+        dw->setWindowTitle(title);
+        refreshDockTabPinChrome(dw);
     });
 
     // Snapshot the reusable pristine "New X" scratch tab BEFORE adding the web
@@ -190,6 +400,7 @@ void MiniAppManager::launchApp(const MiniAppDefinition &def)
 
     // Wire tab close → destroy instance
     connect(dw, &ads::CDockWidget::closed, this, [this, instance]() {
+        forgetPinKey(instance ? instance->dockWidget() : nullptr);
         instance->destroy();
     });
 
@@ -200,6 +411,8 @@ void MiniAppManager::launchApp(const MiniAppDefinition &def)
              dw = QPointer<ads::CDockWidget>(dw)](const QPoint &pos) {
         if (!instance || !dw) return;
         QMenu menu;
+        addPinMenuAction(&menu, dw);
+        menu.addSeparator();
         menu.addAction(tr("Debug Info..."), this,
                        [instance, dw]() {
             if (!instance || !dw) return;
@@ -255,6 +468,8 @@ void MiniAppManager::launchApp(const MiniAppDefinition &def)
         menu.exec(dw->tabWidget()->mapToGlobal(pos));
     });
 
+    wireDockTabPinRefresh(dw);
+
     m_instances.append(instance);
     emit instanceCountChanged(m_instances.size());
 
@@ -307,6 +522,9 @@ void MiniAppManager::onInstanceStateChanged(MiniAppInstance *instance)
                     settings->commitMessageApiFormat() == ApplicationSettings::Anthropic);
             });
 
+            connect(webView, &WebViewWidget::faviconChanged, this,
+                    [this, dw](const QIcon &icon) { applyTabFavicon(dw, icon); });
+
             webView->initialize();
         }
     }
@@ -321,6 +539,8 @@ void MiniAppManager::onInstanceFinished(MiniAppInstance *instance)
 
 void MiniAppManager::shutdown()
 {
+    m_shuttingDown = true;
+
     // Destroy quick browser webviews
     for (const QuickBrowserTab &tab : m_quickBrowserTabs) {
         if (tab.webView)
@@ -367,20 +587,6 @@ void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
     QDesktopServices::openUrl(url);
     return;
 #endif
-
-    // RAM warning at 4th total WebView2 instance
-    const int totalWebViews = m_instances.size() + m_quickBrowserTabs.size();
-    if (totalWebViews >= 3) {
-        QMessageBox::StandardButton btn = QMessageBox::warning(
-            nullptr,
-            tr("Quick Browser"),
-            tr("Each browser tab uses ~100MB RAM. You have %1 WebView2 instances running. Continue?")
-                .arg(totalWebViews),
-            QMessageBox::Yes | QMessageBox::Cancel,
-            QMessageBox::Cancel);
-        if (btn != QMessageBox::Yes)
-            return;
-    }
 
     const QString uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
     const QString appId = QStringLiteral("qb-") + uuid;
@@ -449,6 +655,7 @@ void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
 
     // Wire tab close → cleanup
     connect(dw, &ads::CDockWidget::closed, this, [this, webView, dw, userDataPath]() {
+        forgetPinKey(dw);
         webView->destroy();
 
         // Remove from tracked list
@@ -485,9 +692,26 @@ void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
 
     // Wire title changes → tab title update
     connect(webView, &WebViewWidget::titleChanged, dw, [dw](const QString &title) {
-        if (!title.isEmpty())
-            dw->setWindowTitle(title);
+        if (title.isEmpty())
+            return;
+        dw->setWindowTitle(title);
+        refreshDockTabPinChrome(dw);
     });
+    connect(webView, &WebViewWidget::urlChanged, this, [this, dw](const QString &url) {
+        if (m_shuttingDown || m_restoringPins || !dockTabPinned(dw))
+            return;
+        const QString oldKey = dw->property("nnPinKey").toString();
+        const QString newKey = browserPinKeyForQuickBrowser(url);
+        if (oldKey == newKey || newKey.isEmpty() || !m_app || !m_app->getSettings())
+            return;
+        QStringList keys = m_app->getSettings()->value(
+            QLatin1String(kBrowserPinnedTabsSettingsKey)).toStringList();
+        keys = replaceBrowserPinKey(keys, oldKey, newKey);
+        m_app->getSettings()->setValue(QLatin1String(kBrowserPinnedTabsSettingsKey), keys);
+        dw->setProperty("nnPinKey", newKey);
+    });
+    connect(webView, &WebViewWidget::faviconChanged, this,
+            [this, dw](const QIcon &icon) { applyTabFavicon(dw, icon); });
 
     // Wire copilot command → retrieve LLM config and execute
     connect(webView, &WebViewWidget::copilotCommandRequested, this, [this, webView](const QString &command) {
@@ -529,6 +753,8 @@ void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
              dw = QPointer<ads::CDockWidget>(dw)](const QPoint &pos) {
         if (!webView || !dw) return;
         QMenu menu;
+        addPinMenuAction(&menu, dw);
+        menu.addSeparator();
         auto *mainWin = qobject_cast<MainWindow *>(parent());
         AiAgentDock *aiDock = mainWin ? mainWin->activeAiDock() : nullptr;
         if (aiDock && !webView->cdpHttpUrl().isEmpty()) {
@@ -565,6 +791,8 @@ void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
         menu.exec(dw->tabWidget()->mapToGlobal(pos));
     });
 
+    wireDockTabPinRefresh(dw);
+
     webView->initialize();
 }
 
@@ -572,13 +800,36 @@ void MiniAppManager::retintAllIcons()
 {
     QIcon icon = tintedGlobeIcon();
     for (MiniAppInstance *inst : m_instances) {
-        if (inst->dockWidget())
+        if (inst->dockWidget() && !inst->dockWidget()->property("nnHasFavicon").toBool()) {
             inst->dockWidget()->tabWidget()->setIcon(icon);
+            if (dockTabPinned(inst->dockWidget()))
+                applyBrowserTabPinChrome(inst->dockWidget()->tabWidget(), true,
+                                         inst->dockWidget()->windowTitle());
+        }
     }
     for (const QuickBrowserTab &tab : m_quickBrowserTabs) {
-        if (tab.dockWidget)
+        if (tab.dockWidget && !tab.dockWidget->property("nnHasFavicon").toBool()) {
             tab.dockWidget->tabWidget()->setIcon(icon);
+            if (dockTabPinned(tab.dockWidget))
+                applyBrowserTabPinChrome(tab.dockWidget->tabWidget(), true,
+                                         tab.dockWidget->windowTitle());
+        }
     }
+}
+
+void MiniAppManager::applyTabFavicon(ads::CDockWidget *dw, const QIcon &icon)
+{
+    if (!dw || !dw->tabWidget())
+        return;
+    if (icon.isNull()) {
+        dw->setProperty("nnHasFavicon", false);
+        dw->tabWidget()->setIcon(tintedGlobeIcon());
+    } else {
+        dw->setProperty("nnHasFavicon", true);
+        dw->tabWidget()->setIcon(icon);
+    }
+    if (dockTabPinned(dw))
+        applyBrowserTabPinChrome(dw->tabWidget(), true, dw->windowTitle());
 }
 
 QIcon MiniAppManager::tintedGlobeIcon() const

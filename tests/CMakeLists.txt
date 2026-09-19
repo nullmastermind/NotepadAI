@@ -100,6 +100,25 @@ target_include_directories(test_terminal_tab_title PRIVATE ${CMAKE_SOURCE_DIR}/s
 target_link_libraries(test_terminal_tab_title PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME TerminalTabTitle COMMAND test_terminal_tab_title)
 
+# --- AiDockGroup: project-group key / title / objectName / compact-after-close ---
+qt_add_executable(test_ai_dock_group test_ai_dock_group.cpp)
+target_include_directories(test_ai_dock_group PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_ai_dock_group PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME AiDockGroup COMMAND test_ai_dock_group)
+
+# --- AiDockSessionStrip: click / middle-click / bold current / [1][2][3] labels ---
+qt_add_executable(test_ai_dock_session_strip test_ai_dock_session_strip.cpp)
+target_include_directories(test_ai_dock_session_strip PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/widgets
+)
+target_link_libraries(test_ai_dock_session_strip PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_ai_dock_session_strip PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/widgets/AiDockSessionStrip.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AiDockSessionStrip.h
+)
+add_test(NAME AiDockSessionStrip COMMAND test_ai_dock_session_strip)
+
 # --- TerminalColorScheme: light/dark palette validity ---
 qt_add_executable(test_terminal_color_scheme test_terminal_color_scheme.cpp)
 target_include_directories(test_terminal_color_scheme PRIVATE ${CMAKE_SOURCE_DIR}/src/widgets)
@@ -302,6 +321,25 @@ target_sources(test_acp_session_model PRIVATE
 )
 add_test(NAME AcpSessionModel COMMAND test_acp_session_model)
 
+# --- AcpTranscriptTruncation: view-side 256-event cap, keep user/goal + last agent ---
+qt_add_executable(test_acp_transcript_truncation test_acp_transcript_truncation.cpp)
+target_include_directories(test_acp_transcript_truncation PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_acp_transcript_truncation PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_acp_transcript_truncation PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.h
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
+    ${CMAKE_SOURCE_DIR}/src/AcpTranscriptTruncation.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpTranscriptTruncation.h
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/DataPaths.h
+)
+add_test(NAME AcpTranscriptTruncation COMMAND test_acp_transcript_truncation)
+
+
 # --- AcpSessionModel persistence integration: full restart round-trip
 #     via the default QStandardPaths::AppDataLocation history directory. ---
 qt_add_executable(test_acp_session_model_persistence_integration
@@ -477,6 +515,8 @@ target_sources(test_acp_agent_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpToolCallCard.h
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AiDockSessionStrip.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AiDockSessionStrip.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.h
     ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.cpp
@@ -565,6 +605,8 @@ target_sources(test_acp_agent_exit_restart PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpToolCallCard.h
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AiDockSessionStrip.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AiDockSessionStrip.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.h
     ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.cpp
@@ -649,6 +691,8 @@ target_sources(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpToolCallCard.h
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpUsageIndicator.h
+    ${CMAKE_SOURCE_DIR}/src/widgets/AiDockSessionStrip.cpp
+    ${CMAKE_SOURCE_DIR}/src/widgets/AiDockSessionStrip.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.h
     ${CMAKE_SOURCE_DIR}/src/GoalHttpJudge.cpp
@@ -1012,6 +1056,52 @@ target_sources(test_markdown_renderer PRIVATE
     ${CMAKE_SOURCE_DIR}/src/MarkdownRenderer.h
 )
 add_test(NAME MarkdownRenderer COMMAND test_markdown_renderer)
+
+# --- BrowserTabPin: Chrome-style pin hides title + close, keeps favicon ---
+qt_add_executable(test_browser_tab_pin test_browser_tab_pin.cpp)
+target_include_directories(test_browser_tab_pin PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_browser_tab_pin PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test qtadvanceddocking-qt6)
+target_sources(test_browser_tab_pin PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/BrowserTabPin.cpp
+    ${CMAKE_SOURCE_DIR}/src/BrowserTabPin.h
+)
+add_test(NAME BrowserTabPin COMMAND test_browser_tab_pin)
+
+# --- DockTabReorder: public ADS addDockWidget(Center, index) keeps tab bar
+#     and content stack in the same order. Real CDockManager, matching
+#     test_dock_bottom_tool_tab. ---
+qt_add_executable(test_dock_tab_reorder test_dock_tab_reorder.cpp)
+target_include_directories(test_dock_tab_reorder PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_dock_tab_reorder PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test qtadvanceddocking-qt6)
+target_sources(test_dock_tab_reorder PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/DockTabReorder.cpp
+    ${CMAKE_SOURCE_DIR}/src/DockTabReorder.h
+    ${CMAKE_SOURCE_DIR}/src/BrowserTabPin.cpp
+    ${CMAKE_SOURCE_DIR}/src/BrowserTabPin.h
+)
+add_test(NAME DockTabReorder COMMAND test_dock_tab_reorder)
+
+# --- FaviconIcon: PNG/JPEG/ICO bytes → QIcon for browser tab icons ---
+qt_add_executable(test_favicon_icon test_favicon_icon.cpp)
+target_include_directories(test_favicon_icon PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_favicon_icon PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_favicon_icon PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/FaviconIcon.cpp
+    ${CMAKE_SOURCE_DIR}/src/FaviconIcon.h
+)
+add_test(NAME FaviconIcon COMMAND test_favicon_icon)
+
+# --- QuickBrowseUrl: file-path detection + https prefix for Quick Browse input ---
+qt_add_executable(test_quick_browse_url test_quick_browse_url.cpp)
+target_include_directories(test_quick_browse_url PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_quick_browse_url PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_quick_browse_url PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/QuickBrowseUrl.cpp
+    ${CMAKE_SOURCE_DIR}/src/QuickBrowseUrl.h
+)
+add_test(NAME QuickBrowseUrl COMMAND test_quick_browse_url)
 
 # --- BrowserProxyArgs: proxy arg builder unit tests ---
 qt_add_executable(test_browser_proxy_args test_browser_proxy_args.cpp)

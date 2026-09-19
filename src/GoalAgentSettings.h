@@ -41,6 +41,7 @@ public:
 
     QString agentId;
     int defaultMaxIterations = kDefaultMaxIterations;
+    bool autoCompact = false;
     QList<GoalPromptTemplate> promptTemplates;
     QString handoffTemplate;
     QString handoffAuthoringTemplate;

@@ -10,6 +10,7 @@ qt_add_executable(NotepadAI
 	AcpHistoryStore.h
 	AcpProtocol.h
 	AcpSessionModel.h
+	AcpTranscriptTruncation.h
 	ActionUtils.h
 	ApplicationSettings.h
 	CronExpression.h
@@ -23,6 +24,10 @@ qt_add_executable(NotepadAI
 	GoalDraftGenerator.h
 	GoalPromptRenderer.h
 	BrowserProxyArgs.h
+	QuickBrowseUrl.h
+	FaviconIcon.h
+	BrowserTabPin.h
+	DockTabReorder.h
 	ByteArrayUtils.h
 	ColorPickerDelegate.h
 	ComboBoxDelegate.h
@@ -113,6 +118,7 @@ qt_add_executable(NotepadAI
 	AcpHistoryStore.cpp
 	AcpProtocol.cpp
 	AcpSessionModel.cpp
+	AcpTranscriptTruncation.cpp
 	LocalAcpProcessChannel.cpp
 	SshAcpProcessChannel.cpp
 	CronExpression.cpp
@@ -126,6 +132,10 @@ qt_add_executable(NotepadAI
 	GoalDraftGenerator.cpp
 	GoalPromptRenderer.cpp
 	BrowserProxyArgs.cpp
+	QuickBrowseUrl.cpp
+	FaviconIcon.cpp
+	BrowserTabPin.cpp
+	DockTabReorder.cpp
 	ColorPickerDelegate.cpp
 	ComboBoxDelegate.cpp
 	Converter.cpp
@@ -432,6 +442,8 @@ qt_add_executable(NotepadAI
 	widgets/AcpToolCallCard.h
 	widgets/AcpUsageIndicator.cpp
 	widgets/AcpUsageIndicator.h
+	widgets/AiDockSessionStrip.cpp
+	widgets/AiDockSessionStrip.h
     widgets/DockMiddleClickCloser.cpp
 	widgets/DockMiddleClickCloser.h
     widgets/DockTabContextMenu.cpp
@@ -467,6 +479,7 @@ qt_add_executable(NotepadAI
 	TerminalAiHelper.cpp
 	TerminalCwdResolver.h
 	TerminalTabTitle.h
+	AiDockGroup.h
 	TerminalCwdResolver.cpp
 	TerminalManager.h
 	TerminalManager.cpp

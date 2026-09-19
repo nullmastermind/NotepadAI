@@ -60,6 +60,9 @@ private slots:
     void restartAction_oldConnectionDestroyedDuringRestart_staysActive();
     void continueAction_stillForwardsToTarget();
     void completeAction_stillAchievesSingleCriterion();
+    void completeAction_withAutoCompact_sendsCompactToTarget();
+    void completeAction_withoutAutoCompact_doesNotSendCompact();
+    void stop_withAutoCompact_doesNotSendCompact();
     void start_attachToExistingConversation_whenIdle_evaluatesImmediately();
     void start_attachToExistingConversation_whenProcessing_waitsForPromptEnded();
     void start_attachToExistingConversation_usesLastUserMessageAsOriginal();
@@ -464,6 +467,101 @@ void TestGoalAgent::completeAction_stillAchievesSingleCriterion()
     goal.applyJudgeAction(action);
 
     QCOMPARE(goal.status(), GoalAgent::Achieved);
+    QCOMPARE(model.messages().size(), 0);
+}
+
+void TestGoalAgent::completeAction_withAutoCompact_sendsCompactToTarget()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.autoCompact = true;
+    QVERIFY(goal.start(req));
+
+    GoalAction action;
+    action.type = GoalAction::Complete;
+    action.text = QStringLiteral("Tests passed.");
+    goal.applyJudgeAction(action);
+
+    QCOMPARE(goal.status(), GoalAgent::Achieved);
+    QCOMPARE(model.messages().size(), 1);
+    QCOMPARE(model.messages().last().role, QStringLiteral("user"));
+    QCOMPARE(model.messages().last().fromGoalAgent, true);
+    QCOMPARE(model.messages().last().content.first().text, QStringLiteral("/compact"));
+}
+
+void TestGoalAgent::completeAction_withoutAutoCompact_doesNotSendCompact()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.autoCompact = false;
+    QVERIFY(goal.start(req));
+
+    GoalAction action;
+    action.type = GoalAction::Complete;
+    action.text = QStringLiteral("Tests passed.");
+    goal.applyJudgeAction(action);
+
+    QCOMPARE(goal.status(), GoalAgent::Achieved);
+    QCOMPARE(model.messages().size(), 0);
+}
+
+void TestGoalAgent::stop_withAutoCompact_doesNotSendCompact()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.autoCompact = true;
+    QVERIFY(goal.start(req));
+
+    goal.stop();
+
+    QCOMPARE(goal.status(), GoalAgent::Cancelled);
+    QCOMPARE(model.messages().size(), 0);
+    QVERIFY(!channel->wroteSessionCancel());
 }
 
 void TestGoalAgent::start_attachToExistingConversation_whenIdle_evaluatesImmediately()

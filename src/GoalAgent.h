@@ -55,6 +55,7 @@ public:
         QString agentId;
         int maxIterations = GoalAgentSettings::kDefaultMaxIterations;
         QString promptTemplateId;
+        bool autoCompact = false;
         QString originalUserMessage;
         // True when Goal is attached to a session that already has a turn
         // (user clicked Send, then Goal). Includes existing messages in the
@@ -105,6 +106,7 @@ private:
     void finalizeHandoff(const QString &verdict, const QString &authoredText,
                          bool authoringSucceeded);
     void markTerminal(Status s, const QString &reason);
+    void maybeSendAutoCompact();
     void destroyJudgeConnection();
     void spawnJudgeForCriterion(int index);
     void evaluateViaHttp();
@@ -129,6 +131,7 @@ private:
     int m_maxIterations = GoalAgentSettings::kDefaultMaxIterations;
     QString m_agentId;
     QString m_promptTemplateId;
+    bool m_autoCompact = false;
     QString m_originalUserMessage;
     QString m_lastActionText;
 

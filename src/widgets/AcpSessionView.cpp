@@ -26,6 +26,7 @@
 #include "AcpPlanWidget.h"
 #include "AcpSessionModel.h"
 #include "AcpToolCallCard.h"
+#include "AcpTranscriptTruncation.h"
 #include "AcpUsageIndicator.h"
 #include "AiAgentDock.h"
 #include "ApplicationSettings.h"
@@ -831,11 +832,27 @@ void AcpSessionView::hydrateFromModel()
 {
     if (!m_model) return;
 
-    // Walk existing timeline entries and recreate widgets in order.
+    // Walk existing timeline entries and recreate widgets in order. Over the
+    // visible cap we skip agent events (not user/goal/system) so a long history
+    // doesn't instantiate thousands of markdown bubbles on session load.
     const auto &timeline = m_model->timeline();
     const auto &messages = m_model->messages();
     const auto &toolCalls = m_model->toolCalls();
-    for (const AcpTimelineEntry &entry : timeline) {
+    const AcpTranscriptTruncation::Plan plan =
+        AcpTranscriptTruncation::compute(timeline, messages);
+    recordTruncation(plan);
+
+    int pendingHidden = 0;
+    for (int i = 0; i < timeline.size(); ++i) {
+        if (plan.visible.at(i) == 0) {
+            ++pendingHidden;
+            continue;
+        }
+        if (pendingHidden > 0) {
+            insertTimelineWidget(makeTruncationPlaceholder(pendingHidden), false);
+            pendingHidden = 0;
+        }
+        const AcpTimelineEntry &entry = timeline.at(i);
         if (entry.kind == AcpTimelineEntry::Kind::Message
             && entry.messageIndex >= 0
             && entry.messageIndex < messages.size()) {
@@ -846,18 +863,22 @@ void AcpSessionView::hydrateFromModel()
                 w->setFromGoalAgent(true);
             }
             w->setContent(msg.content);
-            insertTimelineWidget(w);
+            insertTimelineWidget(w, false);
             m_messageWidgets.insert(entry.messageIndex, w);
         } else if (entry.kind == AcpTimelineEntry::Kind::ToolCall) {
             auto it = toolCalls.find(entry.toolCallId);
             if (it != toolCalls.end()) {
                 auto *card = new AcpToolCallCard(it.value(), m_transcriptHost);
                 card->setChatFont(chatFont()); // styled widget: must set font explicitly
-                insertTimelineWidget(card);
+                insertTimelineWidget(card, false);
                 m_toolCallCards.insert(entry.toolCallId, card);
             }
         }
     }
+    if (pendingHidden > 0) {
+        insertTimelineWidget(makeTruncationPlaceholder(pendingHidden), false);
+    }
+    syncTranscriptHostWidth();
 
     if (m_model->usage().has_value()) {
         m_usageIndicator->setUsage(m_model->usage());
@@ -954,6 +975,9 @@ void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)
     m_messageWidgets.clear();
     m_toolCallCards.clear();
     m_currentGroupCards.clear();
+    m_truncationPlaceholders.clear();
+    m_truncatedMessageIndices.clear();
+    m_truncatedToolCallIds.clear();
     m_planWidget = nullptr;
     m_activeThought.clear();
     if (m_activePermissionPrompt) {
@@ -1013,7 +1037,7 @@ void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)
     hydrateFromModel();
 }
 
-void AcpSessionView::insertTimelineWidget(QWidget *w)
+void AcpSessionView::insertTimelineWidget(QWidget *w, bool syncWidth)
 {
     if (!w || !m_transcriptLayout) return;
     // Default: just before the trailing stretch.
@@ -1028,7 +1052,8 @@ void AcpSessionView::insertTimelineWidget(QWidget *w)
         }
     }
     m_transcriptLayout->insertWidget(idx, w);
-    syncTranscriptHostWidth();
+    if (syncWidth)
+        syncTranscriptHostWidth();
 }
 
 void AcpSessionView::syncTranscriptHostWidth()
@@ -1042,10 +1067,138 @@ void AcpSessionView::syncTranscriptHostWidth()
     }
 }
 
+void AcpSessionView::removeTranscriptWidget(QWidget *w)
+{
+    if (!w || !m_transcriptLayout) return;
+    const int idx = m_transcriptLayout->indexOf(w);
+    if (idx >= 0) {
+        QLayoutItem *item = m_transcriptLayout->takeAt(idx);
+        delete item;
+    }
+    w->deleteLater();
+}
+
+QWidget *AcpSessionView::widgetForTimelineEntry(const AcpTimelineEntry &entry) const
+{
+    if (entry.kind == AcpTimelineEntry::Kind::Message)
+        return m_messageWidgets.value(entry.messageIndex, nullptr);
+    return m_toolCallCards.value(entry.toolCallId, nullptr);
+}
+
+QLabel *AcpSessionView::makeTruncationPlaceholder(int hiddenCount)
+{
+    auto *lab = new QLabel(m_transcriptHost);
+    lab->setObjectName(QStringLiteral("acpTruncationGap"));
+    lab->setAlignment(Qt::AlignHCenter);
+    lab->setWordWrap(true);
+    lab->setStyleSheet(QStringLiteral(
+        "QLabel { color: palette(placeholder-text); font-style: italic; padding: 4px 0px; }"));
+    lab->setText(hiddenCount == 1
+                     ? tr("1 event hidden")
+                     : tr("%1 events hidden").arg(hiddenCount));
+    lab->setFont(chatFont());
+    m_truncationPlaceholders.append(lab);
+    return lab;
+}
+
+void AcpSessionView::recordTruncation(const AcpTranscriptTruncation::Plan &plan)
+{
+    if (!m_model) return;
+    const auto &timeline = m_model->timeline();
+    const int n = qMin(plan.visible.size(), timeline.size());
+    for (int i = 0; i < n; ++i) {
+        if (plan.visible.at(i) != 0)
+            continue;
+        const AcpTimelineEntry &e = timeline.at(i);
+        if (e.kind == AcpTimelineEntry::Kind::Message)
+            m_truncatedMessageIndices.insert(e.messageIndex);
+        else
+            m_truncatedToolCallIds.insert(e.toolCallId);
+    }
+}
+
+void AcpSessionView::rebuildTruncationPlaceholders(const AcpTranscriptTruncation::Plan &plan)
+{
+    for (QLabel *lab : m_truncationPlaceholders) {
+        if (lab)
+            removeTranscriptWidget(lab);
+    }
+    m_truncationPlaceholders.clear();
+    if (!m_model || plan.gaps.isEmpty() || !m_transcriptLayout)
+        return;
+
+    const auto &timeline = m_model->timeline();
+    for (const AcpTranscriptTruncation::Plan::Gap &gap : plan.gaps) {
+        QLabel *lab = makeTruncationPlaceholder(gap.hiddenCount);
+        QWidget *before = nullptr;
+        if (gap.beforeIndex >= 0 && gap.beforeIndex < timeline.size())
+            before = widgetForTimelineEntry(timeline.at(gap.beforeIndex));
+        if (!before)
+            before = m_elapsedLabel;
+        const int idx = before ? m_transcriptLayout->indexOf(before) : -1;
+        if (idx >= 0)
+            m_transcriptLayout->insertWidget(idx, lab);
+        else
+            insertTimelineWidget(lab, false);
+    }
+}
+
+void AcpSessionView::maybeTruncateTranscript()
+{
+    if (!m_model || !m_transcriptLayout) return;
+    const auto &timeline = m_model->timeline();
+    const int n = timeline.size();
+    const bool alreadyTruncating = !m_truncatedMessageIndices.isEmpty()
+                                   || !m_truncatedToolCallIds.isEmpty()
+                                   || !m_truncationPlaceholders.isEmpty();
+    if (!alreadyTruncating) {
+        if (n <= AcpTranscriptTruncation::kMaxVisibleEvents
+                    + AcpTranscriptTruncation::kLiveHysteresis)
+            return;
+    } else if (n <= AcpTranscriptTruncation::kMaxVisibleEvents) {
+        return;
+    }
+
+    const AcpTranscriptTruncation::Plan plan =
+        AcpTranscriptTruncation::compute(timeline, m_model->messages());
+    bool anyRemoved = false;
+    const int lim = qMin(plan.visible.size(), n);
+    for (int i = 0; i < lim; ++i) {
+        if (plan.visible.at(i) != 0)
+            continue;
+        const AcpTimelineEntry &e = timeline.at(i);
+        if (e.kind == AcpTimelineEntry::Kind::Message) {
+            m_truncatedMessageIndices.insert(e.messageIndex);
+            if (AcpMessageWidget *w = m_messageWidgets.take(e.messageIndex)) {
+                if (m_activeThought == w)
+                    m_activeThought.clear();
+                removeTranscriptWidget(w);
+                anyRemoved = true;
+            }
+        } else {
+            m_truncatedToolCallIds.insert(e.toolCallId);
+            if (AcpToolCallCard *c = m_toolCallCards.take(e.toolCallId)) {
+                m_currentGroupCards.removeAll(c);
+                removeTranscriptWidget(c);
+                anyRemoved = true;
+            }
+        }
+    }
+
+    if (anyRemoved || m_truncationPlaceholders.isEmpty())
+        rebuildTruncationPlaceholders(plan);
+    else
+        recordTruncation(plan);
+
+    if (anyRemoved)
+        syncTranscriptHostWidth();
+}
+
 void AcpSessionView::appendMessageWidget(int idx)
 {
     if (!m_model) return;
     if (idx < 0 || idx >= m_model->messages().size()) return;
+    if (m_truncatedMessageIndices.contains(idx)) return;
     const AcpMessage &msg = m_model->messages().at(idx);
 
     auto *w = new AcpMessageWidget(msg.role, m_transcriptHost);
@@ -1063,6 +1216,7 @@ void AcpSessionView::appendMessageWidget(int idx)
         m_activeThought.clear();
     }
 
+    maybeTruncateTranscript();
     scrollToBottomDeferred();
 }
 
@@ -1076,6 +1230,7 @@ void AcpSessionView::onMessageChunkAppended(int idx, const QString &chunk)
 {
     auto *w = m_messageWidgets.value(idx, nullptr);
     if (!w) {
+        if (m_truncatedMessageIndices.contains(idx)) return;
         appendMessageWidget(idx);
         w = m_messageWidgets.value(idx, nullptr);
     }
@@ -1093,6 +1248,7 @@ void AcpSessionView::onMessageReplaced(int idx, const QString &fullText)
 {
     auto *w = m_messageWidgets.value(idx, nullptr);
     if (!w) {
+        if (m_truncatedMessageIndices.contains(idx)) return;
         appendMessageWidget(idx);
         w = m_messageWidgets.value(idx, nullptr);
     }
@@ -1120,6 +1276,7 @@ void AcpSessionView::onThoughtChunkAppended(int idx, const QString &chunk)
 {
     auto *w = m_messageWidgets.value(idx, nullptr);
     if (!w) {
+        if (m_truncatedMessageIndices.contains(idx)) return;
         appendMessageWidget(idx);
         w = m_messageWidgets.value(idx, nullptr);
         if (w && w->role() == QLatin1String("thought")) {
@@ -1142,11 +1299,13 @@ void AcpSessionView::onToolCallAddedOrUpdated(const QString &toolCallId)
 
     auto *card = m_toolCallCards.value(toolCallId, nullptr);
     if (!card) {
+        if (m_truncatedToolCallIds.contains(toolCallId)) return;
         card = new AcpToolCallCard(tc, m_transcriptHost);
         card->setChatFont(chatFont()); // styled widget: must set font explicitly
         insertTimelineWidget(card);
         m_toolCallCards.insert(toolCallId, card);
         m_currentGroupCards.append(card);
+        maybeTruncateTranscript();
         scrollToBottomDeferred();
     } else {
         // Apply as an update: build an update payload from the latest state.
@@ -2139,6 +2298,9 @@ void AcpSessionView::applyChatFont()
     if (m_activeThought) m_activeThought->setChatFont(f);
     for (AcpToolCallCard *c : m_toolCallCards) {
         if (c) c->setChatFont(f);
+    }
+    for (QLabel *lab : m_truncationPlaceholders) {
+        if (lab) lab->setFont(f);
     }
 }
 

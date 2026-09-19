@@ -11,6 +11,7 @@
 #include <QtTest>
 #include <QCoreApplication>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonObject>
 #include <QMetaObject>
 #include <QPointer>
@@ -25,6 +26,7 @@
 #include "AcpHistoryStore.h"
 #include "AcpSessionModel.h"
 #include "AiAgentDock.h"
+#include "AiDockGroup.h"
 #include "ApplicationSettings.h"
 
 class TestAcpAgentExitRestart : public QObject
@@ -39,8 +41,9 @@ private slots:
     void agentExited_emittedFromProcessFinished();
 
     // W4.d — restartSession swaps connection+model but keeps the dock,
-    // updates objectName, deletes the old history file.
+    // keeps group objectName, deletes the old history file.
     void restartSession_swapsInnerStateAndDeletesOldHistory();
+    void openAgent_sameCwd_reusesDockAndRestartDoesNotAddSlot();
 
 private:
     QTemporaryDir m_tempSettings;
@@ -113,7 +116,10 @@ void TestAcpAgentExitRestart::restartSession_swapsInnerStateAndDeletesOldHistory
 
     const QString oldSessionId = dock->sessionId();
     QVERIFY(!oldSessionId.isEmpty());
-    QCOMPARE(dock->objectName(), QStringLiteral("AiAgentDock_%1").arg(oldSessionId));
+    const QString expectedObjectName = aiDockObjectName(
+        aiDockGroupKey(QFileInfo(workDir.path()).canonicalFilePath(), QString()));
+    QCOMPARE(dock->objectName(), expectedObjectName);
+    QCOMPARE(dock->slotCount(), 1);
 
     // Seed an on-disk history file for the old session so we can observe it
     // disappear after restart.
@@ -143,11 +149,71 @@ void TestAcpAgentExitRestart::restartSession_swapsInnerStateAndDeletesOldHistory
     const QString newSessionId = dock->sessionId();
     QVERIFY(!newSessionId.isEmpty());
     QVERIFY(newSessionId != oldSessionId);
-    QCOMPARE(dock->objectName(), QStringLiteral("AiAgentDock_%1").arg(newSessionId));
+    QCOMPARE(dock->objectName(), expectedObjectName);
+    QCOMPARE(dock->slotCount(), 1);
 
     // Old history file is deleted (queued through worker thread).
     QTRY_VERIFY_WITH_TIMEOUT(deletedSpy.count() >= 1, 2000);
     QVERIFY(!QFile::exists(oldFile));
+}
+
+void TestAcpAgentExitRestart::openAgent_sameCwd_reusesDockAndRestartDoesNotAddSlot()
+{
+    ApplicationSettings settings;
+    AcpAgentManager manager(&settings);
+
+    AcpAgentDefinition def;
+    def.id = QStringLiteral("test-agent-group");
+    def.name = QStringLiteral("Test Agent");
+    def.command = QStringLiteral("definitely-not-a-real-binary-xyz");
+    QVERIFY(manager.registry()->addAgent(def));
+
+    QTemporaryDir workDir;
+    QVERIFY(workDir.isValid());
+
+    AiAgentDock *dock = manager.openAgent(def.id, workDir.path());
+    QVERIFY(dock != nullptr);
+    const QString firstId = dock->sessionId();
+    QCOMPARE(dock->slotCount(), 1);
+    QCOMPARE(dock->currentIndex(), 0);
+
+    AiAgentDock *same = manager.openAgent(def.id, workDir.path(), false, nullptr, false);
+    QCOMPARE(same, dock);
+    QCOMPARE(dock->slotCount(), 2);
+    QCOMPARE(dock->sessionId(), firstId);
+    QCOMPARE(dock->currentIndex(), 0);
+
+    AiAgentDock *raised = manager.openAgent(def.id, workDir.path());
+    QCOMPARE(raised, dock);
+    QCOMPARE(dock->slotCount(), 3);
+    QCOMPARE(dock->currentIndex(), 2);
+
+    QTemporaryDir otherDir;
+    QVERIFY(otherDir.isValid());
+    AiAgentDock *other = manager.openAgent(def.id, otherDir.path());
+    QVERIFY(other != nullptr);
+    QVERIFY(other != dock);
+    QCOMPARE(other->slotCount(), 1);
+
+    const QString slot2 = dock->sessionIdAt(1);
+    QVERIFY(!slot2.isEmpty());
+    manager.restartSession(slot2);
+    QCOMPARE(dock->slotCount(), 3);
+    QVERIFY(dock->sessionIdAt(1) != slot2);
+
+    QPointer<AiAgentDock> dockPtr(dock);
+    manager.closeSession(dock->sessionIdAt(2));
+    QVERIFY(!dockPtr.isNull());
+    QCOMPARE(dock->slotCount(), 2);
+    manager.closeSession(dock->sessionIdAt(0));
+    QVERIFY(!dockPtr.isNull());
+    QCOMPARE(dock->slotCount(), 1);
+    manager.closeSession(dock->sessionIdAt(0));
+    QTRY_VERIFY_WITH_TIMEOUT(dockPtr.isNull(), 2000);
+
+    QPointer<AiAgentDock> otherPtr(other);
+    other->close();
+    QTRY_VERIFY_WITH_TIMEOUT(otherPtr.isNull(), 2000);
 }
 
 QTEST_MAIN(TestAcpAgentExitRestart)

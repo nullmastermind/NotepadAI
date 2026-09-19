@@ -1,5 +1,6 @@
 #include <QtTest>
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QJsonDocument>
@@ -34,6 +35,9 @@ private slots:
     void customApi_showsFieldsWhenSelected();
     void customApi_statusEmptyPartialInvalidIdeal();
     void customApi_loadingDisablesFields();
+    void autoCompact_defaultsUnchecked();
+    void autoCompact_isRestoredAfterCancel();
+    void autoCompact_isRestoredAfterAccept();
 
 private:
     static QComboBox *agentCombo(SendWithGoalDialog &dialog);
@@ -238,6 +242,63 @@ void TestSendWithGoalDialog::customApi_loadingDisablesFields()
     for (QLineEdit *edit : fields->findChildren<QLineEdit *>())
         QVERIFY(edit->isReadOnly());
     cfg->setJudgeLoading(false);
+}
+
+void TestSendWithGoalDialog::autoCompact_defaultsUnchecked()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    auto *check = dialog.findChild<QCheckBox *>(QStringLiteral("autoCompactCheck"));
+    QVERIFY(check);
+    QVERIFY(!check->isChecked());
+    QCOMPARE(dialog.goalResult().autoCompact, false);
+}
+
+void TestSendWithGoalDialog::autoCompact_isRestoredAfterCancel()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+
+    SendWithGoalDialog first(&registry, &settings);
+    auto *check = first.findChild<QCheckBox *>(QStringLiteral("autoCompactCheck"));
+    QVERIFY(check);
+    check->setChecked(true);
+    const GoalAgentSettings stored = GoalAgentSettings::fromJson(
+        QJsonDocument::fromJson(settings.get("Ai/GoalAgentSettings", QString()).toUtf8()).object());
+    QVERIFY(stored.autoCompact);
+    QVERIFY(dialogButton(first, QStringLiteral("Cancel")));
+    QTest::mouseClick(dialogButton(first, QStringLiteral("Cancel")), Qt::LeftButton);
+    QCOMPARE(first.result(), QDialog::Rejected);
+
+    SendWithGoalDialog reopened(&registry, &settings);
+    auto *reopenedCheck = reopened.findChild<QCheckBox *>(QStringLiteral("autoCompactCheck"));
+    QVERIFY(reopenedCheck);
+    QVERIFY(reopenedCheck->isChecked());
+    QCOMPARE(reopened.goalResult().autoCompact, true);
+}
+
+void TestSendWithGoalDialog::autoCompact_isRestoredAfterAccept()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+
+    SendWithGoalDialog first(&registry, &settings);
+    auto *check = first.findChild<QCheckBox *>(QStringLiteral("autoCompactCheck"));
+    QVERIFY(check);
+    check->setChecked(true);
+    const auto criteria = first.findChildren<QPlainTextEdit *>();
+    QVERIFY(!criteria.isEmpty());
+    criteria.first()->setPlainText(QStringLiteral("Confirm auto compact"));
+    QVERIFY(dialogButton(first, QStringLiteral("Start Goal")));
+    QTest::mouseClick(dialogButton(first, QStringLiteral("Start Goal")), Qt::LeftButton);
+    QCOMPARE(first.result(), QDialog::Accepted);
+    QCOMPARE(first.goalResult().autoCompact, true);
+
+    SendWithGoalDialog reopened(&registry, &settings);
+    auto *reopenedCheck = reopened.findChild<QCheckBox *>(QStringLiteral("autoCompactCheck"));
+    QVERIFY(reopenedCheck);
+    QVERIFY(reopenedCheck->isChecked());
 }
 
 QTEST_MAIN(TestSendWithGoalDialog)

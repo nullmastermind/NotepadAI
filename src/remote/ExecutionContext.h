@@ -75,6 +75,8 @@ public:
     virtual bool isRemote() const = 0;
     virtual QString displayName() const = 0;
     virtual State state() const = 0;
+    // SSH profile id for grouping remote AI docks. Local returns empty.
+    virtual QString sshProfileId() const { return {}; }
 
     // PTY for a terminal. Caller takes ownership (passes a parent). Local
     // returns the exact same PtyQt object used before this change; remote

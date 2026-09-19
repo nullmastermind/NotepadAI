@@ -24,6 +24,20 @@
 
 using DockTabContextMenu::Scope;
 
+class CloseGroupDock : public QDockWidget
+{
+    Q_OBJECT
+public:
+    using QDockWidget::QDockWidget;
+    int closeGroupCalls = 0;
+public slots:
+    void closeGroup()
+    {
+        ++closeGroupCalls;
+        close();
+    }
+};
+
 namespace {
 
 // Qt creates the QMainWindowTabBar lazily, while laying out a tabified group,
@@ -72,6 +86,8 @@ private slots:
     void populateMenu_singleTab_disablesEmptyScopes();
     void populateMenu_labelsMatchEditorOverlaps();
     void populateMenu_closeAll_survivesDestroyedDock();
+    void populateMenu_close_doesNotInvokeCloseGroup();
+    void populateMenu_closeAll_invokesCloseGroup();
 
     void showMenu_plainTabBar_returnsFalse();
     void showMenu_dockTabBarMiss_consumesWithoutPopup();
@@ -334,6 +350,40 @@ void TestDockTabContextMenu::populateMenu_closeAll_survivesDestroyedDock()
 
     QVERIFY(b && !b->isVisible());
     QVERIFY(c && !c->isVisible());
+}
+
+void TestDockTabContextMenu::populateMenu_close_doesNotInvokeCloseGroup()
+{
+    QMainWindow owner;
+    auto *a = new CloseGroupDock(QStringLiteral("a"), &owner);
+    auto *b = new QDockWidget(QStringLiteral("b"), &owner);
+    a->show();
+    b->show();
+
+    QMenu menu;
+    DockTabContextMenu::populateMenu(&menu, {a, b}, 0);
+    menu.actions().at(0)->trigger(); // Close
+
+    QCOMPARE(a->closeGroupCalls, 0);
+    QVERIFY(!a->isVisible());
+    QVERIFY(b->isVisible());
+}
+
+void TestDockTabContextMenu::populateMenu_closeAll_invokesCloseGroup()
+{
+    QMainWindow owner;
+    auto *a = new CloseGroupDock(QStringLiteral("a"), &owner);
+    auto *b = new QDockWidget(QStringLiteral("b"), &owner);
+    a->show();
+    b->show();
+
+    QMenu menu;
+    DockTabContextMenu::populateMenu(&menu, {a, b}, 0);
+    menu.actions().at(4)->trigger(); // Close All
+
+    QCOMPARE(a->closeGroupCalls, 1);
+    QVERIFY(!a->isVisible());
+    QVERIFY(!b->isVisible());
 }
 
 void TestDockTabContextMenu::showMenu_plainTabBar_returnsFalse()

@@ -68,9 +68,11 @@ public:
     // suite verify the store has been correctly moved off the main thread.
     QThread *historyStoreThread() const { return m_historyThread; }
 
-    // Spawn a new agent session against workingDirectory. Returns the freshly
-    // created dock (still parentless — caller is responsible for
-    // addDockWidget()). Returns nullptr if the agent cannot be resolved at all.
+    // Spawn a new agent session against workingDirectory. Returns the dock
+    // for that project group (still parentless on first create — caller
+    // addDockWidget()s it). A later session with the same group key is
+    // appended as a slot on the existing dock. Returns nullptr if the agent
+    // cannot be resolved at all.
     // When recordAsLastUsed is true, the resolved agent id is persisted as the
     // "last used" AI agent (the single chokepoint for that record).
     //
@@ -78,9 +80,13 @@ public:
     // agent is spawned on that host over an SSH exec channel with workingDirectory
     // as the remote cwd (captured at spawn, never re-resolved); when null or
     // local, the agent spawns locally exactly as before.
+    //
+    // raiseNewSession: true (user open) switches the dock to the new slot;
+    // false (scheduled/background) leaves the current slot and marks activity.
     AiAgentDock *openAgent(const QString &agentId, const QString &workingDirectory,
                            bool recordAsLastUsed = false,
-                           remote::ExecutionContext *context = nullptr);
+                           remote::ExecutionContext *context = nullptr,
+                           bool raiseNewSession = true);
 
     // Spawn an agent with no dock (no chat UI). After initialize, sends `prompt`
     // and tears the session down when the turn ends, the process exits, or an
@@ -126,6 +132,7 @@ public:
 
     AcpConnection *connectionFor(const QString &sessionId) const;
     AcpSessionModel *modelFor(const QString &sessionId) const;
+    bool sessionIsBusy(const QString &sessionId) const;
 
     // Flush the history worker and quit its thread. Called from
     // NotepadNextApplication's aboutToQuit handler.
@@ -167,6 +174,7 @@ private:
     AcpConnection::RemoteChannelBuilder m_remoteChannelBuilder; // app-injected (D8)
 
     QHash<QString, Session> m_sessions;
+    QHash<QString, QPointer<AiAgentDock>> m_docksByGroup;
 };
 
 #endif // ACP_AGENT_MANAGER_H

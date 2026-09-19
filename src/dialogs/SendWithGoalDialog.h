@@ -7,6 +7,7 @@
 class AcpAgentRegistry;
 class ApplicationSettings;
 class GoalConfigWidget;
+class QCheckBox;
 class QLabel;
 class QPushButton;
 struct GoalConfigResult;
@@ -17,6 +18,7 @@ struct SendWithGoalResult
     QString agentId;
     int maxIterations = 100;
     QString promptTemplateId;
+    bool autoCompact = false;
 };
 
 class SendWithGoalDialog : public QDialog
@@ -42,6 +44,7 @@ private:
     ApplicationSettings *m_settings = nullptr;
     GoalConfigWidget *m_goalConfig = nullptr;
     QLabel *m_errorLabel = nullptr;
+    QCheckBox *m_autoCompactCheck = nullptr;
     QPushButton *m_startBtn = nullptr;
 };
 

@@ -25,6 +25,7 @@
 #include "AcpHistoryStore.h"
 #include "AcpSessionModel.h"
 #include "AiAgentDock.h"
+#include "AiDockGroup.h"
 #include "ApplicationSettings.h"
 #include "ProfileScope.h"
 #include "remote/ExecutionContext.h"
@@ -77,7 +78,8 @@ AcpAgentManager::~AcpAgentManager()
 }
 
 AiAgentDock *AcpAgentManager::openAgent(const QString &agentId, const QString &workingDirectory,
-                                        bool recordAsLastUsed, remote::ExecutionContext *context)
+                                        bool recordAsLastUsed, remote::ExecutionContext *context,
+                                        bool raiseNewSession)
 {
     AcpAgentDefinition agent = m_registry->agent(agentId);
     if (agent.id.isEmpty()) {
@@ -137,7 +139,29 @@ AiAgentDock *AcpAgentManager::openAgent(const QString &agentId, const QString &w
 
     wireConnectionToModel(conn, model);
 
+    const QString sshProfileId = context ? context->sshProfileId() : QString();
+    const QString groupKey = aiDockGroupKey(projectId, sshProfileId);
+
+    if (AiAgentDock *existing = m_docksByGroup.value(groupKey).data()) {
+        existing->addSlot(sessionId, agent.name, model, conn, raiseNewSession);
+        Session session;
+        session.connection = conn;
+        session.model = model;
+        session.dock = existing;
+        m_sessions.insert(sessionId, session);
+        emit agentOpened(sessionId, existing);
+        conn->spawn(agent, projectId);
+        qCInfo(lcAcpManager) << "openAgent: appended session" << sessionId
+                             << "agent" << agent.id
+                             << "cwd" << projectId
+                             << "group" << groupKey
+                             << "raise" << raiseNewSession;
+        return existing;
+    }
+
     auto *dock = new AiAgentDock(sessionId, agent.name, projectId, model, conn, m_registry, this, m_settings, /*parent=*/nullptr);
+    dock->setObjectName(aiDockObjectName(groupKey));
+    m_docksByGroup.insert(groupKey, dock);
     connect(dock, &QObject::destroyed,
             this, &AcpAgentManager::onDockDestroyed);
     connect(dock, &AiAgentDock::restartRequested,
@@ -264,6 +288,8 @@ void AcpAgentManager::closeSession(const QString &sessionId)
 
     Session session = it.value();
     m_sessions.erase(it);
+    if (session.dock)
+        session.dock->detachSlot(sessionId);
     teardownSession(session);
 }
 
@@ -341,8 +367,8 @@ QString AcpAgentManager::restartSession(const QString &oldSessionId)
                                   Qt::QueuedConnection);
     }
 
-    // Rebind the existing dock to the new pair.
-    old.dock->rebind(newConn, newModel, newSessionId, agent.name);
+    // Rebind the existing dock to the new pair. objectName stays the group key.
+    old.dock->rebind(oldSessionId, newConn, newModel, newSessionId, agent.name);
 
     // Now tear down the old connection + model. The dock survives.
     if (old.connection) {
@@ -393,6 +419,16 @@ AcpSessionModel *AcpAgentManager::modelFor(const QString &sessionId) const
     return (it == m_sessions.cend()) ? nullptr : it.value().model;
 }
 
+bool AcpAgentManager::sessionIsBusy(const QString &sessionId) const
+{
+    auto it = m_sessions.constFind(sessionId);
+    if (it == m_sessions.cend())
+        return false;
+    if (it.value().dock)
+        return it.value().dock->isSessionBusy(sessionId);
+    return it.value().model && it.value().model->isProcessing();
+}
+
 void AcpAgentManager::shutdown()
 {
     PROFILE_SCOPE("AcpAgentManager::shutdown");
@@ -406,8 +442,11 @@ void AcpAgentManager::shutdown()
         if (it == m_sessions.end()) continue;
         Session session = it.value();
         m_sessions.erase(it);
+        if (session.dock)
+            session.dock->detachSlot(id);
         teardownSession(session);
     }
+    m_docksByGroup.clear();
 
     if (m_historyStore && m_historyThread && m_historyThread->isRunning()) {
         QMetaObject::invokeMethod(m_historyStore, "flushAll", Qt::BlockingQueuedConnection);
@@ -451,6 +490,12 @@ void AcpAgentManager::onDockDestroyed(QObject *obj)
         if (it.value().dock.isNull() && it.value().lastDockDetachedAtMs == 0) {
             it.value().lastDockDetachedAtMs = now;
         }
+    }
+    for (auto it = m_docksByGroup.begin(); it != m_docksByGroup.end(); ) {
+        if (it.value().isNull())
+            it = m_docksByGroup.erase(it);
+        else
+            ++it;
     }
 }
 
@@ -540,10 +585,7 @@ void AcpAgentManager::teardownSession(Session &session)
         session.model->deleteLater();
         session.model = nullptr;
     }
-    if (!session.dock.isNull()) {
-        // WA_DeleteOnClose handles deletion if the user closed the dock.
-        // If we're tearing down for reasons other than user-close (e.g. app
-        // shutdown), close it explicitly.
-        session.dock->close();
-    }
+    // The dock is shared across slots. closeSession already called detachSlot
+    // (last slot destroys the widget). Never dock->close() here — that would
+    // close a sibling slot.
 }

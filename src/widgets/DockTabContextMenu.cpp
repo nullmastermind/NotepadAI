@@ -22,6 +22,7 @@
 #include <QCoreApplication>
 #include <QDockWidget>
 #include <QMenu>
+#include <QMetaObject>
 #include <QPoint>
 #include <QPointer>
 #include <QTabBar>
@@ -48,11 +49,17 @@ GuardedDocks guard(const QList<QDockWidget *> &docks)
 // Docks are guarded rather than raw because closing one can delete others:
 // WA_DeleteOnClose docks self-destruct, and an owner (TerminalManager,
 // MainWindow) may reap siblings in response.
-void closeAll(const GuardedDocks &targets)
+void closeAll(const GuardedDocks &targets, DockTabContextMenu::Scope scope)
 {
+    const bool entireGroup = scope != DockTabContextMenu::Scope::Close;
     for (const auto &dock : targets) {
-        if (!dock.isNull())
-            dock->close();
+        if (dock.isNull())
+            continue;
+        if (entireGroup
+            && QMetaObject::invokeMethod(dock.data(), "closeGroup", Qt::DirectConnection)) {
+            continue;
+        }
+        dock->close();
     }
 }
 
@@ -153,8 +160,8 @@ void populateMenu(QMenu *menu, const QList<QDockWidget *> &order, int index)
             continue;
         // menu.exec() spins an event loop, so a dock can die between building
         // the menu and triggering the action.
-        QObject::connect(action, &QAction::triggered, menu, [guarded = guard(targets)]() {
-            closeAll(guarded);
+        QObject::connect(action, &QAction::triggered, menu, [guarded = guard(targets), scope = entry.scope]() {
+            closeAll(guarded, scope);
         });
     }
 }

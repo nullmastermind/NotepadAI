@@ -13,6 +13,7 @@
 #include <QFile>
 #include <QJsonObject>
 #include <QMetaObject>
+#include <QPointer>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -22,6 +23,7 @@
 #include "AcpAgentManager.h"
 #include "AcpAgentRegistry.h"
 #include "AcpHistoryStore.h"
+#include "AiAgentDock.h"
 #include "ApplicationSettings.h"
 
 class TestAcpAgentManager : public QObject
@@ -39,6 +41,7 @@ private slots:
     void deleteSessionHistory_removesFile();
     void runHeadlessPrompt_tearsDownWhenProcessFails();
     void runHeadlessPrompt_doesNotOpenDock_closeSessionFreesImmediately();
+    void openAgent_groupsByCwd_andRaiseFlag();
 
 private:
     QTemporaryDir tempDir;
@@ -186,6 +189,49 @@ void TestAcpAgentManager::runHeadlessPrompt_doesNotOpenDock_closeSessionFreesImm
 
     manager.closeSession(sid);
     QVERIFY(manager.connectionFor(sid) == nullptr);
+}
+
+void TestAcpAgentManager::openAgent_groupsByCwd_andRaiseFlag()
+{
+    ApplicationSettings settings;
+    AcpAgentManager manager(&settings);
+
+    AcpAgentDefinition def;
+    def.id = QStringLiteral("test-group");
+    def.name = QStringLiteral("Grouped");
+    def.command = QStringLiteral("definitely-not-a-real-binary-xyz");
+    QVERIFY(manager.registry()->addAgent(def));
+
+    QTemporaryDir workDir;
+    QVERIFY(workDir.isValid());
+    QTemporaryDir otherDir;
+    QVERIFY(otherDir.isValid());
+
+    AiAgentDock *first = manager.openAgent(def.id, workDir.path());
+    QVERIFY(first != nullptr);
+    QCOMPARE(first->slotCount(), 1);
+    const QString firstId = first->sessionId();
+
+    AiAgentDock *background = manager.openAgent(def.id, workDir.path(), false, nullptr, false);
+    QCOMPARE(background, first);
+    QCOMPARE(first->slotCount(), 2);
+    QCOMPARE(first->sessionId(), firstId);
+    QCOMPARE(first->currentIndex(), 0);
+
+    AiAgentDock *other = manager.openAgent(def.id, otherDir.path());
+    QVERIFY(other != first);
+    QCOMPARE(other->slotCount(), 1);
+
+    QPointer<AiAgentDock> firstPtr(first);
+    manager.closeSession(first->sessionIdAt(1));
+    QVERIFY(!firstPtr.isNull());
+    QCOMPARE(first->slotCount(), 1);
+    manager.closeSession(first->sessionIdAt(0));
+    QTRY_VERIFY_WITH_TIMEOUT(firstPtr.isNull(), 2000);
+
+    QPointer<AiAgentDock> otherPtr(other);
+    other->close();
+    QTRY_VERIFY_WITH_TIMEOUT(otherPtr.isNull(), 2000);
 }
 
 QTEST_MAIN(TestAcpAgentManager)

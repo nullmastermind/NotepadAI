@@ -155,6 +155,37 @@ QList<MiniAppDefinition> MiniAppRegistry::mergedApps(const QString &workspacePat
     return result;
 }
 
+MiniAppDefinition MiniAppRegistry::findById(const QString &id) const
+{
+    if (id.isEmpty())
+        return {};
+
+    for (const MiniAppDefinition &def : globalApps()) {
+        if (def.id == id)
+            return def;
+    }
+
+    if (!m_settings)
+        return {};
+    const QString raw = m_settings->miniAppsWorkspaceJson();
+    if (raw.isEmpty())
+        return {};
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8());
+    if (!doc.isObject())
+        return {};
+
+    const QJsonObject root = doc.object();
+    for (auto it = root.begin(); it != root.end(); ++it) {
+        const QList<MiniAppDefinition> apps = parseJson(
+            QString::fromUtf8(QJsonDocument(it.value().toArray()).toJson(QJsonDocument::Compact)));
+        for (const MiniAppDefinition &def : apps) {
+            if (def.id == id)
+                return def;
+        }
+    }
+    return {};
+}
+
 QList<MiniAppDefinition> MiniAppRegistry::parseJson(const QString &json)
 {
     if (json.isEmpty()) return {};

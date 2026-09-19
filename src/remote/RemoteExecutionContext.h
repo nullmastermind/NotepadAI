@@ -49,6 +49,7 @@ public:
     bool isRemote() const override { return true; }
     QString displayName() const override;
     State state() const override { return m_state; }
+    QString sshProfileId() const override { return m_profile.id; }
 
     IPtyProcess *createPty(QObject *parent) override;
 

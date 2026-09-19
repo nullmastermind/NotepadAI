@@ -7,8 +7,12 @@
 
 #include "WebViewWidget.h"
 
+#include "FaviconIcon.h"
+#include "BrowserProxyArgs.h"
+
 #include <QCoreApplication>
 #include <QDir>
+#include <QIcon>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -25,8 +29,6 @@
 #include <windows.h>
 #include <aclapi.h>
 #include <WebView2.h>
-
-#include "BrowserProxyArgs.h"
 
 // Load CreateCoreWebView2EnvironmentWithOptions dynamically so we don't
 // depend on WebView2LoaderStatic.lib (MSVC-only). The function lives in
@@ -425,6 +427,15 @@ private:
         m_webView->add_DocumentTitleChanged(
             new DocumentTitleChangedHandler(this), &titleToken);
 
+        ICoreWebView2_15 *webView15 = nullptr;
+        if (SUCCEEDED(m_webView->QueryInterface(IID_ICoreWebView2_15,
+                                                reinterpret_cast<void **>(&webView15)))
+            && webView15) {
+            EventRegistrationToken favToken;
+            webView15->add_FaviconChanged(new FaviconChangedHandler(this), &favToken);
+            webView15->Release();
+        }
+
         // Block new windows — navigate in-place instead
         EventRegistrationToken newWinToken;
         m_webView->add_NewWindowRequested(
@@ -621,6 +632,78 @@ private:
                 CoTaskMemFree(title);
                 emit owner->titleChanged(qtTitle);
             }
+            return S_OK;
+        }
+    };
+
+    static QByteArray bytesFromIStream(IStream *stream)
+    {
+        if (!stream)
+            return {};
+        QByteArray data;
+        char buf[4096];
+        for (;;) {
+            ULONG n = 0;
+            const HRESULT hr = stream->Read(buf, sizeof(buf), &n);
+            if (n > 0)
+                data.append(buf, static_cast<int>(n));
+            if (FAILED(hr) || n == 0)
+                break;
+        }
+        return data;
+    }
+
+    struct GetFaviconCompletedHandler : ICoreWebView2GetFaviconCompletedHandler {
+        WebViewWidgetWin *owner;
+        std::shared_ptr<std::atomic<bool>> alive;
+        ULONG refCount = 1;
+        GetFaviconCompletedHandler(WebViewWidgetWin *o) : owner(o), alive(o->m_alive) {}
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv) override {
+            if (IsEqualIID(riid, IID_IUnknown)
+                || IsEqualIID(riid, IID_ICoreWebView2GetFaviconCompletedHandler)) {
+                *ppv = this; AddRef(); return S_OK;
+            }
+            *ppv = nullptr; return E_NOINTERFACE;
+        }
+        ULONG STDMETHODCALLTYPE AddRef() override { return ++refCount; }
+        ULONG STDMETHODCALLTYPE Release() override { if (--refCount == 0) { delete this; return 0; } return refCount; }
+        HRESULT STDMETHODCALLTYPE Invoke(HRESULT errorCode, IStream *result) override {
+            if (!alive->load(std::memory_order_acquire)) return S_OK;
+            if (FAILED(errorCode) || !result) {
+                emit owner->faviconChanged(QIcon());
+                return S_OK;
+            }
+            emit owner->faviconChanged(faviconIconFromData(bytesFromIStream(result)));
+            return S_OK;
+        }
+    };
+
+    struct FaviconChangedHandler : ICoreWebView2FaviconChangedEventHandler {
+        WebViewWidgetWin *owner;
+        std::shared_ptr<std::atomic<bool>> alive;
+        ULONG refCount = 1;
+        FaviconChangedHandler(WebViewWidgetWin *o) : owner(o), alive(o->m_alive) {}
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv) override {
+            if (IsEqualIID(riid, IID_IUnknown)
+                || IsEqualIID(riid, IID_ICoreWebView2FaviconChangedEventHandler)) {
+                *ppv = this; AddRef(); return S_OK;
+            }
+            *ppv = nullptr; return E_NOINTERFACE;
+        }
+        ULONG STDMETHODCALLTYPE AddRef() override { return ++refCount; }
+        ULONG STDMETHODCALLTYPE Release() override { if (--refCount == 0) { delete this; return 0; } return refCount; }
+        HRESULT STDMETHODCALLTYPE Invoke(ICoreWebView2 *sender, IUnknown *) override {
+            if (!alive->load(std::memory_order_acquire)) return S_OK;
+            ICoreWebView2_15 *webView15 = nullptr;
+            if (!sender
+                || FAILED(sender->QueryInterface(IID_ICoreWebView2_15,
+                                                 reinterpret_cast<void **>(&webView15)))
+                || !webView15) {
+                return S_OK;
+            }
+            webView15->GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG,
+                                  new GetFaviconCompletedHandler(owner));
+            webView15->Release();
             return S_OK;
         }
     };
