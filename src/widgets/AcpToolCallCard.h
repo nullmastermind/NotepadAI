@@ -31,6 +31,7 @@ class QTextBrowser;
 class QTimer;
 class QToolButton;
 class QVBoxLayout;
+class QShowEvent;
 
 class AcpToolCallCard : public QFrame
 {
@@ -60,6 +61,11 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    // QStackedWidget (session tabs) hides inactive pages without a size change,
+    // so resizeEvent does not re-run on tab switch. Re-fit on show so an
+    // expanded diff/output body that streamed in the background keeps its
+    // height instead of staying pinned to the header.
+    void showEvent(QShowEvent *event) override;
 
 private:
     void refreshHeader();

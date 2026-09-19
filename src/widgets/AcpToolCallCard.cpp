@@ -29,6 +29,7 @@
 #include <QPointer>
 #include <QRegularExpression>
 #include <QResizeEvent>
+#include <QShowEvent>
 #include <QStringList>
 #include <QTextBlock>
 #include <QTextBrowser>
@@ -1072,7 +1073,9 @@ void AcpToolCallCard::refitBodyHeight()
 
     const int w = width() - marginL - marginR;
     if (w <= 0) {
-        setFixedHeight(cardH);
+        // Width not settled (never-shown stack page). Keep whatever height we
+        // already have — pinning to header-only here clips an expanded body
+        // that streamed on a hidden tab.
         return;
     }
     QTextDocument *doc = m_body->document();
@@ -1126,6 +1129,21 @@ void AcpToolCallCard::resizeEvent(QResizeEvent *event)
     } else {
         refitBodyHeight();
     }
+}
+
+void AcpToolCallCard::showEvent(QShowEvent *event)
+{
+    QFrame::showEvent(event);
+    // Session-tab switch shows this page without a size change, so resizeEvent
+    // may not run. Re-measure now that we are actually visible and the stacked
+    // layout has given us a real width.
+    refreshHeader();
+    if (!m_collapsed && m_bodyDirty) {
+        flushBodyRender();
+    } else {
+        refitBodyHeight();
+    }
+    scheduleRefit();
 }
 
 void AcpToolCallCard::setCollapsed(bool collapsed)

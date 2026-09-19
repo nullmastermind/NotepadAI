@@ -32,6 +32,7 @@ class QTimer;
 class QToolButton;
 class QLabel;
 class QVBoxLayout;
+class QShowEvent;
 
 // One transcript row representing either a user/assistant/thought/system
 // message. Assistant messages render markdown via QTextDocument::setMarkdown;
@@ -78,6 +79,11 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    // QStackedWidget (session tabs) hides inactive pages without a size change,
+    // so resizeEvent does not re-run on tab switch. Re-fit on show so a thought
+    // that streamed in the background keeps its body height instead of staying
+    // pinned to the header.
+    void showEvent(QShowEvent *event) override;
     // Bubble height is derived from QTextDocument::size() under the current
     // font metrics; when the parent's font changes (Default Font preference)
     // we need to re-fit, because Qt does not auto-relayout content widgets on
@@ -90,6 +96,7 @@ protected:
 private:
     void rerender();
     void refitBrowserHeight();
+    void scheduleRefit();
     void applyCollapsed(bool collapsed);
     void scheduleRerender();
     void flushRerender();
@@ -115,6 +122,7 @@ private:
     QString m_text;
     bool m_collapsed = false;
     bool m_fromGoalAgent = false;
+    bool m_refitScheduled = false; // coalesced deferred height pass already queued
 
     // Chat (Default Font) typeface, pushed in via setChatFont(). Held so that
     // content created/re-rendered after the initial setFont() (streamed chunks,

@@ -21,6 +21,7 @@ private slots:
     void diff_card_auto_expands_at_terminal_status();
     void running_diff_card_stays_collapsed();
     void collapsed_multiline_title_autosizes_to_two_lines();
+    void expanded_diff_taller_than_collapsed_while_hidden();
 };
 
 namespace {
@@ -196,6 +197,35 @@ void TestAcpToolCallCard::collapsed_multiline_title_autosizes_to_two_lines()
     two.setCollapsed(false);
     two.setCollapsed(true);
     QCOMPARE(two.height(), beforeToggle);
+}
+
+void TestAcpToolCallCard::expanded_diff_taller_than_collapsed_while_hidden()
+{
+    // Inactive session tabs live on a hidden QStackedWidget page. An
+    // auto-expanded diff must still include the body in its pinned height
+    // even though isVisible() is false — otherwise switching back clips
+    // the diff to the header.
+    AcpProtocol::AcpToolCall tc = baseCall();
+    tc.status = QStringLiteral("completed");
+    tc.content.append(diffBlock());
+
+    AcpToolCallCard expanded(tc);
+    expanded.resize(480, 120);
+    QVERIFY(!expanded.isVisible());
+    QVERIFY(!expanded.isCollapsed());
+    QTRY_VERIFY(bodyFor(expanded)->toPlainText().contains(QStringLiteral("a.cpp")));
+    const int expandedH = expanded.height();
+
+    AcpProtocol::AcpToolCall running = baseCall();
+    AcpToolCallCard collapsed(running);
+    collapsed.resize(480, 120);
+    QVERIFY(collapsed.isCollapsed());
+    const int collapsedH = collapsed.height();
+
+    QVERIFY2(expandedH > collapsedH,
+             qPrintable(QStringLiteral("expanded=%1 collapsed=%2")
+                            .arg(expandedH)
+                            .arg(collapsedH)));
 }
 
 QTEST_MAIN(TestAcpToolCallCard)

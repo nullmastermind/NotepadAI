@@ -31,9 +31,11 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPixmap>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QResizeEvent>
 #include <QScrollBar>
+#include <QShowEvent>
 #include <QStyle>
 #include <QTextBlock>
 #include <QTextBrowser>
@@ -156,6 +158,28 @@ QString ensureHardBreaks(const QString &md)
     return out;
 }
 
+// QTextDocument lays out lazily: after setHtml()/setPlainText() the document
+// reports a stale (often single-line) size until something forces the layout
+// engine to run for the current text width. Measuring height before that pass
+// clips multi-line thought/assistant bodies to ~one line. Touching the layout's
+// documentSize() after pinning the text width forces the full pass, so the
+// subsequent doc->size() read is authoritative. Same helper as AcpToolCallCard.
+qreal layoutDocumentHeight(QTextDocument *doc, int textWidth)
+{
+    if (!doc) return 0.0;
+    doc->setTextWidth(textWidth);
+    QAbstractTextDocumentLayout *layout = doc->documentLayout();
+    if (!layout) return doc->size().height();
+    qreal h = layout->documentSize().height();
+    const QTextBlock last = doc->lastBlock();
+    if (last.isValid()) {
+        const QRectF r = layout->blockBoundingRect(last);
+        if (r.isValid())
+            h = qMax(h, r.bottom());
+    }
+    return qMax(h, doc->size().height());
+}
+
 } // namespace
 
 AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
@@ -203,8 +227,9 @@ AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
         m_layout->addWidget(m_browser);
 
         connect(m_thoughtHeader, &QToolButton::toggled, this, [this](bool checked) {
-            if (m_browser) m_browser->setVisible(checked);
-            refitBrowserHeight();
+            // Header checked = expanded. Keep m_collapsed in lockstep so height
+            // fitting can gate on the logical flag, not QWidget::isVisible().
+            applyCollapsed(!checked);
         });
     } else {
         // assistant + any other roles
@@ -449,6 +474,7 @@ void AcpMessageWidget::rerender()
         normalizeBlockMargins(m_browser->document());
     }
     refitBrowserHeight();
+    scheduleRefit();
 }
 
 void AcpMessageWidget::refitBrowserHeight()
@@ -461,14 +487,6 @@ void AcpMessageWidget::refitBrowserHeight()
     if (m_layout) {
         m_layout->getContentsMargins(&marginL, &marginT, &marginR, &marginB);
     }
-    const int w = width() - marginL - marginR;
-    if (w <= 0) {
-        return;
-    }
-    QTextDocument *doc = m_browser->document();
-    doc->setTextWidth(w);
-    const int browserH = qMax(0, static_cast<int>(std::ceil(doc->size().height())));
-    m_browser->setFixedHeight(browserH);
 
     // Pin the bubble's own height too. setFixedHeight on the inner browser
     // only clamps the browser — QFrame's sizeHint cascades through QBoxLayout
@@ -480,13 +498,47 @@ void AcpMessageWidget::refitBrowserHeight()
         // adds style-derived button margins even with stylesheet padding:0,
         // which adds phantom vertical space inside the bubble.
         bubbleH += m_thoughtHeader->fontMetrics().height();
-        if (m_browser->isVisible()) {
-            bubbleH += m_layout->spacing() + browserH;
+        // Gate on the LOGICAL expand state, not m_browser->isVisible(): a
+        // thought on a hidden QStackedWidget page (inactive session tab) —
+        // or a just-inserted widget not yet painted — reads isVisible()==false
+        // even though the body WILL paint once the tab is shown. That under-
+        // pins the frame to header-only height while the body keeps its
+        // measured height, clipping the thinking text. m_collapsed is
+        // independent of show timing.
+        if (m_collapsed) {
+            setFixedHeight(bubbleH);
+            return;
         }
-    } else {
-        bubbleH += browserH;
+        bubbleH += m_layout->spacing();
     }
+
+    const int w = width() - marginL - marginR;
+    if (w <= 0) {
+        // Width not settled (never-shown stack page). Keep whatever height we
+        // already have unless we just collapsed to header-only above.
+        return;
+    }
+    QTextDocument *doc = m_browser->document();
+    // Force a full layout pass for the current width before measuring —
+    // QTextDocument under-reports height for freshly-set multi-line text
+    // until the layout engine has run, which clips an expanded thought down
+    // to roughly its first line.
+    const int browserH = qMax(0, static_cast<int>(std::ceil(layoutDocumentHeight(doc, w))));
+    m_browser->setFixedHeight(browserH);
+    bubbleH += browserH;
     setFixedHeight(bubbleH);
+}
+
+void AcpMessageWidget::scheduleRefit()
+{
+    if (m_refitScheduled) return;
+    m_refitScheduled = true;
+    QPointer<AcpMessageWidget> guard(this);
+    QTimer::singleShot(0, this, [guard]() {
+        if (!guard) return;
+        guard->m_refitScheduled = false;
+        guard->refitBrowserHeight();
+    });
 }
 
 void AcpMessageWidget::resizeEvent(QResizeEvent *event)
@@ -501,11 +553,22 @@ void AcpMessageWidget::resizeEvent(QResizeEvent *event)
     }
 }
 
+void AcpMessageWidget::showEvent(QShowEvent *event)
+{
+    QFrame::showEvent(event);
+    // Session-tab switch shows this page without a size change, so resizeEvent
+    // may not run. Re-measure now that we are actually visible and the stacked
+    // layout has given us a real width.
+    refitBrowserHeight();
+    scheduleRefit();
+}
+
 void AcpMessageWidget::changeEvent(QEvent *event)
 {
     QFrame::changeEvent(event);
     if (event->type() == QEvent::FontChange) {
         refitBrowserHeight();
+        scheduleRefit();
     } else if (event->type() == QEvent::PaletteChange
                || event->type() == QEvent::ApplicationPaletteChange) {
         // Re-tint the copy glyph and re-skin code surfaces for the new theme.
@@ -867,6 +930,7 @@ void AcpMessageWidget::setChatFont(const QFont &font)
         rerender();
     } else {
         refitBrowserHeight();
+        scheduleRefit();
     }
 }
 
@@ -886,4 +950,8 @@ void AcpMessageWidget::applyCollapsed(bool collapsed)
         m_browser->setVisible(!collapsed);
     }
     refitBrowserHeight();
+    // Body may have been laid out at a stale width while hidden; re-measure
+    // once the expanded geometry settles so the thought doesn't clip on
+    // first expand / tab show.
+    if (!collapsed) scheduleRefit();
 }
