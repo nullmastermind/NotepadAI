@@ -216,6 +216,7 @@ void AcpSessionModel::loadFromDisk()
             msg.exitCode = ec.toInt();
         }
         msg.fromGoalAgent = mo.value(QStringLiteral("fromGoalAgent")).toBool(false);
+        msg.marker = mo.value(QStringLiteral("marker")).toString();
         m_messages.append(msg);
     }
 
@@ -229,6 +230,7 @@ void AcpSessionModel::loadFromDisk()
         AcpToolCall tc;
         tc.id = to.value(QStringLiteral("toolCallId")).toString();
         tc.title = to.value(QStringLiteral("title")).toString();
+        tc.name = to.value(QStringLiteral("name")).toString();
         tc.kind = to.value(QStringLiteral("kind")).toString();
         tc.status = to.value(QStringLiteral("status")).toString();
         tc.content = to.value(QStringLiteral("content")).toArray();
@@ -297,6 +299,9 @@ QJsonObject AcpSessionModel::toHistoryJson() const
         if (m.fromGoalAgent) {
             mo.insert(QStringLiteral("fromGoalAgent"), true);
         }
+        if (!m.marker.isEmpty()) {
+            mo.insert(QStringLiteral("marker"), m.marker);
+        }
         msgs.append(mo);
     }
     obj.insert(QStringLiteral("messages"), msgs);
@@ -307,6 +312,9 @@ QJsonObject AcpSessionModel::toHistoryJson() const
         QJsonObject to;
         to.insert(QStringLiteral("toolCallId"), tc.id);
         to.insert(QStringLiteral("title"), tc.title);
+        if (!tc.name.isEmpty()) {
+            to.insert(QStringLiteral("name"), tc.name);
+        }
         if (!tc.kind.isEmpty()) {
             to.insert(QStringLiteral("kind"), tc.kind);
         }
@@ -625,6 +633,9 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         if (update.title.has_value()) {
             tc.title = *update.title;
         }
+        if (update.name.has_value()) {
+            tc.name = *update.name;
+        }
         if (update.kind.has_value()) {
             tc.kind = *update.kind;
         }
@@ -655,6 +666,9 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
     } else {
         if (update.title.has_value()) {
             it.value().title = *update.title;
+        }
+        if (update.name.has_value()) {
+            it.value().name = *update.name;
         }
         if (update.kind.has_value()) {
             it.value().kind = *update.kind;
@@ -811,11 +825,12 @@ void AcpSessionModel::appendUserMessage(const QString &text,
     schedulePersistIfNeeded();
 }
 
-void AcpSessionModel::appendSystemMessage(const QString &text)
+void AcpSessionModel::appendSystemMessage(const QString &text, const QString &marker)
 {
     AcpMessage msg;
     msg.role = QStringLiteral("system");
     msg.timestamp = QDateTime::currentMSecsSinceEpoch();
+    msg.marker = marker;
     AcpContentBlock tb;
     tb.kind = AcpContentBlock::Kind::Text;
     tb.text = text;

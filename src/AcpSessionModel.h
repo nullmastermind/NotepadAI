@@ -48,7 +48,12 @@ struct AcpMessage
     std::optional<QString> command;
     std::optional<int> exitCode;
     bool fromGoalAgent = false;
+    // Locale-stable tag for host-generated system rows. Display text is tr()'d;
+    // the summarizer keys off this, not the translated body.
+    QString marker;
 };
+
+inline constexpr char kAcpMarkerGoalAchieved[] = "goal-achieved";
 
 // One entry in the rendered transcript ordering. Either a pointer (by index)
 // into m_messages, or a tool-call id pointing into m_toolCalls. groupId
@@ -152,7 +157,7 @@ public slots:
     void appendUserMessage(const QString &text,
                            const QVector<QPair<QByteArray, QString>> &images,
                            bool fromGoalAgent = false);
-    void appendSystemMessage(const QString &text);
+    void appendSystemMessage(const QString &text, const QString &marker = {});
 
 signals:
     void metadataChanged();

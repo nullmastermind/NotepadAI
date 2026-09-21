@@ -23,6 +23,13 @@
 
 class AcpSessionModel;
 
+// Target-session XML for the Goal judge / draft enhancer.
+// User + assistant text only (thought/system omitted from the XML body).
+// Tool calls: toolCallLooksFileMutating — name or title needles, else
+// ACP kind edit/delete/move; also bash/powershell/pwsh unless
+// rawInput.command contains grep. Drops timeline before the latest
+// goal-achieved marker or user `/compact` (the marker itself is kept).
+// startIndex is still applied.
 class GoalConversationSummary
 {
 public:

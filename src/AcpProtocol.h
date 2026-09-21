@@ -88,7 +88,8 @@ struct AcpUsage
 struct AcpToolCall
 {
     QString id;
-    QString title;
+    QString title; // human-readable; adapters often rewrite (e.g. "Write path")
+    QString name;  // wire tool name when sent (e.g. Write / Read / apply_patch)
     QString kind;
     QString status;
     QJsonArray content;
@@ -97,10 +98,35 @@ struct AcpToolCall
     int groupId{0};
 };
 
+// Needle match for ACP tool name or title. Prefer extra over dropping a write.
+inline bool toolCallTitleLooksFileMutating(const QString &title)
+{
+    return title.contains(QLatin1String("write"), Qt::CaseInsensitive)
+        || title.contains(QLatin1String("edit"), Qt::CaseInsensitive)
+        || title.contains(QLatin1String("apply_patch"), Qt::CaseInsensitive)
+        || title.contains(QLatin1String("apply-patch"), Qt::CaseInsensitive)
+        || title.contains(QLatin1String("apply patch"), Qt::CaseInsensitive);
+}
+
+inline bool toolCallKindLooksFileMutating(const QString &kind)
+{
+    return kind.compare(QLatin1String("edit"), Qt::CaseInsensitive) == 0
+        || kind.compare(QLatin1String("delete"), Qt::CaseInsensitive) == 0
+        || kind.compare(QLatin1String("move"), Qt::CaseInsensitive) == 0;
+}
+
+inline bool toolCallLooksFileMutating(const AcpToolCall &tc)
+{
+    return toolCallTitleLooksFileMutating(tc.name)
+        || toolCallTitleLooksFileMutating(tc.title)
+        || toolCallKindLooksFileMutating(tc.kind);
+}
+
 struct AcpToolCallUpdate
 {
     QString id;
     std::optional<QString> title;
+    std::optional<QString> name;
     std::optional<QString> kind;
     std::optional<QString> status;
     std::optional<QJsonArray> content;

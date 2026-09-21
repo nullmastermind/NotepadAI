@@ -36,6 +36,7 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
+#include <QPointer>
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QTimer>
@@ -1024,6 +1025,14 @@ bool AiAgentDock::attachGoalAgent(GoalAgent *goal, const QString &sessionId)
         });
     }
 
+    // View survives rebind(); QPointer drops if the slot is destroyed.
+    QPointer<AcpSessionView> view = slot->view;
+    goal->setTargetPromptDecorator([view](const QString &text) {
+        if (!view)
+            return text;
+        return view->applyNewWorktreeInstruction(text);
+    });
+
     const QString sid = slot->sessionId;
     connect(slot->goal, &GoalAgent::debugLogEntry, this, [this](const QString &entry) {
         m_goalDebugLog.append(entry);
@@ -1048,8 +1057,10 @@ bool AiAgentDock::attachGoalAgent(GoalAgent *goal, const QString &sessionId)
             if (target->view)
                 target->view->setGoalTerminal(tr("Goal achieved"));
             if (target->model) {
-                target->model->appendSystemMessage(tr("✓ Goal achieved: %1").arg(
-                    target->goal ? target->goal->lastActionText() : QString()));
+                target->model->appendSystemMessage(
+                    tr("✓ Goal achieved: %1").arg(
+                        target->goal ? target->goal->lastActionText() : QString()),
+                    QLatin1String(kAcpMarkerGoalAchieved));
             }
             break;
         case GoalAgent::Cancelled:

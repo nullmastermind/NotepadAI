@@ -552,11 +552,7 @@ void AcpAgentManager::wireConnectionToModel(AcpConnection *conn, AcpSessionModel
         const auto &tc = it.value();
         if (tc.status != QLatin1String("completed"))
             return;
-        const QString titleLower = tc.title.toLower();
-        if (titleLower != QLatin1String("edit") &&
-            titleLower != QLatin1String("write") &&
-            titleLower != QLatin1String("edit file") &&
-            titleLower != QLatin1String("write file"))
+        if (!AcpProtocol::toolCallLooksFileMutating(tc))
             return;
         QString path = tc.rawInput[QLatin1String("file_path")].toString();
         if (path.isEmpty())

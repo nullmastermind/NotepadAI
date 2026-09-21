@@ -79,6 +79,11 @@ public:
     };
     void setSessionRestarter(std::function<RestartedSession(const QString &oldSessionId)> fn);
 
+    // Optional transform applied to prompts forwarded to the target session
+    // (continue / restart / handoff). Transcript stays on the display text.
+    // `/compact` is never decorated — it is a system command.
+    void setTargetPromptDecorator(std::function<QString(const QString &)> fn);
+
 signals:
     void statusChanged(GoalAgent::Status status);
     void criterionAdvanced(int newIndex);
@@ -113,6 +118,8 @@ private:
     void ensureHttpJudge();
     void applyJudgeAction(const GoalAction &action);
     void restartWatchedSession(const QString &prompt);
+    void sendPromptToTarget(const QString &displayText);
+    QString wireTextForTarget(const QString &displayText) const;
     void onHttpVerdict(const GoalAction &action);
     void onHttpAssumedAchieved(const QString &reason);
     void onHttpFailed(const QString &message);
@@ -148,6 +155,7 @@ private:
     bool m_restartingTarget = false;
     bool m_restartedSinceLastEval = false;
     std::function<RestartedSession(const QString &)> m_sessionRestarter;
+    std::function<QString(const QString &)> m_targetPromptDecorator;
 
     bool m_awaitingAuthoring = false;
     QString m_authoringBuffer;

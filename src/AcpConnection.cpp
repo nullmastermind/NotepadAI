@@ -814,6 +814,7 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         AcpProtocol::AcpToolCall tc;
         tc.id = update.value(QStringLiteral("toolCallId")).toString();
         tc.title = update.value(QStringLiteral("title")).toString();
+        tc.name = update.value(QStringLiteral("name")).toString();
         tc.kind = update.value(QStringLiteral("kind")).toString();
         tc.status = update.value(QStringLiteral("status")).toString();
         tc.content = update.value(QStringLiteral("content")).toArray();
@@ -828,6 +829,10 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         const QJsonValue title = update.value(QStringLiteral("title"));
         if (title.isString()) {
             u.title = title.toString();
+        }
+        const QJsonValue name = update.value(QStringLiteral("name"));
+        if (name.isString()) {
+            u.name = name.toString();
         }
         const QJsonValue toolKind = update.value(QStringLiteral("kind"));
         if (toolKind.isString()) {

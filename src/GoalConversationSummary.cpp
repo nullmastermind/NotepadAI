@@ -25,6 +25,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QStringList>
 
 namespace {
 
@@ -121,13 +122,78 @@ void appendMessage(QString &xml, const AcpMessage &msg)
     }
 }
 
+bool textHasGrep(const QString &s)
+{
+    return s.contains(QLatin1String("grep"), Qt::CaseInsensitive);
+}
+
+QString shellCommandText(const AcpProtocol::AcpToolCall &tc)
+{
+    const QJsonValue cmd = tc.rawInput.value(QLatin1String("command"));
+    if (cmd.isString())
+        return cmd.toString();
+    if (cmd.isArray()) {
+        QStringList parts;
+        const QJsonArray arr = cmd.toArray();
+        parts.reserve(arr.size());
+        for (const auto &v : arr) {
+            const QString t = v.toString();
+            if (!t.isEmpty())
+                parts.append(t);
+        }
+        return parts.join(QLatin1Char(' '));
+    }
+    return {};
+}
+
+bool isShellToolCall(const AcpProtocol::AcpToolCall &tc)
+{
+    auto isShell = [](const QString &s) {
+        return s.contains(QLatin1String("bash"), Qt::CaseInsensitive)
+            || s.contains(QLatin1String("powershell"), Qt::CaseInsensitive)
+            || s.contains(QLatin1String("pwsh"), Qt::CaseInsensitive);
+    };
+    return isShell(tc.name) || isShell(tc.title);
+}
+
+bool isMutatingToolCall(const AcpProtocol::AcpToolCall &tc)
+{
+    if (AcpProtocol::toolCallLooksFileMutating(tc))
+        return true;
+    if (!isShellToolCall(tc))
+        return false;
+    return !textHasGrep(shellCommandText(tc));
+}
+
+bool isRoundBoundary(const AcpMessage &msg)
+{
+    if (msg.role == QLatin1String("user"))
+        return textContent(msg).trimmed() == QLatin1String("/compact");
+    if (msg.role == QLatin1String("system"))
+        return msg.marker == QLatin1String(kAcpMarkerGoalAchieved);
+    return false;
+}
+
+int lastRoundBoundaryIndex(const QVector<AcpMessage> &msgs)
+{
+    for (int i = msgs.size() - 1; i >= 0; --i) {
+        if (isRoundBoundary(msgs[i]))
+            return i;
+    }
+    return -1;
+}
+
 void appendToolCall(QString &xml, const AcpProtocol::AcpToolCall &tc)
 {
     xml += QStringLiteral("  <tool-call id=\"")
            + tc.id.toHtmlEscaped()
            + QStringLiteral("\" title=\"")
-           + tc.title.toHtmlEscaped()
-           + QStringLiteral("\" kind=\"")
+           + tc.title.toHtmlEscaped();
+    if (!tc.name.isEmpty()) {
+        xml += QStringLiteral("\" name=\"")
+               + tc.name.toHtmlEscaped();
+    }
+    xml += QStringLiteral("\" kind=\"")
            + tc.kind.toHtmlEscaped()
            + QStringLiteral("\" status=\"")
            + tc.status.toHtmlEscaped()
@@ -175,6 +241,9 @@ QString GoalConversationSummary::fromModel(const AcpSessionModel *model, int sta
         startIndex = 0;
     if (startIndex > msgs.size())
         startIndex = msgs.size();
+    const int watermark = lastRoundBoundaryIndex(msgs);
+    if (watermark > startIndex)
+        startIndex = watermark;
 
     const auto &timeline = model->timeline();
     const int begin = timelineBegin(timeline, startIndex);
@@ -192,7 +261,7 @@ QString GoalConversationSummary::fromModel(const AcpSessionModel *model, int sta
             continue;
         }
         const auto it = toolCalls.constFind(entry.toolCallId);
-        if (it != toolCalls.cend())
+        if (it != toolCalls.cend() && isMutatingToolCall(it.value()))
             appendToolCall(xml, it.value());
     }
 

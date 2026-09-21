@@ -59,8 +59,11 @@ private slots:
     void restartAction_duplicateBeforeNextEval_isIgnored();
     void restartAction_oldConnectionDestroyedDuringRestart_staysActive();
     void continueAction_stillForwardsToTarget();
+    void continueAction_appliesTargetPromptDecorator_hidesFromTranscript();
+    void restartAction_appliesTargetPromptDecorator_hidesFromTranscript();
     void completeAction_stillAchievesSingleCriterion();
     void completeAction_withAutoCompact_sendsCompactToTarget();
+    void completeAction_withAutoCompact_skipsTargetPromptDecorator();
     void completeAction_withoutAutoCompact_doesNotSendCompact();
     void stop_withAutoCompact_doesNotSendCompact();
     void start_attachToExistingConversation_whenIdle_evaluatesImmediately();
@@ -440,6 +443,96 @@ void TestGoalAgent::continueAction_stillForwardsToTarget()
     QCOMPARE(model.messages().last().role, QStringLiteral("user"));
 }
 
+void TestGoalAgent::continueAction_appliesTargetPromptDecorator_hidesFromTranscript()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    QVERIFY(goal.start(req));
+
+    int decorateCalls = 0;
+    goal.setTargetPromptDecorator([&](const QString &text) {
+        ++decorateCalls;
+        return text + QLatin1String("\n\nWORKTREE");
+    });
+
+    GoalAction action;
+    action.type = GoalAction::Continue;
+    action.text = QStringLiteral("Please run the tests.");
+    goal.applyJudgeAction(action);
+
+    QCOMPARE(decorateCalls, 1);
+    QCOMPARE(model.messages().last().content.first().text,
+             QStringLiteral("Please run the tests."));
+    QCOMPARE(goal.wireTextForTarget(action.text),
+             QStringLiteral("Please run the tests.\n\nWORKTREE"));
+}
+
+void TestGoalAgent::restartAction_appliesTargetPromptDecorator_hidesFromTranscript()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection oldTarget;
+    auto *oldChannel = new RecordingChannel(&oldTarget);
+    oldTarget.attachChannelForTest(oldChannel);
+    oldChannel->start();
+
+    AcpConnection newTarget;
+    auto *newChannel = new RecordingChannel(&newTarget);
+    newTarget.attachChannelForTest(newChannel);
+    newChannel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel oldModel(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    AcpSessionModel newModel(QStringLiteral("s2"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&oldTarget, &oldModel);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    QVERIFY(goal.start(req));
+
+    goal.setSessionRestarter([&](const QString &) {
+        GoalAgent::RestartedSession out;
+        out.sessionId = QStringLiteral("s2");
+        out.connection = &newTarget;
+        out.model = &newModel;
+        return out;
+    });
+
+    int decorateCalls = 0;
+    goal.setTargetPromptDecorator([&](const QString &text) {
+        ++decorateCalls;
+        return text + QLatin1String("\n\nWORKTREE");
+    });
+
+    GoalAction action;
+    action.type = GoalAction::Restart;
+    action.text = QStringLiteral("Continue from the last failing test.");
+    goal.applyJudgeAction(action);
+
+    QCOMPARE(decorateCalls, 1);
+    QCOMPARE(newModel.messages().at(0).content.first().text,
+             QStringLiteral("Continue from the last failing test."));
+}
+
 void TestGoalAgent::completeAction_stillAchievesSingleCriterion()
 {
     ApplicationSettings settings;
@@ -502,6 +595,46 @@ void TestGoalAgent::completeAction_withAutoCompact_sendsCompactToTarget()
     QCOMPARE(model.messages().last().role, QStringLiteral("user"));
     QCOMPARE(model.messages().last().fromGoalAgent, true);
     QCOMPARE(model.messages().last().content.first().text, QStringLiteral("/compact"));
+}
+
+void TestGoalAgent::completeAction_withAutoCompact_skipsTargetPromptDecorator()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    int decorateCalls = 0;
+    goal.setTargetPromptDecorator([&](const QString &text) {
+        ++decorateCalls;
+        return text + QLatin1String("\n\nWORKTREE");
+    });
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.autoCompact = true;
+    QVERIFY(goal.start(req));
+
+    GoalAction action;
+    action.type = GoalAction::Complete;
+    action.text = QStringLiteral("Tests passed.");
+    goal.applyJudgeAction(action);
+
+    QCOMPARE(goal.status(), GoalAgent::Achieved);
+    QCOMPARE(decorateCalls, 0);
+    QCOMPARE(model.messages().last().content.first().text, QStringLiteral("/compact"));
+    QCOMPARE(goal.wireTextForTarget(QStringLiteral("/compact")),
+             QStringLiteral("/compact"));
 }
 
 void TestGoalAgent::completeAction_withoutAutoCompact_doesNotSendCompact()

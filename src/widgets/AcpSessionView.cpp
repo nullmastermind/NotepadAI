@@ -483,7 +483,7 @@ void AcpSessionView::buildUi()
     m_autoApproveCheck->setStyleSheet(QStringLiteral(
         "QCheckBox:checked { color: #856404; font-weight: 600; }"));
     m_newWorktreeCheck = new QCheckBox(tr("New worktree"), this);
-    m_newWorktreeCheck->setToolTip(tr("Do this turn in a new git worktree, then merge and clean up"));
+    m_newWorktreeCheck->setToolTip(tr("Do this conversation in a new git worktree, then merge and clean up"));
     auto *autoApproveRow = new QHBoxLayout();
     autoApproveRow->setContentsMargins(0, 0, 0, 0);
     autoApproveRow->setSpacing(6);
@@ -694,8 +694,8 @@ void AcpSessionView::buildUi()
     }
     connect(m_autoApproveCheck, &QCheckBox::toggled,
             this, &AcpSessionView::onAutoApproveToggled);
-    // clicked, not toggled: send/rebind call setChecked(false) and must not
-    // yank focus away from the transcript or a permission prompt.
+    // clicked, not toggled: a programmatic setChecked must not yank focus
+    // away from the transcript or a permission prompt.
     connect(m_newWorktreeCheck, &QCheckBox::clicked, this, [this]() {
         if (m_input) m_input->setFocus();
     });
@@ -952,9 +952,6 @@ void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)
     m_model = model;
     m_connection = connection;
     m_savedPrefsApplied = false;
-    if (m_newWorktreeCheck) {
-        m_newWorktreeCheck->setChecked(false);
-    }
 
     // Clear the transcript: drop bubbles, cards, plan, permission prompts.
     // Leave the trailing stretch in place, and skip the inline heartbeat
@@ -1719,12 +1716,11 @@ void AcpSessionView::clearGoalStatus()
     if (m_goalElapsedLabel) m_goalElapsedLabel->hide();
 }
 
-QString AcpSessionView::applyNewWorktreeInstruction(const QString &displayText)
+QString AcpSessionView::applyNewWorktreeInstruction(const QString &displayText) const
 {
     if (!m_newWorktreeCheck || !m_newWorktreeCheck->isChecked()) {
         return displayText;
     }
-    m_newWorktreeCheck->setChecked(false);
     QString instruction = QStringLiteral(
         "Create a new git worktree for this task. When finished, merge the result "
         "into the current branch and remove the worktree to free disk space.");

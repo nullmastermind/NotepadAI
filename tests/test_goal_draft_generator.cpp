@@ -62,6 +62,14 @@ private slots:
     void conversationSummary_doesNotTruncateStringOf256Chars();
     void conversationSummary_doesNotSplitSurrogatePairWhenTruncating();
     void conversationSummary_escapesToolCallXmlAttributes();
+    void conversationSummary_omitsNonMutatingToolCalls();
+    void conversationSummary_includesEditAndApplyPatchToolNames();
+    void conversationSummary_mutatingToolCall_nameTitleAndKindFallback();
+    void conversationSummary_includesBashAndPowershell_skipsGrep();
+    void conversationSummary_dropsMessagesBeforeGoalAchieved();
+    void conversationSummary_doesNotWatermarkUnmarkedGoalAchievedText();
+    void conversationSummary_dropsMessagesBeforeCompact();
+    void conversationSummary_watermarkUsesLatestBoundary();
     void cancel_isIdempotentAndDeletesConnection();
     void start_customApiContinue_emitsDraft();
     void start_customApiComplete_emitsAlreadyComplete();
@@ -254,8 +262,8 @@ void TestGoalDraftGenerator::conversationSummary_includesToolCallBetweenMessages
 
     AcpProtocol::AcpToolCall tc;
     tc.id = QStringLiteral("call-1");
-    tc.title = QStringLiteral("Read a.cpp");
-    tc.kind = QStringLiteral("read");
+    tc.title = QStringLiteral("Write a.cpp");
+    tc.kind = QStringLiteral("edit");
     tc.status = QStringLiteral("completed");
     tc.rawInput.insert(QStringLiteral("path"), QStringLiteral("a.cpp"));
     tc.rawOutput.insert(QStringLiteral("text"), QStringLiteral("int main() {}"));
@@ -269,7 +277,7 @@ void TestGoalDraftGenerator::conversationSummary_includesToolCallBetweenMessages
 
     QVERIFY(xml.contains(QStringLiteral("<message role=\"user\">inspect a.cpp</message>")));
     QVERIFY(xml.contains(QStringLiteral(
-        "<tool-call id=\"call-1\" title=\"Read a.cpp\" kind=\"read\" status=\"completed\">")));
+        "<tool-call id=\"call-1\" title=\"Write a.cpp\" kind=\"edit\" status=\"completed\">")));
     QVERIFY2(xml.contains(QStringLiteral("<input>{\"path\":\"a.cpp\"}</input>")),
                qPrintable(xml));
     QVERIFY2(xml.contains(QStringLiteral("<output>{\"text\":\"int main() {}\"}</output>")),
@@ -326,10 +334,10 @@ void TestGoalDraftGenerator::conversationSummary_startIndexIncludesLaterToolCall
 
     AcpProtocol::AcpToolCall tc;
     tc.id = QStringLiteral("call-3");
-    tc.title = QStringLiteral("Bash");
-    tc.kind = QStringLiteral("execute");
+    tc.title = QStringLiteral("Write");
+    tc.kind = QStringLiteral("edit");
     tc.status = QStringLiteral("completed");
-    tc.rawInput.insert(QStringLiteral("command"), QStringLiteral("ls"));
+    tc.rawInput.insert(QStringLiteral("path"), QStringLiteral("c.cpp"));
     model.onToolCallReceived(tc);
     model.onPromptStarted();
     model.onMessageChunk(QStringLiteral("new assistant"));
@@ -339,7 +347,7 @@ void TestGoalDraftGenerator::conversationSummary_startIndexIncludesLaterToolCall
     QVERIFY(!xml.contains(QStringLiteral("old user")));
     QVERIFY(!xml.contains(QStringLiteral("old assistant")));
     QVERIFY(xml.contains(QStringLiteral("<tool-call id=\"call-3\"")));
-    QVERIFY(xml.contains(QStringLiteral("\"command\":\"ls\"")));
+    QVERIFY(xml.contains(QStringLiteral("\"path\":\"c.cpp\"")));
     QVERIFY(xml.contains(QStringLiteral("new assistant")));
 }
 
@@ -354,8 +362,8 @@ void TestGoalDraftGenerator::conversationSummary_usesTruncatedContentWhenRawOutp
     const QString longText = QString(300, QLatin1Char('B'));
     AcpProtocol::AcpToolCall tc;
     tc.id = QStringLiteral("call-4");
-    tc.title = QStringLiteral("Bash");
-    tc.kind = QStringLiteral("execute");
+    tc.title = QStringLiteral("Write");
+    tc.kind = QStringLiteral("edit");
     tc.status = QStringLiteral("completed");
     tc.rawInput.insert(QStringLiteral("command"), QStringLiteral("just test"));
     QJsonObject block;
@@ -381,16 +389,16 @@ void TestGoalDraftGenerator::conversationSummary_keepsFailedAndCancelledStatus()
 
     AcpProtocol::AcpToolCall failed;
     failed.id = QStringLiteral("call-fail");
-    failed.title = QStringLiteral("Bash");
-    failed.kind = QStringLiteral("execute");
+    failed.title = QStringLiteral("Write");
+    failed.kind = QStringLiteral("edit");
     failed.status = QStringLiteral("failed");
     failed.rawInput.insert(QStringLiteral("command"), QStringLiteral("false"));
     model.onToolCallReceived(failed);
 
     AcpProtocol::AcpToolCall cancelled;
     cancelled.id = QStringLiteral("call-cancel");
-    cancelled.title = QStringLiteral("Read");
-    cancelled.kind = QStringLiteral("read");
+    cancelled.title = QStringLiteral("Edit");
+    cancelled.kind = QStringLiteral("edit");
     cancelled.status = QStringLiteral("cancelled");
     cancelled.rawInput.insert(QStringLiteral("path"), QStringLiteral("x.cpp"));
     model.onToolCallReceived(cancelled);
@@ -412,8 +420,8 @@ void TestGoalDraftGenerator::conversationSummary_omitsEmptyInputAndOutput()
 
     AcpProtocol::AcpToolCall tc;
     tc.id = QStringLiteral("call-empty");
-    tc.title = QStringLiteral("Pending");
-    tc.kind = QStringLiteral("other");
+    tc.title = QStringLiteral("Write");
+    tc.kind = QStringLiteral("edit");
     tc.status = QStringLiteral("pending");
     model.onToolCallReceived(tc);
 
@@ -509,15 +517,374 @@ void TestGoalDraftGenerator::conversationSummary_escapesToolCallXmlAttributes()
 
     AcpProtocol::AcpToolCall tc;
     tc.id = QStringLiteral("id&1");
-    tc.title = QStringLiteral("say \"hi\" & <go>");
-    tc.kind = QStringLiteral("read");
+    tc.title = QStringLiteral("edit \"hi\" & <go>");
+    tc.kind = QStringLiteral("edit");
     tc.status = QStringLiteral("completed");
     model.onToolCallReceived(tc);
 
     const QString xml = GoalConversationSummary::fromModel(&model, 0);
     QVERIFY2(xml.contains(QStringLiteral("id=\"id&amp;1\"")), qPrintable(xml));
-    QVERIFY2(xml.contains(QStringLiteral("title=\"say &quot;hi&quot; &amp; &lt;go&gt;\"")),
+    QVERIFY2(xml.contains(QStringLiteral("title=\"edit &quot;hi&quot; &amp; &lt;go&gt;\"")),
              qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::conversationSummary_omitsNonMutatingToolCalls()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-filter"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("inspect"),
+                            QVector<QPair<QByteArray, QString>>{});
+
+    AcpProtocol::AcpToolCall readTc;
+    readTc.id = QStringLiteral("read-1");
+    readTc.title = QStringLiteral("Read");
+    readTc.kind = QStringLiteral("read");
+    readTc.status = QStringLiteral("completed");
+    readTc.rawInput.insert(QStringLiteral("path"), QStringLiteral("a.cpp"));
+    model.onToolCallReceived(readTc);
+
+    AcpProtocol::AcpToolCall kindEdit;
+    kindEdit.id = QStringLiteral("kind-edit");
+    kindEdit.title = QStringLiteral("Read");
+    kindEdit.kind = QStringLiteral("edit");
+    kindEdit.status = QStringLiteral("completed");
+    model.onToolCallReceived(kindEdit);
+
+    AcpProtocol::AcpToolCall grepTc;
+    grepTc.id = QStringLiteral("grep-1");
+    grepTc.title = QStringLiteral("grep");
+    grepTc.kind = QStringLiteral("search");
+    grepTc.status = QStringLiteral("completed");
+    grepTc.rawInput.insert(QStringLiteral("pattern"), QStringLiteral("ls"));
+    model.onToolCallReceived(grepTc);
+
+    AcpProtocol::AcpToolCall writeTc;
+    writeTc.id = QStringLiteral("write-1");
+    writeTc.title = QStringLiteral("Write");
+    writeTc.kind = QStringLiteral("edit");
+    writeTc.status = QStringLiteral("completed");
+    writeTc.rawInput.insert(QStringLiteral("path"), QStringLiteral("a.cpp"));
+    model.onToolCallReceived(writeTc);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(xml.contains(QStringLiteral("id=\"write-1\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"kind-edit\"")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("id=\"read-1\"")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("id=\"grep-1\"")), qPrintable(xml));
+    QVERIFY(!xml.contains(QStringLiteral("\"pattern\":\"ls\"")));
+}
+
+void TestGoalDraftGenerator::conversationSummary_includesEditAndApplyPatchToolNames()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-names"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+
+    AcpProtocol::AcpToolCall editTc;
+    editTc.id = QStringLiteral("edit-1");
+    editTc.title = QStringLiteral("Edit File");
+    editTc.kind = QStringLiteral("other");
+    editTc.status = QStringLiteral("completed");
+    model.onToolCallReceived(editTc);
+
+    AcpProtocol::AcpToolCall patchTc;
+    patchTc.id = QStringLiteral("patch-1");
+    patchTc.title = QStringLiteral("apply_patch");
+    patchTc.kind = QStringLiteral("execute");
+    patchTc.status = QStringLiteral("completed");
+    model.onToolCallReceived(patchTc);
+
+    AcpProtocol::AcpToolCall hyphenTc;
+    hyphenTc.id = QStringLiteral("patch-2");
+    hyphenTc.title = QStringLiteral("Apply-Patch");
+    hyphenTc.kind = QStringLiteral("other");
+    hyphenTc.status = QStringLiteral("completed");
+    model.onToolCallReceived(hyphenTc);
+
+    AcpProtocol::AcpToolCall kindOnly;
+    kindOnly.id = QStringLiteral("kind-edit");
+    kindOnly.title = QStringLiteral("StrReplace");
+    kindOnly.kind = QStringLiteral("edit");
+    kindOnly.status = QStringLiteral("completed");
+    model.onToolCallReceived(kindOnly);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(xml.contains(QStringLiteral("id=\"edit-1\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"patch-1\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"patch-2\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"kind-edit\"")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::conversationSummary_mutatingToolCall_nameTitleAndKindFallback()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-fallback"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+
+    AcpProtocol::AcpToolCall pendingWrite;
+    pendingWrite.id = QStringLiteral("name-write");
+    pendingWrite.title = QStringLiteral("Preparing file...");
+    pendingWrite.name = QStringLiteral("Write");
+    pendingWrite.kind = QStringLiteral("other");
+    pendingWrite.status = QStringLiteral("pending");
+    model.onToolCallReceived(pendingWrite);
+
+    AcpProtocol::AcpToolCall pathEdit;
+    pathEdit.id = QStringLiteral("path-edit");
+    pathEdit.title = QStringLiteral("C:\\tmp\\opencode\\gen_icons.py");
+    pathEdit.kind = QStringLiteral("edit");
+    pathEdit.status = QStringLiteral("completed");
+    model.onToolCallReceived(pathEdit);
+
+    AcpProtocol::AcpToolCall delTc;
+    delTc.id = QStringLiteral("del-1");
+    delTc.title = QStringLiteral("rm dest.txt");
+    delTc.kind = QStringLiteral("delete");
+    delTc.status = QStringLiteral("completed");
+    model.onToolCallReceived(delTc);
+
+    AcpProtocol::AcpToolCall moveTc;
+    moveTc.id = QStringLiteral("move-1");
+    moveTc.title = QStringLiteral("mv a b");
+    moveTc.kind = QStringLiteral("move");
+    moveTc.status = QStringLiteral("completed");
+    model.onToolCallReceived(moveTc);
+
+    AcpProtocol::AcpToolCall applyPatchSpace;
+    applyPatchSpace.id = QStringLiteral("patch-space");
+    applyPatchSpace.title = QStringLiteral("Apply Patch");
+    applyPatchSpace.kind = QStringLiteral("execute");
+    applyPatchSpace.status = QStringLiteral("completed");
+    model.onToolCallReceived(applyPatchSpace);
+
+    AcpProtocol::AcpToolCall namePatch;
+    namePatch.id = QStringLiteral("name-patch");
+    namePatch.title = QStringLiteral("Updating files");
+    namePatch.name = QStringLiteral("apply_patch");
+    namePatch.kind = QStringLiteral("execute");
+    namePatch.status = QStringLiteral("completed");
+    model.onToolCallReceived(namePatch);
+
+    AcpProtocol::AcpToolCall readTc;
+    readTc.id = QStringLiteral("read-1");
+    readTc.title = QStringLiteral("Read File");
+    readTc.name = QStringLiteral("Read");
+    readTc.kind = QStringLiteral("read");
+    readTc.status = QStringLiteral("completed");
+    model.onToolCallReceived(readTc);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(xml.contains(QStringLiteral("id=\"name-write\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("name=\"Write\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"path-edit\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"del-1\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"move-1\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"patch-space\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"name-patch\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("name=\"apply_patch\"")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("id=\"read-1\"")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::conversationSummary_includesBashAndPowershell_skipsGrep()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("tool-shell"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+
+    AcpProtocol::AcpToolCall bashLs;
+    bashLs.id = QStringLiteral("bash-ls");
+    bashLs.title = QStringLiteral("ls");
+    bashLs.name = QStringLiteral("Bash");
+    bashLs.kind = QStringLiteral("execute");
+    bashLs.status = QStringLiteral("completed");
+    bashLs.rawInput.insert(QStringLiteral("command"), QStringLiteral("ls"));
+    model.onToolCallReceived(bashLs);
+
+    AcpProtocol::AcpToolCall bashTitleGrepCmdLs;
+    bashTitleGrepCmdLs.id = QStringLiteral("bash-title-grep-cmd-ls");
+    bashTitleGrepCmdLs.title = QStringLiteral("grep -n foo a.cpp");
+    bashTitleGrepCmdLs.name = QStringLiteral("Bash");
+    bashTitleGrepCmdLs.kind = QStringLiteral("execute");
+    bashTitleGrepCmdLs.status = QStringLiteral("completed");
+    bashTitleGrepCmdLs.rawInput.insert(QStringLiteral("command"), QStringLiteral("ls"));
+    model.onToolCallReceived(bashTitleGrepCmdLs);
+
+    AcpProtocol::AcpToolCall bashGrepCmd;
+    bashGrepCmd.id = QStringLiteral("bash-grep-cmd");
+    bashGrepCmd.title = QStringLiteral("Bash");
+    bashGrepCmd.name = QStringLiteral("Bash");
+    bashGrepCmd.kind = QStringLiteral("execute");
+    bashGrepCmd.status = QStringLiteral("completed");
+    bashGrepCmd.rawInput.insert(QStringLiteral("command"), QStringLiteral("grep foo"));
+    model.onToolCallReceived(bashGrepCmd);
+
+    AcpProtocol::AcpToolCall bashGrepArr;
+    bashGrepArr.id = QStringLiteral("bash-grep-arr");
+    bashGrepArr.title = QStringLiteral("Bash");
+    bashGrepArr.name = QStringLiteral("Bash");
+    bashGrepArr.kind = QStringLiteral("execute");
+    bashGrepArr.status = QStringLiteral("completed");
+    bashGrepArr.rawInput.insert(QStringLiteral("command"),
+                                QJsonArray{QStringLiteral("grep"), QStringLiteral("-n"), QStringLiteral("x")});
+    model.onToolCallReceived(bashGrepArr);
+
+    AcpProtocol::AcpToolCall psTc;
+    psTc.id = QStringLiteral("ps-1");
+    psTc.title = QStringLiteral("powershell.exe Get-Content a.txt");
+    psTc.kind = QStringLiteral("execute");
+    psTc.status = QStringLiteral("completed");
+    model.onToolCallReceived(psTc);
+
+    AcpProtocol::AcpToolCall pwshTc;
+    pwshTc.id = QStringLiteral("pwsh-1");
+    pwshTc.title = QStringLiteral("pwsh -File setup.ps1");
+    pwshTc.kind = QStringLiteral("execute");
+    pwshTc.status = QStringLiteral("completed");
+    model.onToolCallReceived(pwshTc);
+
+    AcpProtocol::AcpToolCall psGrep;
+    psGrep.id = QStringLiteral("ps-grep");
+    psGrep.title = QStringLiteral("powershell.exe grep foo");
+    psGrep.kind = QStringLiteral("execute");
+    psGrep.status = QStringLiteral("completed");
+    psGrep.rawInput.insert(QStringLiteral("command"), QStringLiteral("grep foo"));
+    model.onToolCallReceived(psGrep);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(xml.contains(QStringLiteral("id=\"bash-ls\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"bash-title-grep-cmd-ls\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"ps-1\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"pwsh-1\"")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("id=\"bash-grep-cmd\"")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("id=\"bash-grep-arr\"")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("id=\"ps-grep\"")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::conversationSummary_dropsMessagesBeforeGoalAchieved()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("goal-achieved-watermark"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("old user"),
+                            QVector<QPair<QByteArray, QString>>{});
+    model.onPromptStarted();
+    model.onMessageChunk(QStringLiteral("old assistant"));
+    model.onPromptEnded();
+
+    AcpProtocol::AcpToolCall oldWrite;
+    oldWrite.id = QStringLiteral("old-write");
+    oldWrite.title = QStringLiteral("Write");
+    oldWrite.kind = QStringLiteral("edit");
+    oldWrite.status = QStringLiteral("completed");
+    model.onToolCallReceived(oldWrite);
+
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: done"),
+                             QLatin1String(kAcpMarkerGoalAchieved));
+
+    model.appendUserMessage(QStringLiteral("new user"),
+                            QVector<QPair<QByteArray, QString>>{});
+    AcpProtocol::AcpToolCall newWrite;
+    newWrite.id = QStringLiteral("new-write");
+    newWrite.title = QStringLiteral("Write");
+    newWrite.kind = QStringLiteral("edit");
+    newWrite.status = QStringLiteral("completed");
+    model.onToolCallReceived(newWrite);
+    model.onPromptStarted();
+    model.onMessageChunk(QStringLiteral("new assistant"));
+    model.onPromptEnded();
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(!xml.contains(QStringLiteral("old user")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("old assistant")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("id=\"old-write\"")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("new user")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("new assistant")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("id=\"new-write\"")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::conversationSummary_doesNotWatermarkUnmarkedGoalAchievedText()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("unmarked-achieved"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("old user"),
+                            QVector<QPair<QByteArray, QString>>{});
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: done"));
+    model.appendUserMessage(QStringLiteral("new user"),
+                            QVector<QPair<QByteArray, QString>>{});
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(xml.contains(QStringLiteral("old user")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("new user")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::conversationSummary_dropsMessagesBeforeCompact()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("compact-watermark"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("old user"),
+                            QVector<QPair<QByteArray, QString>>{});
+    model.onPromptStarted();
+    model.onMessageChunk(QStringLiteral("old assistant"));
+    model.onPromptEnded();
+    model.appendUserMessage(QStringLiteral("/compact"),
+                            QVector<QPair<QByteArray, QString>>{},
+                            /*fromGoalAgent=*/true);
+    model.onPromptStarted();
+    model.onMessageChunk(QStringLiteral("Context compacted"));
+    model.onPromptEnded();
+    model.appendUserMessage(QStringLiteral("new user"),
+                            QVector<QPair<QByteArray, QString>>{});
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(!xml.contains(QStringLiteral("old user")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("old assistant")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("<message role=\"user\">/compact</message>")),
+             qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("Context compacted")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("new user")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::conversationSummary_watermarkUsesLatestBoundary()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("latest-watermark"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("round1"),
+                            QVector<QPair<QByteArray, QString>>{});
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: first"),
+                             QLatin1String(kAcpMarkerGoalAchieved));
+    model.appendUserMessage(QStringLiteral("round2"),
+                            QVector<QPair<QByteArray, QString>>{});
+    model.appendUserMessage(QStringLiteral("/compact"),
+                            QVector<QPair<QByteArray, QString>>{},
+                            /*fromGoalAgent=*/true);
+    model.appendUserMessage(QStringLiteral("round3"),
+                            QVector<QPair<QByteArray, QString>>{});
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(!xml.contains(QStringLiteral("round1")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("round2")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("/compact")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("round3")), qPrintable(xml));
 }
 
 void TestGoalDraftGenerator::cancel_isIdempotentAndDeletesConnection()

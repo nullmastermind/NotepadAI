@@ -457,18 +457,38 @@ void GoalAgent::applyJudgeAction(const GoalAction &action)
     if (m_targetConnection) {
         logDebug(QStringLiteral("processJudgeResponse: forwarding continue to target (%1 chars)")
                      .arg(action.text.size()));
-        if (m_targetModel) {
-            m_targetModel->appendUserMessage(action.text, {}, /*fromGoalAgent=*/true);
-        }
-        m_targetConnection->sendPrompt(action.text, {});
+        sendPromptToTarget(action.text);
     }
-    m_lastSeenTargetMessageCount = m_targetModel
-        ? m_targetModel->messages().size() : 0;
 }
 
 void GoalAgent::setSessionRestarter(std::function<RestartedSession(const QString &oldSessionId)> fn)
 {
     m_sessionRestarter = std::move(fn);
+}
+
+void GoalAgent::setTargetPromptDecorator(std::function<QString(const QString &)> fn)
+{
+    m_targetPromptDecorator = std::move(fn);
+}
+
+QString GoalAgent::wireTextForTarget(const QString &displayText) const
+{
+    if (!m_targetPromptDecorator)
+        return displayText;
+    if (displayText.trimmed() == QLatin1String("/compact"))
+        return displayText;
+    return m_targetPromptDecorator(displayText);
+}
+
+void GoalAgent::sendPromptToTarget(const QString &displayText)
+{
+    if (!m_targetConnection)
+        return;
+    if (m_targetModel)
+        m_targetModel->appendUserMessage(displayText, {}, /*fromGoalAgent=*/true);
+    m_targetConnection->sendPrompt(wireTextForTarget(displayText), {});
+    m_lastSeenTargetMessageCount = m_targetModel
+        ? m_targetModel->messages().size() : 0;
 }
 
 void GoalAgent::restartWatchedSession(const QString &prompt)
@@ -508,12 +528,7 @@ void GoalAgent::restartWatchedSession(const QString &prompt)
     logDebug(QStringLiteral("restartWatchedSession: %1 -> %2, forwarding prompt (%3 chars)")
                  .arg(oldId, restarted.sessionId)
                  .arg(prompt.size()));
-    if (m_targetModel) {
-        m_targetModel->appendUserMessage(prompt, {}, /*fromGoalAgent=*/true);
-    }
-    m_targetConnection->sendPrompt(prompt, {});
-    m_lastSeenTargetMessageCount = m_targetModel
-        ? m_targetModel->messages().size() : 0;
+    sendPromptToTarget(prompt);
     m_restartingTarget = false;
 }
 
@@ -653,13 +668,8 @@ void GoalAgent::finalizeHandoff(const QString &verdict, const QString &authoredT
     if (m_targetConnection) {
         logDebug(QStringLiteral("finalizeHandoff: sending handoff to target (%1 chars)")
                      .arg(handoff.size()));
-        if (m_targetModel) {
-            m_targetModel->appendUserMessage(handoff, {}, /*fromGoalAgent=*/true);
-        }
-        m_targetConnection->sendPrompt(handoff, {});
+        sendPromptToTarget(handoff);
     }
-    m_lastSeenTargetMessageCount = m_targetModel
-        ? m_targetModel->messages().size() : 0;
 }
 
 QString GoalAgent::collectRecentUserMessages(int take, int perEntryCharCap)
