@@ -183,6 +183,7 @@ private:
     void positionJumpButton();
     void positionImproveButton();
     void updateImproveButtonState();
+    void updateSendButton();
     bool inputKeyEventIsSubmit(QKeyEvent *ke) const;
     // Heartbeat indicator at the tail of the transcript: shows time since the
     // last structural event (new message / thought / tool call / plan /

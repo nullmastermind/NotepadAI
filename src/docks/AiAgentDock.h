@@ -153,6 +153,7 @@ private slots:
     // on the sender view's slot. Shared sink for the goal-status-row Stop
     // button and the composer Cancel button. No-op when no goal is active.
     void stopGoalAgentIfActive();
+    void onNativeGoalPromptEnded();
 
 private:
     struct Slot {
@@ -165,6 +166,7 @@ private:
         bool hasActivity = false;
         qint64 busySinceMs = 0;
         bool agentExited = false;
+        bool nativeAutoCompact = false;
     };
 
     void buildUi();

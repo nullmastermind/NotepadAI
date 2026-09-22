@@ -36,6 +36,8 @@ public:
     void kill() override { m_running = false; }
     bool isRunning() const override { return m_running; }
 
+    void pushStdout(const QByteArray &chunk) { emit readyReadStdout(chunk); }
+
     bool wroteSessionCancel() const
     {
         return written.contains("session/cancel");
@@ -74,6 +76,14 @@ private slots:
     void launchAction_emptyWhileProcessing_attaches();
     void launchAction_composerIdle_sends();
     void launchAction_composerWhileProcessing_attaches();
+    void nativeGoalCommand_prefixesCriterion();
+    void nativeGoalCommands_oneSlashPerRow();
+    void nativeGoalWireText_appendsWorktreeInstruction();
+    void nativeGoalCommand_skipsBlankRows();
+    void isNativeGoalSlash_matchesGoalCommandOnly();
+    void sidePrompt_whileTurnInFlight_doesNotEndTurn();
+    void sidePrompts_twoGoalsWhileTurnInFlight_bothGoOutImmediately();
+    void userPromptResult_whileGoalOutstanding_doesNotEndTurn();
 };
 
 void TestGoalAgent::stop_doesNotCancelTargetAcpPrompt()
@@ -824,6 +834,122 @@ void TestGoalAgent::launchAction_composerIdle_sends()
 void TestGoalAgent::launchAction_composerWhileProcessing_attaches()
 {
     QCOMPARE(GoalAgent::launchAction(true, true, true), GoalAgent::LaunchAction::Attach);
+}
+
+void TestGoalAgent::nativeGoalCommand_prefixesCriterion()
+{
+    QCOMPARE(GoalAgent::nativeGoalCommands(QStringList{QStringLiteral("viết bằng tiếng Lào")}),
+             QStringList{QStringLiteral("/goal viết bằng tiếng Lào")});
+}
+
+void TestGoalAgent::nativeGoalCommands_oneSlashPerRow()
+{
+    const QStringList commands = GoalAgent::nativeGoalCommands(
+        {QStringLiteral("hi in Vietnamese"), QStringLiteral("hi in japanase")});
+    QCOMPARE(commands, QStringList({QStringLiteral("/goal hi in Vietnamese"),
+                                    QStringLiteral("/goal hi in japanase")}));
+}
+
+void TestGoalAgent::nativeGoalWireText_appendsWorktreeInstruction()
+{
+    const QString command = QStringLiteral("/goal say hi in korean");
+    QCOMPARE(GoalAgent::nativeGoalWireText(command, false), command);
+    QCOMPARE(GoalAgent::nativeGoalWireText(command, true),
+             QStringLiteral("/goal say hi in korean\n\n"
+                            "Create a new git worktree for this task. When finished, merge the result "
+                            "into the current branch and remove the worktree to free disk space."));
+}
+
+void TestGoalAgent::nativeGoalCommand_skipsBlankRows()
+{
+    QCOMPARE(GoalAgent::nativeGoalCommands({QStringLiteral("  "), QStringLiteral("xong")}),
+             QStringList{QStringLiteral("/goal xong")});
+    QCOMPARE(GoalAgent::nativeGoalCommands({}), QStringList());
+}
+
+void TestGoalAgent::isNativeGoalSlash_matchesGoalCommandOnly()
+{
+    QVERIFY(GoalAgent::isNativeGoalSlash(QStringLiteral("/goal xxx")));
+    QVERIFY(GoalAgent::isNativeGoalSlash(QStringLiteral("  /goal")));
+    QVERIFY(!GoalAgent::isNativeGoalSlash(QStringLiteral("/goals")));
+    QVERIFY(!GoalAgent::isNativeGoalSlash(QStringLiteral("hello /goal")));
+    QVERIFY(!GoalAgent::isNativeGoalSlash(QStringLiteral("/compact")));
+}
+
+void TestGoalAgent::sidePrompt_whileTurnInFlight_doesNotEndTurn()
+{
+    AcpConnection conn;
+    auto *channel = new RecordingChannel(&conn);
+    conn.attachChannelForTest(channel);
+    channel->start();
+    conn.setSessionIdForTest(QStringLiteral("s1"));
+
+    int started = 0;
+    int ended = 0;
+    connect(&conn, &AcpConnection::promptStarted, &conn, [&]() { ++started; });
+    connect(&conn, &AcpConnection::promptEnded, &conn, [&]() { ++ended; });
+
+    conn.sendPrompt(QStringLiteral("hello"), {});
+    QCOMPARE(started, 1);
+    QCOMPARE(ended, 0);
+
+    conn.sendSidePrompt(QStringLiteral("/goal xong"));
+    QCOMPARE(started, 1);
+    QVERIFY(channel->written.contains("\"/goal xong\""));
+
+    channel->pushStdout(QByteArray("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n"));
+    QCOMPARE(ended, 0);
+    QCOMPARE(started, 1);
+
+    channel->pushStdout(QByteArray("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n"));
+    QCOMPARE(ended, 1);
+}
+
+void TestGoalAgent::sidePrompts_twoGoalsWhileTurnInFlight_bothGoOutImmediately()
+{
+    AcpConnection conn;
+    auto *channel = new RecordingChannel(&conn);
+    conn.attachChannelForTest(channel);
+    channel->start();
+    conn.setSessionIdForTest(QStringLiteral("s1"));
+
+    int ended = 0;
+    connect(&conn, &AcpConnection::promptEnded, &conn, [&]() { ++ended; });
+
+    conn.sendPrompt(QStringLiteral("hi"), {});
+    conn.sendSidePrompt(QStringLiteral("/goal hi in Vietnamese"));
+    conn.sendSidePrompt(QStringLiteral("/goal hi in japanase"));
+
+    QVERIFY(channel->written.contains("\"/goal hi in Vietnamese\""));
+    QVERIFY(channel->written.contains("\"/goal hi in japanase\""));
+    QCOMPARE(ended, 0);
+
+    channel->pushStdout(QByteArray("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n"));
+    channel->pushStdout(QByteArray("{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}\n"));
+    QCOMPARE(ended, 0);
+    channel->pushStdout(QByteArray("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n"));
+    QCOMPARE(ended, 1);
+}
+
+void TestGoalAgent::userPromptResult_whileGoalOutstanding_doesNotEndTurn()
+{
+    AcpConnection conn;
+    auto *channel = new RecordingChannel(&conn);
+    conn.attachChannelForTest(channel);
+    channel->start();
+    conn.setSessionIdForTest(QStringLiteral("s1"));
+
+    int ended = 0;
+    connect(&conn, &AcpConnection::promptEnded, &conn, [&]() { ++ended; });
+
+    conn.sendPrompt(QStringLiteral("hi"), {});
+    conn.sendSidePrompt(QStringLiteral("/goal say hi in korean"));
+
+    channel->pushStdout(QByteArray("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"stopReason\":\"end_turn\"}}\n"));
+    QCOMPARE(ended, 0);
+
+    channel->pushStdout(QByteArray("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"stopReason\":\"end_turn\"}}\n"));
+    QCOMPARE(ended, 1);
 }
 
 QTEST_MAIN(TestGoalAgent)

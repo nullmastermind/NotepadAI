@@ -135,6 +135,7 @@ public slots:
                        const QString &currentModel,
                        const QList<AcpProtocol::AcpConfigOption> &configOptions);
     void onMessageChunk(const QString &text);
+    void onMessageChunk(const QString &text, const QString &messageId);
     void onThoughtChunk(const QString &text);
     void onToolCallReceived(const AcpProtocol::AcpToolCall &tc);
     void onToolCallUpdated(const AcpProtocol::AcpToolCallUpdate &update);
@@ -208,6 +209,7 @@ private:
 
     bool m_isProcessing = false;
     int m_streamingAssistantMessageIndex = -1;
+    QString m_streamingAssistantMessageId;
     int m_streamingThoughtMessageIndex = -1;
 };
 

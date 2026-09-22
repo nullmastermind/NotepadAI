@@ -504,7 +504,7 @@ void AcpAgentManager::wireConnectionToModel(AcpConnection *conn, AcpSessionModel
     connect(conn, &AcpConnection::initialized,
             model, &AcpSessionModel::onInitialized);
     connect(conn, &AcpConnection::messageChunk,
-            model, &AcpSessionModel::onMessageChunk);
+            model, qOverload<const QString &, const QString &>(&AcpSessionModel::onMessageChunk));
     connect(conn, &AcpConnection::thoughtChunk,
             model, &AcpSessionModel::onThoughtChunk);
     connect(conn, &AcpConnection::toolCallReceived,

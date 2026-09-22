@@ -38,6 +38,10 @@ private slots:
     void autoCompact_defaultsUnchecked();
     void autoCompact_isRestoredAfterCancel();
     void autoCompact_isRestoredAfterAccept();
+    void useNativeGoal_defaultsChecked();
+    void useNativeGoal_uncheckedIsRestored();
+    void useNativeGoal_goalResultFollowsCheck();
+    void useNativeGoal_missingKeyStaysChecked();
 
 private:
     static QComboBox *agentCombo(SendWithGoalDialog &dialog);
@@ -299,6 +303,58 @@ void TestSendWithGoalDialog::autoCompact_isRestoredAfterAccept()
     auto *reopenedCheck = reopened.findChild<QCheckBox *>(QStringLiteral("autoCompactCheck"));
     QVERIFY(reopenedCheck);
     QVERIFY(reopenedCheck->isChecked());
+}
+
+void TestSendWithGoalDialog::useNativeGoal_defaultsChecked()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    auto *check = dialog.findChild<QCheckBox *>(QStringLiteral("useNativeGoalCheck"));
+    QVERIFY(check);
+    QVERIFY(check->isChecked());
+}
+
+void TestSendWithGoalDialog::useNativeGoal_uncheckedIsRestored()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+
+    SendWithGoalDialog first(&registry, &settings);
+    auto *check = first.findChild<QCheckBox *>(QStringLiteral("useNativeGoalCheck"));
+    QVERIFY(check);
+    check->setChecked(false);
+
+    SendWithGoalDialog reopened(&registry, &settings);
+    auto *reopenedCheck = reopened.findChild<QCheckBox *>(QStringLiteral("useNativeGoalCheck"));
+    QVERIFY(reopenedCheck);
+    QVERIFY(!reopenedCheck->isChecked());
+}
+
+void TestSendWithGoalDialog::useNativeGoal_goalResultFollowsCheck()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    auto *check = dialog.findChild<QCheckBox *>(QStringLiteral("useNativeGoalCheck"));
+    QVERIFY(check);
+    check->setChecked(false);
+    QCOMPARE(dialog.goalResult().useNativeGoal, false);
+    check->setChecked(true);
+    QCOMPARE(dialog.goalResult().useNativeGoal, true);
+}
+
+void TestSendWithGoalDialog::useNativeGoal_missingKeyStaysChecked()
+{
+    ApplicationSettings settings;
+    settings.setValue(QStringLiteral("Ai/GoalAgentSettings"),
+                      QStringLiteral("{\"autoCompact\":true}"));
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    auto *check = dialog.findChild<QCheckBox *>(QStringLiteral("useNativeGoalCheck"));
+    QVERIFY(check);
+    QVERIFY(check->isChecked());
+    QCOMPARE(dialog.goalResult().useNativeGoal, true);
 }
 
 QTEST_MAIN(TestSendWithGoalDialog)

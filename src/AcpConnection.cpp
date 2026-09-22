@@ -599,7 +599,7 @@ void AcpConnection::sendPrompt(const QString &text, const QList<QPair<QByteArray
     // ContentBlock), not `content`.
     params.insert(QStringLiteral("prompt"), content);
 
-    beginPrompt();
+    notePromptOpened();
     sendRequest(AcpProtocol::kMethodSessionPrompt, params,
                 [this](const QJsonValue &result, const QJsonValue &error) {
                     if (!error.isUndefined() && !error.isNull()) {
@@ -627,10 +627,39 @@ void AcpConnection::sendPrompt(const QString &text, const QList<QPair<QByteArray
                             emit requestFailed(QStringLiteral("The agent ended the turn without a response. Open Debug for details."));
                         }
                     }
-                    // session/prompt response is the authoritative end-of-turn
-                    // — regardless of whether the agent also sent a
-                    // session/update prompt_end notification.
-                    endPrompt();
+                    // session/prompt response is one request finishing. The turn
+                    // stays open while other prompts (native /goal) are still out.
+                    notePromptClosed();
+                });
+}
+
+void AcpConnection::sendSidePrompt(const QString &text)
+{
+    // Idle, or session not up yet: this is a normal turn. Only a prompt that
+    // arrives while one is already in flight must not steal begin/end.
+    if (!m_promptInFlight || m_sessionId.isEmpty()) {
+        sendPrompt(text, {});
+        return;
+    }
+
+    QJsonArray content;
+    {
+        AcpProtocol::AcpContentBlock t;
+        t.kind = AcpProtocol::AcpContentBlock::Kind::Text;
+        t.text = text;
+        content.append(AcpProtocol::contentBlockToJson(t));
+    }
+    QJsonObject params;
+    params.insert(QStringLiteral("sessionId"), m_sessionId);
+    params.insert(QStringLiteral("prompt"), content);
+
+    notePromptOpened();
+    sendRequest(AcpProtocol::kMethodSessionPrompt, params,
+                [this](const QJsonValue &result, const QJsonValue &error) {
+                    Q_UNUSED(result);
+                    if (!error.isUndefined() && !error.isNull())
+                        emit requestFailed(rpcErrorMessage(error));
+                    notePromptClosed();
                 });
 }
 
@@ -803,7 +832,7 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         m_promptProducedOutput = true;
         const QString text = AcpProtocol::contentBlockToChunkText(
             update.value(QStringLiteral("content")).toObject());
-        emit messageChunk(text);
+        emit messageChunk(text, update.value(QStringLiteral("messageId")).toString());
     } else if (kind == QLatin1String("agent_thought_chunk")) {
         m_promptProducedOutput = true;
         const QString text = AcpProtocol::contentBlockToChunkText(
@@ -1397,11 +1426,28 @@ void AcpConnection::beginPrompt()
 
 void AcpConnection::endPrompt()
 {
-    if (!m_promptInFlight) {
+    if (!m_promptInFlight)
         return;
-    }
+    if (m_openPrompts > 0)
+        return;
     m_promptInFlight = false;
     emit promptEnded();
+}
+
+void AcpConnection::notePromptOpened()
+{
+    if (m_openPrompts == 0 && m_promptInFlight)
+        m_openPrompts = 1;
+    if (m_openPrompts++ == 0)
+        beginPrompt();
+}
+
+void AcpConnection::notePromptClosed()
+{
+    if (m_openPrompts > 0)
+        --m_openPrompts;
+    if (m_openPrompts == 0)
+        endPrompt();
 }
 
 void AcpConnection::clearDebugLog()

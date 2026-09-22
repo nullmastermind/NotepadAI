@@ -71,6 +71,51 @@ public:
     // the existing turn, or refuses. Processing never sends (no stacked prompt).
     enum class LaunchAction : std::uint8_t { NeedComposer, Attach, Send };
     static LaunchAction launchAction(bool hasComposer, bool sessionHasHistory, bool processing);
+    static QStringList nativeGoalCommands(const QStringList &criteria);
+    static QString nativeGoalWorktreeInstruction()
+    {
+        return QStringLiteral(
+            "Create a new git worktree for this task. When finished, merge the result "
+            "into the current branch and remove the worktree to free disk space.");
+    }
+    // Agent echoes the wire suffix inside "Goal set:". Hide that sentence in the
+    // bubble only — session/prompt still sends the full text.
+    static QString nativeGoalDisplayText(const QString &text)
+    {
+        if (!text.trimmed().startsWith(QLatin1String("Goal set:")))
+            return text;
+        const QString instruction = nativeGoalWorktreeInstruction();
+        auto chopTrailingLine = [](const QString &src, int lineStart) {
+            QString out = src.left(lineStart);
+            while (!out.isEmpty() && out.back().isSpace())
+                out.chop(1);
+            return out;
+        };
+        const int at = text.lastIndexOf(instruction);
+        if (at >= 0 && text.mid(at + instruction.size()).trimmed().isEmpty()) {
+            int lineStart = at;
+            while (lineStart > 0 && text.at(lineStart - 1).isSpace()
+                   && text.at(lineStart - 1) != QLatin1Char('\n')
+                   && text.at(lineStart - 1) != QLatin1Char('\r'))
+                --lineStart;
+            if (lineStart > 0) {
+                const QChar prev = text.at(lineStart - 1);
+                if (prev == QLatin1Char('\n') || prev == QLatin1Char('\r'))
+                    return chopTrailingLine(text, lineStart);
+            }
+        }
+        // Streaming may deliver only a prefix of the injected sentence.
+        const int nl = text.lastIndexOf(QLatin1Char('\n'));
+        if (nl > 0) {
+            const QString last = text.mid(nl + 1).remove(QLatin1Char('\r'));
+            if (last.size() >= 16 && instruction.startsWith(last))
+                return chopTrailingLine(text, nl);
+        }
+        return text;
+    }
+    static QString nativeGoalWireText(const QString &goalCommand, bool injectWorktree);
+    static bool isNativeGoalSlash(const QString &text);
+    static void sendAutoCompactTo(AcpConnection *conn, AcpSessionModel *model);
 
     struct RestartedSession {
         QString sessionId;

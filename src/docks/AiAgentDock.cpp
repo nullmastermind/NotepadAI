@@ -188,6 +188,9 @@ void AiAgentDock::wireSlotSignals(Slot &slot)
     if (slot.connection) {
         connect(slot.connection, &AcpConnection::agentExited,
                 this, &AiAgentDock::onAgentExited);
+        connect(slot.connection, &AcpConnection::promptEnded,
+                this, &AiAgentDock::onNativeGoalPromptEnded,
+                Qt::UniqueConnection);
     }
     if (slot.view) {
         connect(slot.view, &AcpSessionView::retryRequested,
@@ -246,8 +249,19 @@ void AiAgentDock::stopGoalAgentIfActive()
     Slot *slot = slotForView(qobject_cast<AcpSessionView *>(sender()));
     if (!slot)
         slot = currentSlot();
+    if (slot)
+        slot->nativeAutoCompact = false;
     if (slot && slot->goal && slot->goal->status() == GoalAgent::Active)
         slot->goal->stop();
+}
+
+void AiAgentDock::onNativeGoalPromptEnded()
+{
+    Slot *slot = slotForConnection(sender());
+    if (!slot || !slot->nativeAutoCompact)
+        return;
+    slot->nativeAutoCompact = false;
+    GoalAgent::sendAutoCompactTo(slot->connection, slot->model);
 }
 
 void AiAgentDock::stopGoalForSession(const QString &sessionId)
@@ -1160,6 +1174,46 @@ void AiAgentDock::sendWithGoal()
     }
 
     const bool attach = action == GoalAgent::LaunchAction::Attach;
+    if (res.useNativeGoal) {
+        const QStringList goalCommands = GoalAgent::nativeGoalCommands(res.successCriteriaList);
+        if (goalCommands.isEmpty())
+            return;
+        if (!attach && slot->view) {
+            composerText = slot->view->takeInputText();
+            composerImages = slot->view->takeInputImages();
+        }
+        Slot *live = slotById(id);
+        if (!live || !live->connection || !live->model) {
+            if (!attach) {
+                live = slotById(id);
+                if (live && live->view)
+                    live->view->insertTextToInput(composerText);
+            }
+            return;
+        }
+        live->nativeAutoCompact = res.autoCompact;
+        if (!attach) {
+            QList<QPair<QByteArray, QString>> imageList;
+            imageList.reserve(composerImages.size());
+            for (const auto &p : composerImages)
+                imageList.append(p);
+            live->model->appendUserMessage(composerText, composerImages);
+            const QString wireText = live->view
+                                         ? live->view->applyNewWorktreeInstruction(composerText)
+                                         : composerText;
+            live->connection->sendPrompt(wireText, imageList);
+        }
+        for (const QString &goalCommand : goalCommands) {
+            live->model->appendUserMessage(goalCommand, {});
+            const QString wireGoal = live->view
+                                         ? live->view->applyNewWorktreeInstruction(goalCommand)
+                                         : goalCommand;
+            live->connection->sendSidePrompt(wireGoal);
+        }
+        emit inputFocused();
+        return;
+    }
+
     if (!attach && slot->view) {
         composerText = slot->view->takeInputText();
         composerImages = slot->view->takeInputImages();

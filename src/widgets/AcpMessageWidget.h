@@ -98,6 +98,7 @@ private:
     void refitBrowserHeight();
     void scheduleRefit();
     void applyCollapsed(bool collapsed);
+    void applyGoalSetFrame();
     void scheduleRerender();
     void flushRerender();
 

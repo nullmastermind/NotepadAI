@@ -42,6 +42,7 @@ public:
     QString agentId;
     int defaultMaxIterations = kDefaultMaxIterations;
     bool autoCompact = false;
+    bool useNativeGoal = true;
     QList<GoalPromptTemplate> promptTemplates;
     QString handoffTemplate;
     QString handoffAuthoringTemplate;

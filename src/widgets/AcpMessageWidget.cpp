@@ -18,6 +18,8 @@
 
 #include "AcpMessageWidget.h"
 
+#include "GoalAgent.h"
+
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QBrush>
@@ -77,7 +79,8 @@ constexpr const char *kFrameStyleUser =
 constexpr const char *kFrameStyleUserGoal =
     "AcpMessageWidget[role=\"user\"][goalAgent=\"true\"] { background: rgba(180, 140, 50, 48); border: 1px solid rgba(180, 140, 50, 80); border-radius: 6px; margin-left: 12px; }";
 constexpr const char *kFrameStyleAssistant =
-    "AcpMessageWidget[role=\"assistant\"] { background: palette(base); border-radius: 6px; }";
+    "AcpMessageWidget[role=\"assistant\"] { background: palette(base); border-radius: 6px; }"
+    "AcpMessageWidget[role=\"assistant\"][goalSet=\"true\"] { background: rgba(180, 140, 50, 48); border: 1px solid rgba(180, 140, 50, 80); border-radius: 6px; }";
 constexpr const char *kFrameStyleThought =
     "AcpMessageWidget[role=\"thought\"] { background: palette(base); border-radius: 6px; }";
 constexpr const char *kFrameStyleSystem =
@@ -275,6 +278,19 @@ void AcpMessageWidget::setFromGoalAgent(bool goal)
     style()->polish(this);
 }
 
+void AcpMessageWidget::applyGoalSetFrame()
+{
+    if (m_role != QLatin1String("assistant"))
+        return;
+    const bool goalSet = m_text.trimmed().startsWith(QLatin1String("Goal set:"));
+    if (property("goalSet").isValid() && property("goalSet").toBool() == goalSet)
+        return;
+    setProperty("goalSet", goalSet);
+    style()->unpolish(this);
+    style()->polish(this);
+    update();
+}
+
 void AcpMessageWidget::scheduleRerender()
 {
     if (m_rerenderTimer) {
@@ -404,6 +420,7 @@ void AcpMessageWidget::rescaleUserImages()
 
 void AcpMessageWidget::rerender()
 {
+    applyGoalSetFrame();
     if (m_role == QLatin1String("user")) {
         // User content is rendered directly in setContent() — block-by-block.
         return;
@@ -437,7 +454,7 @@ void AcpMessageWidget::rerender()
         // angle-bracket construct in model text (Surreal<Db>, vector<int>,
         // "a < b") is consumed as an inline HTML tag — it swallows everything
         // after it and only inline-code fragments survive, garbling the bubble.
-        tmp.setMarkdown(ensureHardBreaks(m_text),
+        tmp.setMarkdown(ensureHardBreaks(GoalAgent::nativeGoalDisplayText(m_text)),
                         QTextDocument::MarkdownFeatures(
                             QTextDocument::MarkdownDialectGitHub
                             | QTextDocument::MarkdownNoHTML));

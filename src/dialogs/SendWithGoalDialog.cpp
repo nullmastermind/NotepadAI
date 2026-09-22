@@ -62,6 +62,36 @@ SendWithGoalDialog::SendWithGoalDialog(AcpAgentRegistry *registry,
             QString::fromUtf8(QJsonDocument(goalSettings.toJson()).toJson(QJsonDocument::Compact)));
     });
     footerLayout->addWidget(m_autoCompactCheck);
+    m_useNativeGoalCheck = new QCheckBox(tr("Use Native Goal"), this);
+    m_useNativeGoalCheck->setObjectName(QStringLiteral("useNativeGoalCheck"));
+    m_useNativeGoalCheck->setToolTip(
+        tr("Send /goal to the ACP agent after your prompt. No goal-agent UI."));
+    m_useNativeGoalCheck->setChecked(true);
+    if (m_settings) {
+        const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
+        if (!settingsJson.isEmpty()) {
+            const GoalAgentSettings goalSettings = GoalAgentSettings::fromJson(
+                QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+            m_useNativeGoalCheck->setChecked(goalSettings.useNativeGoal);
+        }
+    }
+    connect(m_useNativeGoalCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        if (!m_settings)
+            return;
+        const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
+        GoalAgentSettings goalSettings;
+        if (!settingsJson.isEmpty()) {
+            goalSettings = GoalAgentSettings::fromJson(
+                QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+        }
+        if (goalSettings.useNativeGoal == checked)
+            return;
+        goalSettings.useNativeGoal = checked;
+        m_settings->setValue(
+            QStringLiteral("Ai/GoalAgentSettings"),
+            QString::fromUtf8(QJsonDocument(goalSettings.toJson()).toJson(QJsonDocument::Compact)));
+    });
+    footerLayout->addWidget(m_useNativeGoalCheck);
     footerLayout->addStretch();
     auto *cancelBtn = new QPushButton(tr("Cancel"), this);
     connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
@@ -129,5 +159,6 @@ SendWithGoalResult SendWithGoalDialog::goalResult() const
     r.maxIterations = gcr.maxIterations;
     r.promptTemplateId = gcr.promptTemplateId;
     r.autoCompact = m_autoCompactCheck && m_autoCompactCheck->isChecked();
+    r.useNativeGoal = !m_useNativeGoalCheck || m_useNativeGoalCheck->isChecked();
     return r;
 }

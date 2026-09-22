@@ -167,6 +167,7 @@ QJsonObject GoalAgentSettings::toJson() const
         {QStringLiteral("agentId"), agentId},
         {QStringLiteral("defaultMaxIterations"), defaultMaxIterations},
         {QStringLiteral("autoCompact"), autoCompact},
+        {QStringLiteral("useNativeGoal"), useNativeGoal},
         {QStringLiteral("promptTemplates"), tplArr},
         {QStringLiteral("criteriaPresets"), presetArr},
         {QStringLiteral("customApiBaseUrl"), customApiBaseUrl},
@@ -180,6 +181,7 @@ GoalAgentSettings GoalAgentSettings::fromJson(const QJsonObject &obj)
     s.agentId = obj.value(QStringLiteral("agentId")).toString();
     s.defaultMaxIterations = obj.value(QStringLiteral("defaultMaxIterations")).toInt(kDefaultMaxIterations);
     s.autoCompact = obj.value(QStringLiteral("autoCompact")).toBool(false);
+    s.useNativeGoal = obj.value(QStringLiteral("useNativeGoal")).toBool(true);
     const QJsonValue urlVal = obj.value(QStringLiteral("customApiBaseUrl"));
     s.customApiBaseUrl = urlVal.isString() ? urlVal.toString() : QString();
     const QJsonValue modelVal = obj.value(QStringLiteral("customApiModel"));

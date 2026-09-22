@@ -107,9 +107,12 @@ public:
         adoptChannel(channel);
     }
 
+    void setSessionIdForTest(const QString &id) { m_sessionId = id; }
+
 public slots:
     // Outbound request slots — wrappers that build params and dispatch.
     void sendPrompt(const QString &text, const QList<QPair<QByteArray, QString>> &images);
+    void sendSidePrompt(const QString &text);
     void cancelPrompt();
     void setMode(const QString &id);
     void setModel(const QString &id);
@@ -129,7 +132,7 @@ signals:
                      const QList<AcpProtocol::AcpConfigOption> &configOptions);
 
     // Inbound notification fan-out (typed Qt signals).
-    void messageChunk(const QString &chunk);
+    void messageChunk(const QString &chunk, const QString &messageId);
     void thoughtChunk(const QString &chunk);
     void toolCallReceived(const AcpProtocol::AcpToolCall &call);
     void toolCallUpdated(const AcpProtocol::AcpToolCallUpdate &update);
@@ -216,6 +219,8 @@ private:
     // promptStarted/promptEnded per turn regardless of which agent emits what.
     void beginPrompt();
     void endPrompt();
+    void notePromptOpened();
+    void notePromptClosed();
 
     // Append a single line to the debug ring buffer and also forward to the
     // lcAcp logging category. Safe to call from anywhere on the owning thread.
@@ -273,6 +278,7 @@ private:
     };
     QList<PendingPrompt> m_pendingPrompts;
     bool m_promptInFlight = false;
+    int m_openPrompts = 0;
     bool m_promptProducedOutput = false;
 
     static constexpr int kDebugLogMaxLines = 2000;

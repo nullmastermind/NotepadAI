@@ -487,6 +487,15 @@ void AcpSessionModel::onInitialized(const AcpAgentInfo &info,
     // No persistence for metadata-only events.
 }
 
+void AcpSessionModel::onMessageChunk(const QString &text, const QString &messageId)
+{
+    if (!messageId.isEmpty() && messageId != m_streamingAssistantMessageId)
+        m_streamingAssistantMessageIndex = -1;
+    if (!messageId.isEmpty())
+        m_streamingAssistantMessageId = messageId;
+    onMessageChunk(text);
+}
+
 void AcpSessionModel::onMessageChunk(const QString &text)
 {
     // Auto-close any active streaming thought.
@@ -778,6 +787,7 @@ void AcpSessionModel::onPromptStarted()
 void AcpSessionModel::onPromptEnded()
 {
     m_isProcessing = false;
+    m_streamingAssistantMessageId.clear();
     const int turnGroup = m_currentGroupId;
     m_streamingAssistantMessageIndex = -1;
     m_streamingThoughtMessageIndex = -1;

@@ -156,6 +156,36 @@ GoalAgent::LaunchAction GoalAgent::launchAction(bool hasComposer, bool sessionHa
     return LaunchAction::NeedComposer;
 }
 
+QStringList GoalAgent::nativeGoalCommands(const QStringList &criteria)
+{
+    QStringList commands;
+    commands.reserve(criteria.size());
+    for (const QString &criterion : criteria) {
+        const QString row = criterion.trimmed();
+        if (!row.isEmpty())
+            commands.append(QStringLiteral("/goal ") + row);
+    }
+    return commands;
+}
+
+QString GoalAgent::nativeGoalWireText(const QString &goalCommand, bool injectWorktree)
+{
+    if (!injectWorktree)
+        return goalCommand;
+    QString instruction = nativeGoalWorktreeInstruction();
+    if (goalCommand.isEmpty())
+        return instruction;
+    return goalCommand + QLatin1String("\n\n") + instruction;
+}
+
+bool GoalAgent::isNativeGoalSlash(const QString &text)
+{
+    const QString trimmed = text.trimmed();
+    if (!trimmed.startsWith(QLatin1String("/goal")))
+        return false;
+    return trimmed.size() == 5 || trimmed.at(5).isSpace();
+}
+
 void GoalAgent::setTargetSession(AcpConnection *conn, AcpSessionModel *model)
 {
     m_targetConnection = conn;
@@ -193,14 +223,16 @@ void GoalAgent::maybeSendAutoCompact()
 {
     if (!m_autoCompact)
         return;
-    if (!m_targetConnection) {
-        logDebug(QStringLiteral("auto compact skipped: no target connection"));
+    sendAutoCompactTo(m_targetConnection, m_targetModel);
+}
+
+void GoalAgent::sendAutoCompactTo(AcpConnection *conn, AcpSessionModel *model)
+{
+    if (!conn)
         return;
-    }
-    logDebug(QStringLiteral("auto compact: sending /compact to target"));
-    if (m_targetModel)
-        m_targetModel->appendUserMessage(QStringLiteral("/compact"), {}, /*fromGoalAgent=*/true);
-    m_targetConnection->sendPrompt(QStringLiteral("/compact"), {});
+    if (model)
+        model->appendUserMessage(QStringLiteral("/compact"), {}, /*fromGoalAgent=*/true);
+    conn->sendPrompt(QStringLiteral("/compact"), {});
 }
 
 void GoalAgent::destroyJudgeConnection()

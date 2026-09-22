@@ -31,6 +31,7 @@ class TestAcpSessionModel : public QObject
 private slots:
     void emptySessionDoesNotPersist();
     void streamingConcatenation();
+    void messageIdChange_startsNewBubble();
     void promptEndedClosesStreaming();
     void thoughtStreamAutoClosesOnAssistantChunk();
     void toolCallMerge();
@@ -76,6 +77,19 @@ void TestAcpSessionModel::streamingConcatenation()
     QCOMPARE(model.messages().first().content.first().text, QStringLiteral("Hello, world"));
     QCOMPARE(appended.count(), 1);
     QCOMPARE(chunkSpy.count(), 1);
+}
+
+void TestAcpSessionModel::messageIdChange_startsNewBubble()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("proj"), tmp.path());
+
+    model.onMessageChunk(QStringLiteral("안녕하세요!"), QStringLiteral("54a1d2a8"));
+    model.onMessageChunk(QStringLiteral("Goal set: say hi in japanese"), QStringLiteral("82bf3ee5"));
+
+    QCOMPARE(model.messages().size(), 2);
+    QCOMPARE(model.messages().at(0).content.first().text, QStringLiteral("안녕하세요!"));
+    QCOMPARE(model.messages().at(1).content.first().text, QStringLiteral("Goal set: say hi in japanese"));
 }
 
 void TestAcpSessionModel::promptEndedClosesStreaming()

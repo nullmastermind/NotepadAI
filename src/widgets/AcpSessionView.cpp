@@ -30,6 +30,7 @@
 #include "AcpUsageIndicator.h"
 #include "AiAgentDock.h"
 #include "ApplicationSettings.h"
+#include "GoalAgent.h"
 #include "NotepadNextApplication.h"
 #include "ai/CredentialStore.h"
 #include "ai/PromptImprover.h"
@@ -702,14 +703,12 @@ void AcpSessionView::buildUi()
 
     // Send-button enable state tracks attachment list non-empty / input text.
     connect(m_input, &QPlainTextEdit::textChanged, this, [this]() {
-        const bool hasContent = !m_input->toPlainText().trimmed().isEmpty() || m_attachmentList->isNonEmpty();
-        m_sendBtn->setEnabled(hasContent && (!m_model || !m_model->isProcessing()));
+        updateSendButton();
         filterCommandPopup();
         updateImproveButtonState();
     });
     connect(m_attachmentList, &AcpImageAttachmentList::contentsChanged, this, [this]() {
-        const bool hasContent = !m_input->toPlainText().trimmed().isEmpty() || m_attachmentList->isNonEmpty();
-        m_sendBtn->setEnabled(hasContent && (!m_model || !m_model->isProcessing()));
+        updateSendButton();
     });
     connect(m_attachmentList, &AcpImageAttachmentList::imageRejected, this, [this](const QString &reason) {
         setBanner(reason, BannerKind::Warning);
@@ -1496,11 +1495,8 @@ void AcpSessionView::onCurrentModeChanged(const QString &modeId)
 
 void AcpSessionView::onIsProcessingChanged(bool processing)
 {
-    if (m_sendBtn) {
-        const bool hasContent = !m_input->toPlainText().trimmed().isEmpty() || m_attachmentList->isNonEmpty();
-        m_sendBtn->setEnabled(!processing && hasContent);
-        m_sendBtn->setVisible(!processing);
-    }
+    if (m_sendBtn)
+        updateSendButton();
     if (m_cancelBtn) {
         m_cancelBtn->setEnabled(processing);
         m_cancelBtn->setVisible(processing);
@@ -1718,24 +1714,44 @@ void AcpSessionView::clearGoalStatus()
 
 QString AcpSessionView::applyNewWorktreeInstruction(const QString &displayText) const
 {
-    if (!m_newWorktreeCheck || !m_newWorktreeCheck->isChecked()) {
+    if (!m_newWorktreeCheck || !m_newWorktreeCheck->isChecked())
         return displayText;
-    }
-    QString instruction = QStringLiteral(
-        "Create a new git worktree for this task. When finished, merge the result "
-        "into the current branch and remove the worktree to free disk space.");
-    if (displayText.isEmpty()) {
-        return instruction;
-    }
-    return displayText + QLatin1String("\n\n") + instruction;
+    return GoalAgent::nativeGoalWireText(displayText, true);
+}
+
+void AcpSessionView::updateSendButton()
+{
+    if (!m_sendBtn)
+        return;
+    const QString text = m_input ? m_input->toPlainText() : QString();
+    const bool hasContent = !text.trimmed().isEmpty()
+        || (m_attachmentList && m_attachmentList->isNonEmpty());
+    const bool processing = m_model && m_model->isProcessing();
+    const bool sideGoal = GoalAgent::isNativeGoalSlash(text);
+    const bool canSend = hasContent && (!processing || sideGoal);
+    m_sendBtn->setEnabled(canSend);
+    m_sendBtn->setVisible(!processing || sideGoal);
 }
 
 void AcpSessionView::onSendClicked()
 {
     if (!m_connection || !m_model) return;
-    if (m_model->isProcessing()) return;
 
     const QString text = m_input->toPlainText().trimmed();
+    const bool processing = m_model->isProcessing();
+    if (processing) {
+        if (!GoalAgent::isNativeGoalSlash(text))
+            return;
+        m_model->appendUserMessage(text, {});
+        m_connection->sendSidePrompt(applyNewWorktreeInstruction(text));
+        m_input->clear();
+        updateSendButton();
+        emit inputFocused();
+        m_stickToBottom = true;
+        scrollToBottomDeferred();
+        return;
+    }
+
     QVector<QPair<QByteArray, QString>> images = m_attachmentList->takeAll();
     if (text.isEmpty() && images.isEmpty()) return;
 
