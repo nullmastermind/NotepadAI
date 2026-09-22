@@ -52,6 +52,7 @@ qt_add_executable(NotepadAI
 	FileDialogHelpers.h
 	FileIndexCache.h
 	FileWatcher.h
+	WatchedPathDelete.h
 	Finder.h
 	FocusWatcher.h
 	HtmlConverter.h
@@ -152,6 +153,7 @@ qt_add_executable(NotepadAI
 	EditorPrintPreviewRenderer.cpp
 	FileDialogHelpers.cpp
 	FileWatcher.cpp
+	WatchedPathDelete.cpp
 	Finder.cpp
 	HtmlConverter.cpp
 	HtmlPreviewWidget.cpp

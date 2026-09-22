@@ -1934,3 +1934,35 @@ if(NOTEPADAI_SSH_INTEGRATION AND EXISTS ${CMAKE_SOURCE_DIR}/tests/test_ssh_integ
     endif()
     add_test(NAME SshIntegration COMMAND test_ssh_integration)
 endif()
+
+# --- DebugLogDock: qWarning from a non-GUI thread must not touch the log
+#     widget until the GUI thread processes events. Delete Permanently on a
+#     watched folder makes QFileSystemWatcher's engine thread qErrnoWarning;
+#     a synchronous appendPlainText from that thread crashes in HarfBuzz. ---
+qt_add_executable(test_debug_log_dock test_debug_log_dock.cpp)
+target_include_directories(test_debug_log_dock PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/docks
+)
+target_link_libraries(test_debug_log_dock PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_debug_log_dock PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/docks/DebugLogDock.cpp
+    ${CMAKE_SOURCE_DIR}/src/docks/DebugLogDock.h
+    ${CMAKE_SOURCE_DIR}/src/docks/DebugLogDock.ui
+    ${CMAKE_SOURCE_DIR}/src/DebugManager.cpp
+    ${CMAKE_SOURCE_DIR}/src/DebugManager.h
+)
+add_test(NAME DebugLogDock COMMAND test_debug_log_dock)
+
+# --- WatchedPathDelete: deleting a directory the file model is watching must
+#     not leave the watch armed. Qt's watcher thread otherwise qErrnoWarning
+#     "FindNextChangeNotification failed … Access is denied" (and the watch
+#     handle can lock the delete, QTBUG-65683). ---
+qt_add_executable(test_watched_path_delete test_watched_path_delete.cpp)
+target_include_directories(test_watched_path_delete PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_watched_path_delete PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_sources(test_watched_path_delete PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/WatchedPathDelete.cpp
+    ${CMAKE_SOURCE_DIR}/src/WatchedPathDelete.h
+)
+add_test(NAME WatchedPathDelete COMMAND test_watched_path_delete)

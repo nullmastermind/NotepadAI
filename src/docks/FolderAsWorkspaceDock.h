@@ -99,6 +99,11 @@ public:
     // Returns true for each selected item that is a directory, parallel to selectedPaths().
     QList<bool> selectedAreDirs() const;
 
+    // Local workspaces only. Drops the file-model watch before unlink so
+    // Windows does not qErrnoWarning from the watcher thread. Callers must
+    // not use this for SSH paths — a remote dock has no local model.
+    bool removeLocalPath(const QString &path, bool isDir);
+
     // --- SSH connection-state surface (D10 / Batch H) -----------------------
     // The banner is an inline, palette-driven, keyboard-accessible row at the top
     // of the dock that surfaces the live SSH connection lifecycle without ever

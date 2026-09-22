@@ -3497,7 +3497,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         deleteMenu->addAction(moveToTrash);
 
         auto *deletePermanently = new QAction(tr("Delete Permanently"), deleteMenu);
-        connect(deletePermanently, &QAction::triggered, this, [this, dock, absPath, isSshDock, isDir]() {
+        connect(deletePermanently, &QAction::triggered, this, [this, dock = QPointer<FolderAsWorkspaceDock>(dock), absPath, isSshDock, isDir]() {
             const QString displayPath = isSshDock ? remote::parseSshUri(absPath).remotePath : absPath;
             const QString name = QFileInfo(displayPath).fileName();
             if (isSshDock) {
@@ -3530,13 +3530,13 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 if (QMessageBox::warning(this, tr("Delete Permanently"), msg,
                         QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
                     return;
-                bool ok;
-                if (isDir) {
-                    QDir dir(absPath);
-                    ok = dir.removeRecursively();
-                } else {
+                bool ok = false;
+                if (dock)
+                    ok = dock->removeLocalPath(absPath, isDir);
+                else if (isDir)
+                    ok = QDir(absPath).removeRecursively();
+                else
                     ok = QFile::remove(absPath);
-                }
                 if (!ok) {
                     QMessageBox::warning(this, tr("Delete Permanently"),
                         tr("Could not delete \"%1\".").arg(name));

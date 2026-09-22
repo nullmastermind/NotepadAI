@@ -38,6 +38,7 @@
 #include "../widgets/TransferProgressBar.h"
 #include "../dialogs/TransferLogDialog.h"
 #include "FolderZipTransfer.h"
+#include "WatchedPathDelete.h"
 #include "ui_FolderAsWorkspaceDock.h"
 
 #include <QApplication>
@@ -580,6 +581,11 @@ void FolderAsWorkspaceDock::setupZipTransfer()
                 closeZipProgress();
                 QMessageBox::warning(this->window(), tr("Zip"), message);
             });
+}
+
+bool FolderAsWorkspaceDock::removeLocalPath(const QString &path, bool isDir)
+{
+    return WatchedPathDelete::remove(model, path, isDir);
 }
 
 QStringList FolderAsWorkspaceDock::selectedPaths() const{

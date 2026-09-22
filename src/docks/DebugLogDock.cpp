@@ -21,18 +21,26 @@
 #include "ui_DebugLogDock.h"
 #include "DebugManager.h"
 
+#include <QCoreApplication>
 #include <QScrollBar>
 
 static QPlainTextEdit *output = Q_NULLPTR;
 
 static void debugLogDockMessageHandler(const QString &msg)
 {
-    // The handler stays installed for the process lifetime, but the dock can be
-    // destroyed first (qDebug calls during MainWindow teardown still hit this).
-    // Guard against the freed widget; the destructor clears `output`.
-    if (output != Q_NULLPTR) {
-        output->appendPlainText(msg);
-    }
+    // qWarning reaches this from whatever thread emitted it. Deleting a folder
+    // that QFileSystemModel is watching makes QWindowsFileSystemWatcherEngineThread
+    // qErrnoWarning ("FindNextChangeNotification failed … Access is denied").
+    // appendPlainText on that thread crashes in HarfBuzz (QTextDocument is not
+    // thread-safe). Always post to the GUI thread. QueuedConnection also stops a
+    // warning emitted during layout from re-entering the same document.
+    QCoreApplication *app = QCoreApplication::instance();
+    if (!app)
+        return;
+    QMetaObject::invokeMethod(app, [msg]() {
+        if (output != nullptr)
+            output->appendPlainText(msg);
+    }, Qt::QueuedConnection);
 }
 
 DebugLogDock::DebugLogDock(QWidget *parent) :
