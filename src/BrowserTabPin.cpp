@@ -7,11 +7,14 @@
 
 #include "BrowserTabPin.h"
 
+#include "DockManager.h"
+#include "DockWidget.h"
 #include "DockWidgetTab.h"
 
 #include <QLabel>
 #include <QLayout>
 #include <QList>
+#include <QMouseEvent>
 #include <QSpacerItem>
 #include <QStyle>
 #include <QVariant>
@@ -87,6 +90,53 @@ void applyPinnedLayoutBalance(QWidget *tab, bool pinned)
 
 } // namespace
 
+namespace {
+
+// Parent to the tab so the filter dies with it. Acts only while nnPinned is
+// set; unpinned middle-clicks fall through to ADS.
+class PinnedTabMiddleClickCloser : public QObject
+{
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (event->type() != QEvent::MouseButtonRelease)
+            return false;
+
+        auto *tab = qobject_cast<ads::CDockWidgetTab *>(watched);
+        if (!tab)
+            return false;
+
+        auto *me = static_cast<QMouseEvent *>(event);
+        if (me->button() != Qt::MiddleButton)
+            return false;
+
+        ads::CDockWidget *dw = tab->dockWidget();
+        if (!dw || !dw->property("nnPinned").toBool())
+            return false;
+        if (!ads::CDockManager::testConfigFlag(ads::CDockManager::MiddleMouseButtonClosesTab))
+            return false;
+        // Release outside the tab cancels, same as ADS.
+        if (!tab->rect().contains(me->position().toPoint()))
+            return false;
+
+        dw->requestCloseDockWidget();
+        return true;
+    }
+};
+
+} // namespace
+
+void installPinnedTabMiddleClickClose(QWidget *tab)
+{
+    auto *dockTab = qobject_cast<ads::CDockWidgetTab *>(tab);
+    if (!dockTab || dockTab->property("nnPinMiddleClick").toBool())
+        return;
+    dockTab->setProperty("nnPinMiddleClick", true);
+    dockTab->installEventFilter(new PinnedTabMiddleClickCloser(dockTab));
+}
 
 void applyBrowserTabPinChrome(QWidget *tab, bool pinned, const QString &fullTitle)
 {

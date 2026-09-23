@@ -111,6 +111,7 @@ static void wireDockTabPinRefresh(ads::CDockWidget *dw)
     ads::CDockWidgetTab *tab = dw->tabWidget();
     if (!tab)
         return;
+    installPinnedTabMiddleClickClose(tab);
     QObject::connect(tab, &ads::CDockWidgetTab::activeTabChanged, dw, [dw]() {
         refreshDockTabPinChrome(dw);
     });

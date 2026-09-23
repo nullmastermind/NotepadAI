@@ -5,9 +5,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <QCoreApplication>
 #include <QIcon>
 #include <QLabel>
 #include <QPixmap>
+#include <QPointer>
 #include <QtTest>
 #include <QWidget>
 
@@ -161,6 +163,64 @@ private slots:
         QVERIFY(close->isHidden());
         QCOMPARE(dw->tabWidget()->text(), QString());
         QCOMPARE(dw->tabWidget()->toolTip(), QStringLiteral("Amazon"));
+    }
+
+    void pin_middleClickClosesDespiteClosableCleared()
+    {
+        ads::CDockManager::setConfigFlag(ads::CDockManager::MiddleMouseButtonClosesTab, true);
+        ads::CDockManager manager;
+        manager.resize(800, 400);
+        manager.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&manager));
+
+        auto *dw = manager.createDockWidget(QStringLiteral("Pinned"));
+        dw->setWidget(new QWidget);
+        dw->setFeature(ads::CDockWidget::DockWidgetDeleteOnClose, true);
+        manager.addDockWidget(ads::CenterDockWidgetArea, dw);
+        dw->setProperty("nnPinned", true);
+        dw->setFeature(ads::CDockWidget::DockWidgetClosable, false);
+        applyBrowserTabPinChrome(dw->tabWidget(), true, QStringLiteral("Pinned"));
+        QPixmap pm(16, 16);
+        pm.fill(Qt::blue);
+        dw->tabWidget()->setIcon(QIcon(pm));
+        installPinnedTabMiddleClickClose(dw->tabWidget());
+
+        QWidget *icon = nullptr;
+        for (QLabel *label : dw->tabWidget()->findChildren<QLabel *>()) {
+            if (label->objectName() != QLatin1String("dockWidgetTabLabel") && label->isVisible())
+                icon = label;
+        }
+        QVERIFY(icon);
+
+        QPointer<ads::CDockWidget> guard(dw);
+        // Pinned hit target is the favicon, not the tab frame. Window dispatch
+        // delivers the release to the label; Qt then propagates the ignored
+        // event to the tab, which is where ADS (and this filter) see it.
+        QTest::mouseClick(icon, Qt::MiddleButton);
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QVERIFY(guard.isNull());
+    }
+
+    void unpinned_middleClickFilterDoesNotCloseNonClosable()
+    {
+        ads::CDockManager::setConfigFlag(ads::CDockManager::MiddleMouseButtonClosesTab, true);
+        ads::CDockManager manager;
+        manager.resize(800, 400);
+        manager.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&manager));
+
+        auto *dw = manager.createDockWidget(QStringLiteral("Open"));
+        dw->setWidget(new QWidget);
+        dw->setFeature(ads::CDockWidget::DockWidgetDeleteOnClose, true);
+        manager.addDockWidget(ads::CenterDockWidgetArea, dw);
+        dw->setFeature(ads::CDockWidget::DockWidgetClosable, false);
+        installPinnedTabMiddleClickClose(dw->tabWidget());
+
+        QPointer<ads::CDockWidget> guard(dw);
+        QTest::mouseClick(dw->tabWidget(), Qt::MiddleButton, Qt::NoModifier,
+                          dw->tabWidget()->rect().center());
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QVERIFY(!guard.isNull());
     }
 
     void pin_withIcon_doesNotClipIcon()

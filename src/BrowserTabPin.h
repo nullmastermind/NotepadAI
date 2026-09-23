@@ -45,3 +45,8 @@ QStringList pruneStaleMiniAppPinKeys(const QStringList &keys, const QStringList 
 // symmetric layout margins plus QSS padding/border. Pin sets min and max to
 // this so the favicon is centered, not left-heavy.
 int browserTabPinnedMaxWidth(const QWidget *tab);
+
+// ADS middle-click close is gated on DockWidgetClosable, which pin clears so
+// the close button stays hidden. Install once per browser/mini-app tab so a
+// pinned tab still closes on middle-click. No-op if `tab` is not a dock tab.
+void installPinnedTabMiddleClickClose(QWidget *tab);
