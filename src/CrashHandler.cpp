@@ -2,7 +2,10 @@
  * NotepadADE addition: crash reporting.
  *
  * Design (locked at plan v4):
- *  - Primary path: cwd/crash_report.txt; fallback: %APPDATA%/NotepadAI/crashes
+ *  - Primary path: <Documents>/crash_report.txt (Windows CSIDL_PERSONAL,
+ *    POSIX $XDG_DOCUMENTS_DIR or ~/Documents). Override with
+ *    NOTEPADAI_CRASH_REPORT_DIR (directory, created if missing — used by
+ *    scripts/test-crash-handler.sh). Fallback: %APPDATA%/NotepadAI/crashes
  *    on Windows or $XDG_DATA_HOME/NotepadAI/crashes on POSIX. Both resolved at
  *    install() time via raw Win32 / POSIX (no Qt dependency, no allocation
  *    inside handlers).
@@ -235,24 +238,39 @@ void appendUuid(char *buf, std::size_t cap, std::size_t *pos)
 }
 
 // ---- Path resolution (install-time only, may allocate / call OS APIs) --
-void captureCwdPath()
+void setPrimaryInDir(const char *dir)
 {
-    char cwd[kPathMax - 32] = {0};
+    if (!dir || !dir[0]) {
+        g_primary_path[0] = '\0';
 #ifdef _WIN32
-    const DWORD n = GetCurrentDirectoryA(static_cast<DWORD>(sizeof(cwd)), cwd);
-    if (n == 0 || n >= sizeof(cwd)) { g_primary_path[0] = '\0'; return; }
+        g_minidump_path[0] = '\0';
+#endif
+        return;
+    }
     std::size_t p = 0;
-    appendStr(g_primary_path, kPathMax, &p, cwd);
+#ifdef _WIN32
+    appendStr(g_primary_path, kPathMax, &p, dir);
     appendStr(g_primary_path, kPathMax, &p, "\\crash_report.txt");
     std::size_t mp = 0;
-    appendStr(g_minidump_path, kPathMax, &mp, cwd);
+    appendStr(g_minidump_path, kPathMax, &mp, dir);
     appendStr(g_minidump_path, kPathMax, &mp, "\\crash.dmp");
 #else
-    if (getcwd(cwd, sizeof(cwd)) == nullptr) { g_primary_path[0] = '\0'; return; }
-    std::size_t p = 0;
-    appendStr(g_primary_path, kPathMax, &p, cwd);
+    appendStr(g_primary_path, kPathMax, &p, dir);
     appendStr(g_primary_path, kPathMax, &p, "/crash_report.txt");
 #endif
+}
+
+// Copies src into dst, dropping trailing slashes. Returns false if empty.
+bool copyDirStripped(char *dst, std::size_t cap, const char *src)
+{
+    std::size_t p = 0;
+    dst[0] = '\0';
+    if (!src || !src[0]) return false;
+    appendStr(dst, cap, &p, src);
+    while (p > 0 && (dst[p - 1] == '/' || dst[p - 1] == '\\')) {
+        dst[--p] = '\0';
+    }
+    return p > 0;
 }
 
 #ifdef _WIN32
@@ -286,6 +304,49 @@ void ensureDirRecursive(const char *dir)
     }
 }
 #endif
+
+void capturePrimaryPath()
+{
+    char dir[kPathMax - 32] = {0};
+
+    if (const char *overrideDir = std::getenv("NOTEPADAI_CRASH_REPORT_DIR");
+        overrideDir && overrideDir[0]) {
+        if (!copyDirStripped(dir, sizeof(dir), overrideDir)) {
+            setPrimaryInDir(nullptr);
+            return;
+        }
+        ensureDirRecursive(dir);
+        setPrimaryInDir(dir);
+        return;
+    }
+
+#ifdef _WIN32
+    char docs[MAX_PATH] = {0};
+    if (!SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_PERSONAL, nullptr, 0, docs))
+        || docs[0] == '\0') {
+        setPrimaryInDir(nullptr);
+        return;
+    }
+    setPrimaryInDir(docs);
+#else
+    const char *xdgDocs = std::getenv("XDG_DOCUMENTS_DIR");
+    const char *home    = std::getenv("HOME");
+    if (xdgDocs && xdgDocs[0]) {
+        if (!copyDirStripped(dir, sizeof(dir), xdgDocs)) {
+            setPrimaryInDir(nullptr);
+            return;
+        }
+        setPrimaryInDir(dir);
+    } else if (home && home[0]) {
+        std::size_t p = 0;
+        appendStr(dir, sizeof(dir), &p, home);
+        appendStr(dir, sizeof(dir), &p, "/Documents");
+        setPrimaryInDir(dir);
+    } else {
+        setPrimaryInDir(nullptr);
+    }
+#endif
+}
 
 void captureFallbackPath()
 {
@@ -434,16 +495,25 @@ void writeFooter(CrashFile *cf)
 
 void emitStderrHint()
 {
-    static const char msg[] = "[CRASH] see crash_report.txt\n";
+    const char *path = g_primary_path[0] ? g_primary_path : g_fallback_path;
+    static const char prefix[] = "[CRASH] see ";
+    static const char fallbackName[] = "crash_report.txt";
+    static const char nl[] = "\n";
+    const char *body = (path && path[0]) ? path : fallbackName;
+    std::size_t n = 0;
+    while (body[n]) ++n;
 #ifdef _WIN32
     HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
     if (h && h != INVALID_HANDLE_VALUE) {
         DWORD w = 0;
-        WriteFile(h, msg, static_cast<DWORD>(sizeof(msg) - 1), &w, nullptr);
+        WriteFile(h, prefix, static_cast<DWORD>(sizeof(prefix) - 1), &w, nullptr);
+        WriteFile(h, body, static_cast<DWORD>(n), &w, nullptr);
+        WriteFile(h, nl, 1, &w, nullptr);
     }
 #else
-    const ssize_t r = ::write(STDERR_FILENO, msg, sizeof(msg) - 1);
-    (void)r;
+    (void)::write(STDERR_FILENO, prefix, sizeof(prefix) - 1);
+    (void)::write(STDERR_FILENO, body, n);
+    (void)::write(STDERR_FILENO, nl, 1);
 #endif
 }
 
@@ -1025,7 +1095,7 @@ const char *minidumpPath()
 
 void install()
 {
-    captureCwdPath();
+    capturePrimaryPath();
     captureFallbackPath();
     rotateIfLarge(g_primary_path);
     rotateIfLarge(g_fallback_path);
