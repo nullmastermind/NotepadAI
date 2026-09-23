@@ -71,3 +71,5 @@ __cmake_systeminformation
 .ninja_lock
 .ninja_log
 build.ninja
+
+installer
