@@ -93,6 +93,35 @@ SendWithGoalDialog::SendWithGoalDialog(AcpAgentRegistry *registry,
             QString::fromUtf8(QJsonDocument(goalSettings.toJson()).toJson(QJsonDocument::Compact)));
     });
     footerLayout->addWidget(m_useNativeGoalCheck);
+    m_prefixGoalCheck = new QCheckBox(tr("Prefix /goal"), this);
+    m_prefixGoalCheck->setObjectName(QStringLiteral("prefixGoalCheck"));
+    m_prefixGoalCheck->setToolTip(
+        tr("Prepend /goal to messages the goal-agent sends to the target."));
+    if (m_settings) {
+        const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
+        if (!settingsJson.isEmpty()) {
+            const GoalAgentSettings goalSettings = GoalAgentSettings::fromJson(
+                QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+            m_prefixGoalCheck->setChecked(goalSettings.prefixGoal);
+        }
+    }
+    connect(m_prefixGoalCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        if (!m_settings)
+            return;
+        const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
+        GoalAgentSettings goalSettings;
+        if (!settingsJson.isEmpty()) {
+            goalSettings = GoalAgentSettings::fromJson(
+                QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+        }
+        if (goalSettings.prefixGoal == checked)
+            return;
+        goalSettings.prefixGoal = checked;
+        m_settings->setValue(
+            QStringLiteral("Ai/GoalAgentSettings"),
+            QString::fromUtf8(QJsonDocument(goalSettings.toJson()).toJson(QJsonDocument::Compact)));
+    });
+    footerLayout->addWidget(m_prefixGoalCheck);
     footerLayout->addStretch();
     auto *cancelBtn = new QPushButton(tr("Cancel"), this);
     connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
@@ -167,5 +196,6 @@ SendWithGoalResult SendWithGoalDialog::goalResult() const
     r.promptTemplateId = gcr.promptTemplateId;
     r.autoCompact = m_autoCompactCheck && m_autoCompactCheck->isChecked();
     r.useNativeGoal = !m_useNativeGoalCheck || m_useNativeGoalCheck->isChecked();
+    r.prefixGoal = m_prefixGoalCheck && m_prefixGoalCheck->isChecked();
     return r;
 }

@@ -40,11 +40,16 @@ bool GoalActionParser::parse(const QString &response, GoalAction *out, ParseErro
     return true;
 }
 
+bool GoalActionParser::isMaxIterationsUnmet(const QString &text)
+{
+    return text.trimmed().startsWith(QLatin1String("max iterations reached"), Qt::CaseInsensitive);
+}
+
 bool GoalActionParser::isUnmetComplete(const QString &text)
 {
     const QString trimmed = text.trimmed();
     return trimmed.startsWith(QLatin1String("need human-in-the-loop"), Qt::CaseInsensitive)
-        || trimmed.startsWith(QLatin1String("max iterations reached"), Qt::CaseInsensitive);
+        || isMaxIterationsUnmet(trimmed);
 }
 
 QString GoalActionParser::correctionPrompt()

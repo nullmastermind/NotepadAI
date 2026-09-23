@@ -33,7 +33,7 @@ The following criteria are not met:
 
 OR
 
-  <action type="complete">Brief reason the original message is done, based on the conversation. If the agent is blocked waiting for the developer to perform an action the agent cannot, start the reason with exactly `need human-in-the-loop:` and say what the developer has to do. If the iteration cap is reached and neither of those applies, start the reason with exactly `max iterations reached:`. Those two completes stop the loop and hand back with the criterion still unmet.</action>
+  <action type="complete">Brief reason the original message is done, based on the conversation. If the agent is blocked waiting for the developer to perform an action the agent cannot, start the reason with exactly `need human-in-the-loop:` and say what the developer has to do. If the iteration cap is reached and neither of those applies, start the reason with exactly `max iterations reached:`. A human-in-the-loop complete stops the whole goal. A max-iterations complete advances to the next criterion, or stops if this is the last one, with the criterion still unmet.</action>
 
 OR
 

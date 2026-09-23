@@ -56,6 +56,7 @@ public:
         int maxIterations = GoalAgentSettings::kDefaultMaxIterations;
         QString promptTemplateId;
         bool autoCompact = false;
+        bool prefixGoal = false;
         QString originalUserMessage;
         // True when Goal is attached to a session that already has a turn
         // (user clicked Send, then Goal). Includes existing messages in the
@@ -115,6 +116,8 @@ public:
     }
     static QString nativeGoalWireText(const QString &goalCommand, bool injectWorktree);
     static bool isNativeGoalSlash(const QString &text);
+    // Prepend "/goal " unless text is empty or already a /goal command.
+    static QString prefixGoalMessage(const QString &text);
     static void sendAutoCompactTo(AcpConnection *conn, AcpSessionModel *model);
 
     struct RestartedSession {
@@ -162,6 +165,8 @@ private:
     void evaluateViaHttp();
     void ensureHttpJudge();
     void applyJudgeAction(const GoalAction &action);
+    bool consumeIfMaxIterations();
+    void skipToNextCriterionAfterMaxIter();
     void restartWatchedSession(const QString &prompt);
     void sendPromptToTarget(const QString &displayText);
     QString wireTextForTarget(const QString &displayText) const;
@@ -184,6 +189,7 @@ private:
     QString m_agentId;
     QString m_promptTemplateId;
     bool m_autoCompact = false;
+    bool m_prefixGoal = false;
     QString m_originalUserMessage;
     QString m_developerRequests;
     QString m_lastActionText;

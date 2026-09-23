@@ -20,6 +20,7 @@ struct SendWithGoalResult
     QString promptTemplateId;
     bool autoCompact = false;
     bool useNativeGoal = true;
+    bool prefixGoal = false;
 };
 
 class SendWithGoalDialog : public QDialog
@@ -47,6 +48,7 @@ private:
     QLabel *m_errorLabel = nullptr;
     QCheckBox *m_autoCompactCheck = nullptr;
     QCheckBox *m_useNativeGoalCheck = nullptr;
+    QCheckBox *m_prefixGoalCheck = nullptr;
     QPushButton *m_startBtn = nullptr;
 };
 

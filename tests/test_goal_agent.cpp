@@ -64,6 +64,9 @@ private slots:
     void restartAction_duplicateBeforeNextEval_isIgnored();
     void restartAction_oldConnectionDestroyedDuringRestart_staysActive();
     void continueAction_stillForwardsToTarget();
+    void continueAction_withPrefixGoal_prefixesMessageToTarget();
+    void continueAction_atMaxIterations_advancesToNextCriterionAndResetsTurns();
+    void continueAction_atMaxIterations_onLastCriterion_cancels();
     void continueAction_appliesTargetPromptDecorator_hidesFromTranscript();
     void restartAction_appliesTargetPromptDecorator_hidesFromTranscript();
     void completeAction_stillAchievesSingleCriterion();
@@ -71,6 +74,8 @@ private slots:
     void completeAction_withAutoCompact_skipsTargetPromptDecorator();
     void completeAction_withoutAutoCompact_doesNotSendCompact();
     void completeUnmetPrefix_stopsWithoutAchieving();
+    void completeAction_maxIterationsReached_advancesToNextCriterion();
+    void completeAction_maxIterationsReached_onLastCriterion_cancels();
     void builtinPrompt_matchesGoalAgentSpec();
     void stop_withAutoCompact_doesNotSendCompact();
     void start_attachToExistingConversation_whenIdle_evaluatesImmediately();
@@ -88,6 +93,7 @@ private slots:
     void nativeGoalWireText_appendsWorktreeInstruction();
     void nativeGoalCommand_skipsBlankRows();
     void isNativeGoalSlash_matchesGoalCommandOnly();
+    void prefixGoalMessage_prefixesUnlessAlreadyGoal();
     void sidePrompt_whileTurnInFlight_doesNotEndTurn();
     void sidePrompts_twoGoalsWhileTurnInFlight_bothGoOutImmediately();
     void userPromptResult_whileGoalOutstanding_doesNotEndTurn();
@@ -460,6 +466,111 @@ void TestGoalAgent::continueAction_stillForwardsToTarget()
     QCOMPARE(model.messages().last().role, QStringLiteral("user"));
 }
 
+void TestGoalAgent::continueAction_withPrefixGoal_prefixesMessageToTarget()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.prefixGoal = true;
+    QVERIFY(goal.start(req));
+
+    GoalAction action;
+    action.type = GoalAction::Continue;
+    action.text = QStringLiteral("Please run the tests.");
+    goal.applyJudgeAction(action);
+
+    QCOMPARE(goal.status(), GoalAgent::Active);
+    QCOMPARE(model.messages().last().fromGoalAgent, true);
+    QCOMPARE(model.messages().last().content.first().text,
+             QStringLiteral("/goal Please run the tests."));
+}
+
+void TestGoalAgent::continueAction_atMaxIterations_advancesToNextCriterionAndResetsTurns()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("first"), QStringLiteral("second")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.maxIterations = 1;
+    QVERIFY(goal.start(req));
+
+    GoalAction action;
+    action.type = GoalAction::Continue;
+    action.text = QStringLiteral("keep going");
+    goal.applyJudgeAction(action);
+
+    QCOMPARE(goal.status(), GoalAgent::Active);
+    QCOMPARE(goal.currentCriterionIndex(), 1);
+    QCOMPARE(goal.criteria().at(0).status, GoalAgent::Archived);
+    QCOMPARE(goal.criteria().at(0).iteration, 1);
+    QCOMPARE(goal.criteria().at(1).status, GoalAgent::CriterionActive);
+    QCOMPARE(goal.criteria().at(1).iteration, 0);
+    QCOMPARE(model.messages().size(), 1);
+    QCOMPARE(model.messages().last().fromGoalAgent, true);
+    QCOMPARE(model.messages().last().content.first().text, QStringLiteral("second"));
+}
+
+void TestGoalAgent::continueAction_atMaxIterations_onLastCriterion_cancels()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("only")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.maxIterations = 1;
+    QVERIFY(goal.start(req));
+
+    GoalAction action;
+    action.type = GoalAction::Continue;
+    action.text = QStringLiteral("keep going");
+    goal.applyJudgeAction(action);
+
+    QCOMPARE(goal.status(), GoalAgent::Cancelled);
+    QCOMPARE(goal.currentCriterionIndex(), 0);
+    QCOMPARE(goal.criteria().at(0).status, GoalAgent::CriterionActive);
+    QCOMPARE(goal.criteria().at(0).iteration, 1);
+    QCOMPARE(model.messages().size(), 0);
+}
+
 void TestGoalAgent::continueAction_appliesTargetPromptDecorator_hidesFromTranscript()
 {
     ApplicationSettings settings;
@@ -689,7 +800,6 @@ void TestGoalAgent::completeUnmetPrefix_stopsWithoutAchieving()
 {
     const QStringList reasons = {
         QStringLiteral("need human-in-the-loop: merge the pull request"),
-        QStringLiteral("  max iterations reached: tests still fail"),
         QStringLiteral("Need human-in-the-loop: sign the release"),
     };
     for (const QString &reason : reasons) {
@@ -730,6 +840,82 @@ void TestGoalAgent::completeUnmetPrefix_stopsWithoutAchieving()
     QVERIFY(!GoalActionParser::isUnmetComplete(QStringLiteral("Tests passed.")));
     QVERIFY(!GoalActionParser::isUnmetComplete(
         QStringLiteral("Done. This is not a need human-in-the-loop case.")));
+}
+
+void TestGoalAgent::completeAction_maxIterationsReached_advancesToNextCriterion()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{
+        QStringLiteral("say hi in Chinese"),
+        QStringLiteral("say hi in Japanese"),
+        QStringLiteral("say hi in Korean"),
+    };
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.maxIterations = 1;
+    QVERIFY(goal.start(req));
+
+    GoalAction action;
+    action.type = GoalAction::Complete;
+    action.text = QStringLiteral(
+        "max iterations reached: the assistant replied \"Hi\" in English and did not "
+        "say hi in Chinese, so the success criterion is still unmet.");
+    goal.applyJudgeAction(action);
+
+    QCOMPARE(goal.status(), GoalAgent::Active);
+    QCOMPARE(goal.currentCriterionIndex(), 1);
+    QCOMPARE(goal.criteria().at(0).status, GoalAgent::Archived);
+    QCOMPARE(goal.criteria().at(1).status, GoalAgent::CriterionActive);
+    QCOMPARE(goal.criteria().at(1).iteration, 0);
+    QCOMPARE(goal.criteria().at(2).status, GoalAgent::Pending);
+    QCOMPARE(model.messages().size(), 1);
+    QCOMPARE(model.messages().last().fromGoalAgent, true);
+    QCOMPARE(model.messages().last().content.first().text, QStringLiteral("say hi in Japanese"));
+}
+
+void TestGoalAgent::completeAction_maxIterationsReached_onLastCriterion_cancels()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("say hi in Chinese")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.maxIterations = 1;
+    QVERIFY(goal.start(req));
+
+    GoalAction action;
+    action.type = GoalAction::Complete;
+    action.text = QStringLiteral("max iterations reached: still unmet.");
+    goal.applyJudgeAction(action);
+
+    QCOMPARE(goal.status(), GoalAgent::Cancelled);
+    QCOMPARE(goal.currentCriterionIndex(), 0);
+    QCOMPARE(model.messages().size(), 0);
 }
 
 void TestGoalAgent::builtinPrompt_matchesGoalAgentSpec()
@@ -1012,6 +1198,19 @@ void TestGoalAgent::isNativeGoalSlash_matchesGoalCommandOnly()
     QVERIFY(!GoalAgent::isNativeGoalSlash(QStringLiteral("/goals")));
     QVERIFY(!GoalAgent::isNativeGoalSlash(QStringLiteral("hello /goal")));
     QVERIFY(!GoalAgent::isNativeGoalSlash(QStringLiteral("/compact")));
+}
+
+void TestGoalAgent::prefixGoalMessage_prefixesUnlessAlreadyGoal()
+{
+    QCOMPARE(GoalAgent::prefixGoalMessage(QStringLiteral("fix the parser")),
+             QStringLiteral("/goal fix the parser"));
+    QCOMPARE(GoalAgent::prefixGoalMessage(QStringLiteral("/goal fix the parser")),
+             QStringLiteral("/goal fix the parser"));
+    QCOMPARE(GoalAgent::prefixGoalMessage(QStringLiteral("  /goal")),
+             QStringLiteral("  /goal"));
+    QCOMPARE(GoalAgent::prefixGoalMessage(QStringLiteral("/goals")),
+             QStringLiteral("/goal /goals"));
+    QCOMPARE(GoalAgent::prefixGoalMessage(QString()), QString());
 }
 
 void TestGoalAgent::sidePrompt_whileTurnInFlight_doesNotEndTurn()

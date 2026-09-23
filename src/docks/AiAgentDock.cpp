@@ -1237,6 +1237,7 @@ void AiAgentDock::sendWithGoal()
     req.maxIterations = res.maxIterations;
     req.promptTemplateId = res.promptTemplateId;
     req.autoCompact = res.autoCompact;
+    req.prefixGoal = res.prefixGoal;
     req.originalUserMessage = attach ? QString() : composerText;
     req.attachToExistingConversation = attach;
 

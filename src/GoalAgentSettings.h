@@ -46,6 +46,8 @@ public:
     int defaultMaxIterations = kDefaultMaxIterations;
     bool autoCompact = false;
     bool useNativeGoal = true;
+    // When true, the message sent at goal start is prefixed with "/goal ".
+    bool prefixGoal = false;
     QList<GoalPromptTemplate> promptTemplates;
     QString handoffTemplate;
     QString handoffAuthoringTemplate;

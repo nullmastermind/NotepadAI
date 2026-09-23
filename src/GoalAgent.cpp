@@ -71,6 +71,7 @@ bool GoalAgent::start(const StartRequest &req)
     m_maxIterations = req.maxIterations;
     m_promptTemplateId = req.promptTemplateId;
     m_autoCompact = req.autoCompact;
+    m_prefixGoal = req.prefixGoal;
     m_originalUserMessage = req.originalUserMessage;
     m_currentCriterionIndex = 0;
     m_lastActionText.clear();
@@ -175,6 +176,13 @@ bool GoalAgent::isNativeGoalSlash(const QString &text)
     if (!trimmed.startsWith(QLatin1String("/goal")))
         return false;
     return trimmed.size() == 5 || trimmed.at(5).isSpace();
+}
+
+QString GoalAgent::prefixGoalMessage(const QString &text)
+{
+    if (text.isEmpty() || isNativeGoalSlash(text))
+        return text;
+    return QStringLiteral("/goal ") + text;
 }
 
 void GoalAgent::setTargetSession(AcpConnection *conn, AcpSessionModel *model)
@@ -433,6 +441,11 @@ void GoalAgent::applyJudgeAction(const GoalAction &action)
 
     if (action.type == GoalAction::Complete) {
         if (GoalActionParser::isUnmetComplete(action.text)) {
+            if (GoalActionParser::isMaxIterationsUnmet(action.text)
+                && m_currentCriterionIndex + 1 < m_criteria.size()) {
+                skipToNextCriterionAfterMaxIter();
+                return;
+            }
             logDebug(QStringLiteral("applyJudgeAction: unmet complete, handing back"));
             destroyJudgeConnection();
             markTerminal(Cancelled, action.text.left(200));
@@ -458,12 +471,10 @@ void GoalAgent::applyJudgeAction(const GoalAction &action)
 
         auto &crit = m_criteria[m_currentCriterionIndex];
         crit.iteration++;
-        if (crit.iteration >= m_maxIterations) {
+        if (crit.iteration >= m_maxIterations)
             emit iterationChanged(m_currentCriterionIndex, crit.iteration);
-            destroyJudgeConnection();
-            markTerminal(Cancelled, QStringLiteral("max_iter"));
+        if (consumeIfMaxIterations())
             return;
-        }
 
         restartWatchedSession(action.text);
         if (m_status != Active)
@@ -478,17 +489,54 @@ void GoalAgent::applyJudgeAction(const GoalAction &action)
     crit.iteration++;
     emit iterationChanged(m_currentCriterionIndex, crit.iteration);
 
-    if (crit.iteration >= m_maxIterations) {
-        destroyJudgeConnection();
-        markTerminal(Cancelled, QStringLiteral("max_iter"));
+    if (consumeIfMaxIterations())
         return;
-    }
 
     if (m_targetConnection) {
         logDebug(QStringLiteral("processJudgeResponse: forwarding continue to target (%1 chars)")
                      .arg(action.text.size()));
         sendPromptToTarget(action.text);
     }
+}
+
+bool GoalAgent::consumeIfMaxIterations()
+{
+    if (m_criteria[m_currentCriterionIndex].iteration < m_maxIterations)
+        return false;
+    if (m_currentCriterionIndex + 1 >= m_criteria.size()) {
+        destroyJudgeConnection();
+        markTerminal(Cancelled, QStringLiteral("max_iter"));
+        return true;
+    }
+    skipToNextCriterionAfterMaxIter();
+    return true;
+}
+
+void GoalAgent::skipToNextCriterionAfterMaxIter()
+{
+    auto &crit = m_criteria[m_currentCriterionIndex];
+    crit.status = Archived;
+    crit.verdict = QStringLiteral("max_iter");
+    logDebug(QStringLiteral("skipToNextCriterionAfterMaxIter: criterion %1 exhausted")
+                 .arg(m_currentCriterionIndex));
+
+    m_currentCriterionIndex++;
+    auto &next = m_criteria[m_currentCriterionIndex];
+    next.status = CriterionActive;
+    next.iteration = 0;
+    emit criterionAdvanced(m_currentCriterionIndex);
+
+    destroyJudgeConnection();
+    if (GoalHttpJudge::isCustomApiAgent(m_agentId)) {
+        ensureHttpJudge();
+    } else {
+        spawnJudgeForCriterion(m_currentCriterionIndex);
+        if (m_status != Active)
+            return;
+    }
+
+    if (m_targetConnection)
+        sendPromptToTarget(next.text);
 }
 
 void GoalAgent::setSessionRestarter(std::function<RestartedSession(const QString &oldSessionId)> fn)
@@ -514,9 +562,10 @@ void GoalAgent::sendPromptToTarget(const QString &displayText)
 {
     if (!m_targetConnection)
         return;
+    const QString sent = m_prefixGoal ? prefixGoalMessage(displayText) : displayText;
     if (m_targetModel)
-        m_targetModel->appendUserMessage(displayText, {}, /*fromGoalAgent=*/true);
-    m_targetConnection->sendPrompt(wireTextForTarget(displayText), {});
+        m_targetModel->appendUserMessage(sent, {}, /*fromGoalAgent=*/true);
+    m_targetConnection->sendPrompt(wireTextForTarget(sent), {});
     m_lastSeenTargetMessageCount = m_targetModel
         ? m_targetModel->messages().size() : 0;
 }

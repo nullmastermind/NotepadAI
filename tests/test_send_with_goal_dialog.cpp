@@ -43,6 +43,10 @@ private slots:
     void useNativeGoal_uncheckedIsRestored();
     void useNativeGoal_goalResultFollowsCheck();
     void useNativeGoal_missingKeyStaysChecked();
+    void prefixGoal_defaultsUnchecked();
+    void prefixGoal_checkedIsRestored();
+    void prefixGoal_goalResultFollowsCheck();
+    void prefixGoal_missingKeyStaysUnchecked();
     void changedTemplate_isRestoredAfterCancel();
     void changedTemplate_isRestoredAfterAccept();
     void removedStoredTemplate_fallsBackToDefault();
@@ -410,6 +414,63 @@ void TestSendWithGoalDialog::useNativeGoal_missingKeyStaysChecked()
     QVERIFY(check);
     QVERIFY(check->isChecked());
     QCOMPARE(dialog.goalResult().useNativeGoal, true);
+}
+
+void TestSendWithGoalDialog::prefixGoal_defaultsUnchecked()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    auto *check = dialog.findChild<QCheckBox *>(QStringLiteral("prefixGoalCheck"));
+    QVERIFY(check);
+    QVERIFY(!check->isChecked());
+    QCOMPARE(dialog.goalResult().prefixGoal, false);
+}
+
+void TestSendWithGoalDialog::prefixGoal_checkedIsRestored()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+
+    SendWithGoalDialog first(&registry, &settings);
+    auto *check = first.findChild<QCheckBox *>(QStringLiteral("prefixGoalCheck"));
+    QVERIFY(check);
+    check->setChecked(true);
+    const GoalAgentSettings stored = GoalAgentSettings::fromJson(
+        QJsonDocument::fromJson(settings.get("Ai/GoalAgentSettings", QString()).toUtf8()).object());
+    QVERIFY(stored.prefixGoal);
+
+    SendWithGoalDialog reopened(&registry, &settings);
+    auto *reopenedCheck = reopened.findChild<QCheckBox *>(QStringLiteral("prefixGoalCheck"));
+    QVERIFY(reopenedCheck);
+    QVERIFY(reopenedCheck->isChecked());
+    QCOMPARE(reopened.goalResult().prefixGoal, true);
+}
+
+void TestSendWithGoalDialog::prefixGoal_goalResultFollowsCheck()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    auto *check = dialog.findChild<QCheckBox *>(QStringLiteral("prefixGoalCheck"));
+    QVERIFY(check);
+    check->setChecked(true);
+    QCOMPARE(dialog.goalResult().prefixGoal, true);
+    check->setChecked(false);
+    QCOMPARE(dialog.goalResult().prefixGoal, false);
+}
+
+void TestSendWithGoalDialog::prefixGoal_missingKeyStaysUnchecked()
+{
+    ApplicationSettings settings;
+    settings.setValue(QStringLiteral("Ai/GoalAgentSettings"),
+                      QStringLiteral("{\"autoCompact\":true}"));
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    auto *check = dialog.findChild<QCheckBox *>(QStringLiteral("prefixGoalCheck"));
+    QVERIFY(check);
+    QVERIFY(!check->isChecked());
+    QCOMPARE(dialog.goalResult().prefixGoal, false);
 }
 
 void TestSendWithGoalDialog::changedTemplate_isRestoredAfterCancel()

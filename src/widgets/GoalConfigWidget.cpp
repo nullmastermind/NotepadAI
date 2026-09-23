@@ -172,6 +172,8 @@ void GoalConfigWidget::buildUi()
     m_maxIterSpin = new QSpinBox(this);
     m_maxIterSpin->setRange(GoalAgentSettings::kMaxIterationsMin,
                             GoalAgentSettings::kMaxIterationsMax);
+    m_maxIterSpin->setToolTip(
+        tr("Per criterion. Hitting the cap advances to the next and resets the turn count."));
     const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
     GoalAgentSettings goalSettings;
     if (!settingsJson.isEmpty()) {
