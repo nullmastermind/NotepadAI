@@ -17,7 +17,11 @@
 
 #include <QtTest>
 
+#include <QDir>
+#include <QFile>
+#include <QFileSystemWatcher>
 #include <QPlainTextEdit>
+#include <QTemporaryDir>
 #include <QThread>
 
 #include <atomic>
@@ -33,6 +37,7 @@ private slots:
     void init();
     void warningFromOtherThread_doesNotAppendUntilGuiProcessesEvents();
     void warningOnGuiThread_doesNotAppendUntilEventsProcessed();
+    void externalDeleteOfWatchedDirectory_doesNotCrash();
 
 private:
     QString logText(DebugLogDock &dock) const;
@@ -92,6 +97,41 @@ void TestDebugLogDock::warningOnGuiThread_doesNotAppendUntilEventsProcessed()
 
     QCoreApplication::processEvents();
     QVERIFY(logText(dock).contains(token));
+}
+
+void TestDebugLogDock::externalDeleteOfWatchedDirectory_doesNotCrash()
+{
+#ifndef Q_OS_WIN
+    QSKIP("FindNextChangeNotification is a Windows QFileSystemWatcher path");
+#else
+    DebugLogDock dock;
+    QVERIFY(dock.findChild<QPlainTextEdit *>(QStringLiteral("txtDebugOutput")));
+
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString watched = QDir(tmp.path()).filePath(QStringLiteral("watched"));
+    QVERIFY(QDir().mkpath(watched));
+    QFile file(QDir(watched).filePath(QStringLiteral("a.txt")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write("x"), qint64(1));
+    file.close();
+
+    QFileSystemWatcher watcher;
+    QVERIFY(watcher.addPath(watched));
+
+    // Another process (agent, Explorer, rm) unlinks the folder while this
+    // app still has the watch. Same warning as Delete Permanently, without
+    // going through the menu unwatch path.
+    QVERIFY(QDir(watched).removeRecursively());
+
+    QThread::msleep(1500);
+    QVERIFY2(!logText(dock).contains(QLatin1String("FindNextChangeNotification")),
+             "log widget was mutated on the watcher thread");
+
+    QCoreApplication::processEvents();
+    QVERIFY2(logText(dock).contains(QLatin1String("FindNextChangeNotification")),
+             "expected the Windows watcher warning after GUI events");
+#endif
 }
 
 QTEST_MAIN(TestDebugLogDock)
