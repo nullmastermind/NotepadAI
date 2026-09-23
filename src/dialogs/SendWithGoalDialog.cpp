@@ -25,6 +25,7 @@ SendWithGoalDialog::SendWithGoalDialog(AcpAgentRegistry *registry,
     mainLayout->setSpacing(12);
 
     m_goalConfig = new GoalConfigWidget(registry, settings, this);
+    m_goalConfig->setRememberPromptTemplate(true);
     mainLayout->addWidget(m_goalConfig);
 
     m_errorLabel = new QLabel(this);
@@ -138,14 +139,20 @@ void SendWithGoalDialog::onStart()
 
     if (m_settings) {
         const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
-        QJsonObject settingsObject = QJsonDocument::fromJson(settingsJson.toUtf8()).object();
-        if (settingsObject.value(QStringLiteral("agentId")).toString() != result.agentId) {
-            settingsObject.insert(QStringLiteral("agentId"), result.agentId);
-            m_settings->setValue(
-                QStringLiteral("Ai/GoalAgentSettings"),
-                QString::fromUtf8(QJsonDocument(settingsObject).toJson(QJsonDocument::Compact)));
+        const QJsonDocument doc = QJsonDocument::fromJson(settingsJson.toUtf8());
+        const bool readable = settingsJson.isEmpty() || doc.isObject();
+        if (readable) {
+            QJsonObject settingsObject = doc.object();
+            if (settingsObject.value(QStringLiteral("agentId")).toString() != result.agentId) {
+                settingsObject.insert(QStringLiteral("agentId"), result.agentId);
+                m_settings->setValue(
+                    QStringLiteral("Ai/GoalAgentSettings"),
+                    QString::fromUtf8(QJsonDocument(settingsObject).toJson(QJsonDocument::Compact)));
+            }
         }
     }
+
+    GoalAgentSettings::rememberPromptTemplateId(m_settings, result.promptTemplateId);
 
     accept();
 }

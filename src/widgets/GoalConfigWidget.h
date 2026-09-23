@@ -45,6 +45,7 @@ public:
     void setAgentId(const QString &agentId);
     void setMaxIterations(int value);
     void setPromptTemplateId(const QString &id);
+    void setRememberPromptTemplate(bool remember);
 
 private slots:
     void onAddCriterion();
@@ -80,6 +81,7 @@ private:
     QComboBox *m_agentCombo = nullptr;
     GoalCustomApiFields *m_customApi = nullptr;
     bool m_judgeLoading = false;
+    bool m_rememberPromptTemplate = false;
     QComboBox *m_templateCombo = nullptr;
     QPushButton *m_tplRenameBtn = nullptr;
     QPushButton *m_tplEditBtn = nullptr;

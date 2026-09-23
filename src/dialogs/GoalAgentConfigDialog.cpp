@@ -36,6 +36,7 @@ GoalAgentConfigDialog::GoalAgentConfigDialog(const ScheduledTaskGoalConfig &conf
     layout->setSpacing(8);
 
     m_goalConfig = new GoalConfigWidget(registry, settings, this);
+    m_goalConfig->setRememberPromptTemplate(false);
     layout->addWidget(m_goalConfig);
 
     if (!config.criteriaList.isEmpty())
@@ -44,8 +45,7 @@ GoalAgentConfigDialog::GoalAgentConfigDialog(const ScheduledTaskGoalConfig &conf
         m_goalConfig->setAgentId(config.agentId);
     if (config.maxIterations > 0)
         m_goalConfig->setMaxIterations(config.maxIterations);
-    if (!config.promptTemplateId.isEmpty())
-        m_goalConfig->setPromptTemplateId(config.promptTemplateId);
+    m_goalConfig->setPromptTemplateId(config.promptTemplateId);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttons, &QDialogButtonBox::accepted, this, [this]() {

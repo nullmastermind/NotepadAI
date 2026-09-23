@@ -452,6 +452,8 @@ target_sources(test_send_with_goal_dialog PRIVATE
     ${CMAKE_SOURCE_DIR}/src/GoalPromptRenderer.h
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.cpp
     ${CMAKE_SOURCE_DIR}/src/dialogs/SendWithGoalDialog.h
+    ${CMAKE_SOURCE_DIR}/src/dialogs/GoalAgentConfigDialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/dialogs/GoalAgentConfigDialog.h
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.cpp

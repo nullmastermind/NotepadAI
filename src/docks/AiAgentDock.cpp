@@ -23,6 +23,7 @@
 #include "AcpSessionModel.h"
 #include "AiDockGroup.h"
 #include "ApplicationSettings.h"
+#include "GoalActionParser.h"
 #include "GoalAgent.h"
 #include "dialogs/GoalDraftDialog.h"
 #include "dialogs/SendWithGoalDialog.h"
@@ -1077,12 +1078,18 @@ bool AiAgentDock::attachGoalAgent(GoalAgent *goal, const QString &sessionId)
                     QLatin1String(kAcpMarkerGoalAchieved));
             }
             break;
-        case GoalAgent::Cancelled:
+        case GoalAgent::Cancelled: {
+            const QString handback = target->goal ? target->goal->lastActionText() : QString();
+            const bool unmet = GoalActionParser::isUnmetComplete(handback);
             if (target->view)
                 target->view->setGoalTerminal(tr("Goal stopped"));
-            if (target->model)
-                target->model->appendSystemMessage(tr("⊘ Goal cancelled"));
+            if (target->model) {
+                target->model->appendSystemMessage(unmet
+                    ? tr("⊘ Goal stopped, criterion unmet: %1").arg(handback)
+                    : tr("⊘ Goal cancelled"));
+            }
             break;
+        }
         case GoalAgent::Failed:
             if (target->view)
                 target->view->setGoalTerminal(tr("Goal failed"));

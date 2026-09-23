@@ -77,6 +77,7 @@ private slots:
     void start_customApiUnconfigured_emitsConfigError();
     void start_customApiNoTool_emitsInvalidPrompt();
     void draftDialog_customApi_isListedInCombo();
+    void draftDialog_changedTemplate_isRestored();
     void draftDialog_customApi_showsFieldsWhenSelected();
     void draftDialog_customApi_statusEmptyPartialInvalidIdeal();
     void draftDialog_customApi_partialMissingKey();
@@ -1106,6 +1107,52 @@ void TestGoalDraftGenerator::draftDialog_customApi_isListedInCombo()
     QComboBox *combo = draftAgentCombo(dialog);
     QVERIFY(combo);
     QVERIFY(combo->findData(QLatin1String(GoalHttpJudge::kAgentId)) >= 0);
+}
+
+void TestGoalDraftGenerator::draftDialog_changedTemplate_isRestored()
+{
+    ApplicationSettings settings;
+    GoalAgentSettings goalSettings;
+    GoalPromptTemplate tpl;
+    tpl.id = QStringLiteral("tpl-classify");
+    tpl.name = QStringLiteral("classify");
+    tpl.content = QStringLiteral("classify {{goal}}");
+    goalSettings.promptTemplates.append(tpl);
+    settings.setValue(
+        QStringLiteral("Ai/GoalAgentSettings"),
+        QString::fromUtf8(QJsonDocument(goalSettings.toJson()).toJson(QJsonDocument::Compact)));
+    AcpAgentRegistry registry(&settings);
+
+    {
+        GoalDraftDialog first(nullptr, &registry, &settings, nullptr, QString(), nullptr);
+        QComboBox *combo = nullptr;
+        for (QComboBox *candidate : first.findChildren<QComboBox *>()) {
+            if (candidate->findData(QStringLiteral("tpl-classify")) >= 0)
+                combo = candidate;
+        }
+        QVERIFY(combo);
+        combo->setCurrentIndex(combo->findData(QStringLiteral("tpl-classify")));
+        const QString stored = GoalAgentSettings::fromJson(
+            QJsonDocument::fromJson(settings.get("Ai/GoalAgentSettings", QString()).toUtf8()).object())
+            .promptTemplateId;
+        QCOMPARE(stored, QStringLiteral("tpl-classify"));
+        QPushButton *cancel = nullptr;
+        for (QPushButton *button : first.findChildren<QPushButton *>()) {
+            if (button->text() == QStringLiteral("Cancel"))
+                cancel = button;
+        }
+        QVERIFY(cancel);
+        QTest::mouseClick(cancel, Qt::LeftButton);
+    }
+
+    GoalDraftDialog reopened(nullptr, &registry, &settings, nullptr, QString(), nullptr);
+    QComboBox *combo = nullptr;
+    for (QComboBox *candidate : reopened.findChildren<QComboBox *>()) {
+        if (candidate->findData(QStringLiteral("tpl-classify")) >= 0)
+            combo = candidate;
+    }
+    QVERIFY(combo);
+    QCOMPARE(combo->currentData().toString(), QStringLiteral("tpl-classify"));
 }
 
 void TestGoalDraftGenerator::draftDialog_customApi_showsFieldsWhenSelected()

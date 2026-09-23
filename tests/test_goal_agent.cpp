@@ -14,7 +14,9 @@
 #include "AcpConnection.h"
 #include "AcpSessionModel.h"
 #include "ApplicationSettings.h"
+#include "GoalActionParser.h"
 #include "GoalAgent.h"
+#include "GoalAgentSettings.h"
 #include "GoalHttpJudge.h"
 #include "IAcpProcessChannel.h"
 
@@ -67,6 +69,8 @@ private slots:
     void completeAction_withAutoCompact_sendsCompactToTarget();
     void completeAction_withAutoCompact_skipsTargetPromptDecorator();
     void completeAction_withoutAutoCompact_doesNotSendCompact();
+    void completeUnmetPrefix_stopsWithoutAchieving();
+    void builtinPrompt_matchesGoalAgentSpec();
     void stop_withAutoCompact_doesNotSendCompact();
     void start_attachToExistingConversation_whenIdle_evaluatesImmediately();
     void start_attachToExistingConversation_whenProcessing_waitsForPromptEnded();
@@ -676,6 +680,70 @@ void TestGoalAgent::completeAction_withoutAutoCompact_doesNotSendCompact()
 
     QCOMPARE(goal.status(), GoalAgent::Achieved);
     QCOMPARE(model.messages().size(), 0);
+}
+
+void TestGoalAgent::completeUnmetPrefix_stopsWithoutAchieving()
+{
+    const QStringList reasons = {
+        QStringLiteral("need human-in-the-loop: merge the pull request"),
+        QStringLiteral("  max iterations reached: tests still fail"),
+        QStringLiteral("Need human-in-the-loop: sign the release"),
+    };
+    for (const QString &reason : reasons) {
+        ApplicationSettings settings;
+        GoalAgent goal(nullptr, &settings);
+
+        AcpConnection target;
+        auto *channel = new RecordingChannel(&target);
+        target.attachChannelForTest(channel);
+        channel->start();
+
+        QTemporaryDir historyDir;
+        QVERIFY(historyDir.isValid());
+        AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+        goal.setTargetSession(&target, &model);
+
+        GoalAgent::StartRequest req;
+        req.targetSessionId = QStringLiteral("s1");
+        req.successCriteriaList = QStringList{QStringLiteral("first"), QStringLiteral("second")};
+        req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+        req.autoCompact = true;
+        QVERIFY(goal.start(req));
+
+        GoalAction action;
+        action.type = GoalAction::Complete;
+        action.text = reason;
+        goal.applyJudgeAction(action);
+
+        QCOMPARE(goal.status(), GoalAgent::Cancelled);
+        QCOMPARE(goal.currentCriterionIndex(), 0);
+        QCOMPARE(goal.criteria().at(0).status, GoalAgent::CriterionActive);
+        QCOMPARE(goal.criteria().at(1).status, GoalAgent::Pending);
+        QVERIFY(goal.criteria().at(0).verdict.isEmpty());
+        QCOMPARE(model.messages().size(), 0);
+        QVERIFY(GoalActionParser::isUnmetComplete(reason));
+    }
+
+    QVERIFY(!GoalActionParser::isUnmetComplete(QStringLiteral("Tests passed.")));
+    QVERIFY(!GoalActionParser::isUnmetComplete(
+        QStringLiteral("Done. This is not a need human-in-the-loop case.")));
+}
+
+void TestGoalAgent::builtinPrompt_matchesGoalAgentSpec()
+{
+    const QString &prompt = GoalAgentSettings::builtinPromptContent();
+    QVERIFY(prompt.startsWith(QStringLiteral(
+        "You are an automated goal evaluator. A developer has started a goal-driven session "
+        "with a coding agent. Classify whether the success criterion has been met.")));
+    QVERIFY(prompt.contains(QStringLiteral("need human-in-the-loop:")));
+    QVERIFY(prompt.contains(QStringLiteral("max iterations reached:")));
+    QVERIFY(prompt.contains(QStringLiteral("{{criterionIndex}}")));
+    QVERIFY(prompt.contains(QStringLiteral("{{originalUserMessage}}")));
+    QVERIFY(prompt.contains(QStringLiteral("{{goal}}")));
+    QVERIFY(prompt.contains(QStringLiteral("{{iteration}}")));
+    QVERIFY(prompt.contains(QStringLiteral("{{maxIterations}}")));
+    QVERIFY(prompt.contains(QStringLiteral("{{conversation}}")));
+    QCOMPARE(GoalAgentSettings().defaultTemplate().content, prompt);
 }
 
 void TestGoalAgent::stop_withAutoCompact_doesNotSendCompact()

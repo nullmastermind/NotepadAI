@@ -7,6 +7,8 @@
 #include <QString>
 #include <QStringList>
 
+class ApplicationSettings;
+
 struct GoalPromptTemplate
 {
     QString id;
@@ -40,6 +42,7 @@ public:
     GoalAgentSettings();
 
     QString agentId;
+    QString promptTemplateId;
     int defaultMaxIterations = kDefaultMaxIterations;
     bool autoCompact = false;
     bool useNativeGoal = true;
@@ -52,9 +55,16 @@ public:
 
     const GoalPromptTemplate *findTemplate(const QString &id) const;
     const GoalPromptTemplate &defaultTemplate() const;
+    QString resolvedPromptTemplateId() const;
 
     QJsonObject toJson() const;
     static GoalAgentSettings fromJson(const QJsonObject &obj);
+
+    // Id the picker should show. Repairs a dangling stored id to default.
+    // Does not write when the key is missing, the blob is corrupt, or settings is null.
+    static QString promptTemplateIdForUi(ApplicationSettings *settings);
+    // Patches only promptTemplateId. No write if unchanged, empty, null, or the blob is not a JSON object.
+    static bool rememberPromptTemplateId(ApplicationSettings *settings, const QString &id);
 
     static const QString &builtinPromptContent();
     static const QString &builtinHandoffContent();

@@ -19,6 +19,11 @@ public:
 
     static bool parse(const QString &response, GoalAction *out, ParseError *error = nullptr);
 
+    // Complete reasons that stop the loop with the criterion still unmet.
+    // Case-insensitive prefix match after trim, so a capitalized handback
+    // is not treated as success.
+    static bool isUnmetComplete(const QString &text);
+
     static QString correctionPrompt();
 };
 

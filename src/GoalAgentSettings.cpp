@@ -1,6 +1,9 @@
 #include "GoalAgentSettings.h"
 
+#include "ApplicationSettings.h"
+
 #include <QJsonDocument>
+#include <QJsonParseError>
 #include <QUuid>
 
 // --- GoalPromptTemplate ---
@@ -54,35 +57,48 @@ const QString &GoalAgentSettings::builtinPromptContent()
 {
     static const QString s = QStringLiteral(
         "You are an automated goal evaluator. A developer has started a goal-driven session "
-        "with a coding agent. Your job is to observe the conversation and decide whether "
-        "the success criterion has been met.\n\n"
+        "with a coding agent. Classify whether the success criterion has been met. "
+        "Leave the fix to the agent.\n\n"
         "You are evaluating criterion {{criterionIndex}} of {{totalCriteria}}.\n\n"
         "The developer's original message (the request that started this session):\n"
         "{{originalUserMessage}}\n\n"
-        "Success criterion:\n{{goal}}\n\n"
-        "Iteration: {{iteration}} of {{maxIterations}}\n\n"
+        "Success criterion:\n"
+        "{{goal}}\n\n"
+        "Iteration: {{iteration}} of {{maxIterations}}\n"
+        "When {{iteration}} equals {{maxIterations}}, emit complete. Do not continue.\n\n"
         "Conversation since last evaluation:\n"
         "{{conversation}}\n\n"
         "Respond with EXACTLY ONE of the following XML actions and nothing else. "
-        "Do not narrate. Do not use markdown. Do not include anything outside the action tag.\n\n"
-        "  <action type=\"continue\">Write a follow-up message AS IF you are the developer "
-        "talking to the agent. Use first person. Be specific and conversational — like a "
-        "developer giving follow-up instructions in a chat. Match the language and tone of "
-        "the developer's original message above.</action>\n\n"
+        "No narration, and nothing outside the action tag.\n\n"
+        "  <action type=\"continue\">Use one of the two lists below, and nothing else. "
+        "Keep the heading as written. Each bullet is one real item from the success criterion, "
+        "in the language of the developer's original message. Do not pick an option.\n\n"
+        "If the agent is waiting on a choice, a question, or a confirmation:\n\n"
+        "Make the choice for this task based on these criteria:\n"
+        "- ...\n\n"
+        "If the criterion is not yet met, list only the unmet parts:\n\n"
+        "The following criteria are not met:\n"
+        "- ...</action>\n\n"
         "OR\n\n"
-        "  <action type=\"complete\">Brief reason why the success criterion has been met "
-        "based on the conversation above.</action>\n\n"
+        "  <action type=\"complete\">Brief reason the criterion is met, based on the conversation. "
+        "If the unmet part is an action the agent is unable to perform, start the reason with exactly "
+        "`need human-in-the-loop:` and say what the developer has to do. If the iteration cap is "
+        "reached and neither of those applies, start the reason with exactly `max iterations reached:`. "
+        "Those two completes stop the loop and hand back with the criterion still unmet.</action>\n\n"
         "OR\n\n"
-        "  <action type=\"restart\">Write a first-person prompt for a FRESH coding-agent "
-        "session. Use this when the current session hit a context-length error, stopped "
-        "suddenly, or is otherwise unusable. The coding agent will be restarted and this "
-        "text will be sent as the first message. Include enough context for it to resume "
-        "the criterion. Match the language and tone of the developer's original message "
-        "above.</action>\n\n"
-        "If you are not sure, emit a continue action nudging the agent toward verification "
-        "(e.g. ask it to run the tests or read the relevant file). "
-        "Do NOT emit complete unless the conversation contains clear evidence the criterion "
-        "is satisfied.\n");
+        "  <action type=\"restart\">Write a first-person prompt for a fresh coding-agent session. "
+        "Use this when the current session hit a context-length error, stopped suddenly, or is "
+        "otherwise unusable. The coding agent will be restarted and this text will be sent as the "
+        "first message. Include enough context for it to resume the criterion. Match the language "
+        "and tone of the developer's original message above.</action>\n\n"
+        "Use `need human-in-the-loop:` only when the unmet part is an action the agent is unable to "
+        "perform. A question, a preference, or waiting for confirmation stays with the agent: "
+        "continue with the choice list, drawn from the success criterion. The agent saying it did "
+        "an action it cannot perform is not evidence.\n\n"
+        "If you are not sure, the remaining work is still the agent's, and {{iteration}} is below "
+        "{{maxIterations}}, emit continue with the unmet list. Do not emit a success complete unless "
+        "the conversation shows the criterion is satisfied. A success reason must not start with "
+        "`need human-in-the-loop` or `max iterations reached`.\n");
     return s;
 }
 
@@ -152,6 +168,77 @@ const GoalPromptTemplate &GoalAgentSettings::defaultTemplate() const
     return promptTemplates.first();
 }
 
+QString GoalAgentSettings::resolvedPromptTemplateId() const
+{
+    QString id = promptTemplateId.trimmed();
+    if (!id.isEmpty() && findTemplate(id))
+        return id;
+    return QString::fromLatin1(kDefaultTemplateId);
+}
+
+namespace {
+
+constexpr const char *kGoalSettingsKey = "Ai/GoalAgentSettings";
+
+bool readGoalSettingsObject(ApplicationSettings *settings, QJsonObject *out, bool *readable)
+{
+    *readable = false;
+    if (!settings)
+        return false;
+    const QString raw = settings->get(kGoalSettingsKey, QString());
+    if (raw.isEmpty()) {
+        *readable = true;
+        *out = QJsonObject();
+        return true;
+    }
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject())
+        return false;
+    *readable = true;
+    *out = doc.object();
+    return true;
+}
+
+} // namespace
+
+QString GoalAgentSettings::promptTemplateIdForUi(ApplicationSettings *settings)
+{
+    QJsonObject obj;
+    bool readable = false;
+    GoalAgentSettings loaded;
+    if (readGoalSettingsObject(settings, &obj, &readable) && readable)
+        loaded = GoalAgentSettings::fromJson(obj);
+
+    const QString resolved = loaded.resolvedPromptTemplateId();
+    if (readable) {
+        const QString stored = loaded.promptTemplateId.trimmed();
+        if (!stored.isEmpty() && stored != resolved)
+            rememberPromptTemplateId(settings, resolved);
+    }
+    return resolved;
+}
+
+bool GoalAgentSettings::rememberPromptTemplateId(ApplicationSettings *settings, const QString &id)
+{
+    const QString trimmed = id.trimmed();
+    if (trimmed.isEmpty())
+        return false;
+
+    QJsonObject obj;
+    bool readable = false;
+    if (!readGoalSettingsObject(settings, &obj, &readable) || !readable)
+        return false;
+    if (obj.value(QStringLiteral("promptTemplateId")).toString() == trimmed)
+        return false;
+
+    obj.insert(QStringLiteral("promptTemplateId"), trimmed);
+    settings->setValue(
+        QString::fromLatin1(kGoalSettingsKey),
+        QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact)));
+    return true;
+}
+
 QJsonObject GoalAgentSettings::toJson() const
 {
     QJsonArray tplArr;
@@ -165,6 +252,7 @@ QJsonObject GoalAgentSettings::toJson() const
         presetArr.append(p.toJson());
     return {
         {QStringLiteral("agentId"), agentId},
+        {QStringLiteral("promptTemplateId"), promptTemplateId},
         {QStringLiteral("defaultMaxIterations"), defaultMaxIterations},
         {QStringLiteral("autoCompact"), autoCompact},
         {QStringLiteral("useNativeGoal"), useNativeGoal},
@@ -179,6 +267,7 @@ GoalAgentSettings GoalAgentSettings::fromJson(const QJsonObject &obj)
 {
     GoalAgentSettings s;
     s.agentId = obj.value(QStringLiteral("agentId")).toString();
+    s.promptTemplateId = obj.value(QStringLiteral("promptTemplateId")).toString();
     s.defaultMaxIterations = obj.value(QStringLiteral("defaultMaxIterations")).toInt(kDefaultMaxIterations);
     s.autoCompact = obj.value(QStringLiteral("autoCompact")).toBool(false);
     s.useNativeGoal = obj.value(QStringLiteral("useNativeGoal")).toBool(true);

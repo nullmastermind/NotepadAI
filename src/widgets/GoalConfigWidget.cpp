@@ -13,6 +13,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QToolButton>
 #include <QUuid>
@@ -58,6 +59,13 @@ GoalConfigWidget::GoalConfigWidget(AcpAgentRegistry *registry,
                     QString::fromUtf8(QJsonDocument(goalSettings.toJson()).toJson(QJsonDocument::Compact)));
             });
     populateTemplates();
+    connect(m_templateCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            [this](int) {
+                if (!m_rememberPromptTemplate)
+                    return;
+                GoalAgentSettings::rememberPromptTemplateId(
+                    m_settings, m_templateCombo->currentData().toString());
+            });
     populatePresets();
     updateRowCount();
     updateTemplateButtons();
@@ -215,8 +223,22 @@ void GoalConfigWidget::setMaxIterations(int value)
 
 void GoalConfigWidget::setPromptTemplateId(const QString &id)
 {
-    int idx = m_templateCombo->findData(id);
-    if (idx >= 0) m_templateCombo->setCurrentIndex(idx);
+    if (!m_templateCombo)
+        return;
+    const QString trimmed = id.trimmed();
+    int idx = trimmed.isEmpty() ? -1 : m_templateCombo->findData(trimmed);
+    if (idx < 0)
+        idx = m_templateCombo->findData(QLatin1String(GoalAgentSettings::kDefaultTemplateId));
+    if (idx < 0)
+        return;
+    const QSignalBlocker blocker(m_templateCombo);
+    m_templateCombo->setCurrentIndex(idx);
+    updateTemplateButtons();
+}
+
+void GoalConfigWidget::setRememberPromptTemplate(bool remember)
+{
+    m_rememberPromptTemplate = remember;
 }
 
 void GoalConfigWidget::populateAgents()
@@ -260,19 +282,36 @@ void GoalConfigWidget::populateAgents()
 
 void GoalConfigWidget::populateTemplates()
 {
-    m_templateCombo->clear();
-    const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
+    if (!m_templateCombo)
+        return;
+
+    const QString selectedId = GoalAgentSettings::promptTemplateIdForUi(m_settings);
     GoalAgentSettings goalSettings;
-    if (!settingsJson.isEmpty()) {
-        goalSettings = GoalAgentSettings::fromJson(
-            QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+    if (m_settings) {
+        const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
+        if (!settingsJson.isEmpty()) {
+            const QJsonDocument doc = QJsonDocument::fromJson(settingsJson.toUtf8());
+            if (doc.isObject())
+                goalSettings = GoalAgentSettings::fromJson(doc.object());
+        }
     }
-    for (const auto &t : goalSettings.promptTemplates) {
+
+    const QSignalBlocker blocker(m_templateCombo);
+    m_templateCombo->clear();
+    int selectedIdx = 0;
+    for (int i = 0; i < goalSettings.promptTemplates.size(); ++i) {
+        const auto &t = goalSettings.promptTemplates.at(i);
         QString label = t.name;
         if (t.id == QLatin1String(GoalAgentSettings::kDefaultTemplateId))
             label += QStringLiteral(" (default)");
         m_templateCombo->addItem(label, t.id);
+        if (t.id == selectedId)
+            selectedIdx = i;
     }
+    if (m_templateCombo->count() == 0)
+        return;
+    m_templateCombo->setCurrentIndex(selectedIdx);
+    updateTemplateButtons();
 }
 
 void GoalConfigWidget::populatePresets()

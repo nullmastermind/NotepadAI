@@ -40,6 +40,13 @@ bool GoalActionParser::parse(const QString &response, GoalAction *out, ParseErro
     return true;
 }
 
+bool GoalActionParser::isUnmetComplete(const QString &text)
+{
+    const QString trimmed = text.trimmed();
+    return trimmed.startsWith(QLatin1String("need human-in-the-loop"), Qt::CaseInsensitive)
+        || trimmed.startsWith(QLatin1String("max iterations reached"), Qt::CaseInsensitive);
+}
+
 QString GoalActionParser::correctionPrompt()
 {
     return QStringLiteral(

@@ -440,6 +440,12 @@ void GoalAgent::applyJudgeAction(const GoalAction &action)
     emit actionEmitted(typeName, action.text);
 
     if (action.type == GoalAction::Complete) {
+        if (GoalActionParser::isUnmetComplete(action.text)) {
+            logDebug(QStringLiteral("applyJudgeAction: unmet complete, handing back"));
+            destroyJudgeConnection();
+            markTerminal(Cancelled, action.text.left(200));
+            return;
+        }
         advanceToNextCriterion(action.text);
         return;
     }

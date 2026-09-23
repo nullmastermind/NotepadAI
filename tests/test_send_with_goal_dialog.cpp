@@ -18,6 +18,7 @@
 #include "GoalConfigWidget.h"
 #include "GoalHttpJudge.h"
 #include "SendWithGoalDialog.h"
+#include "GoalAgentConfigDialog.h"
 
 class TestSendWithGoalDialog : public QObject
 {
@@ -42,12 +43,27 @@ private slots:
     void useNativeGoal_uncheckedIsRestored();
     void useNativeGoal_goalResultFollowsCheck();
     void useNativeGoal_missingKeyStaysChecked();
+    void changedTemplate_isRestoredAfterCancel();
+    void changedTemplate_isRestoredAfterAccept();
+    void removedStoredTemplate_fallsBackToDefault();
+    void missingTemplateKey_openDoesNotMutateSettings();
+    void switchedBackToDefault_isRestored();
+    void corruptJson_openLeavesBlob();
+    void remember_preservesUnknownKey_andIsIdempotent();
+    void remember_rejectsNullEmptyAndCorrupt();
+    void failedStart_keepsSelectedTemplate();
+    void untouchedDefault_startWritesOnce();
+    void scheduledTaskDialog_doesNotClobberSendTemplate();
 
 private:
     static QComboBox *agentCombo(SendWithGoalDialog &dialog);
+    static QComboBox *templateCombo(SendWithGoalDialog &dialog);
     static QPushButton *dialogButton(SendWithGoalDialog &dialog, const QString &text);
     static QString storedAgentId(ApplicationSettings &settings);
+    static QString storedPromptTemplateId(ApplicationSettings &settings);
     static void selectCodex(SendWithGoalDialog &dialog);
+    static void seedClassifyTemplate(ApplicationSettings &settings);
+    static void selectClassify(SendWithGoalDialog &dialog);
 
     QTemporaryDir m_settingsDir;
 };
@@ -102,6 +118,45 @@ void TestSendWithGoalDialog::selectCodex(SendWithGoalDialog &dialog)
     const int codexIndex = combo->findData(AcpAgentRegistry::builtinCodexId());
     QVERIFY(codexIndex >= 0);
     combo->setCurrentIndex(codexIndex);
+}
+
+QComboBox *TestSendWithGoalDialog::templateCombo(SendWithGoalDialog &dialog)
+{
+    for (QComboBox *combo : dialog.findChildren<QComboBox *>()) {
+        if (combo->findData(QLatin1String(GoalAgentSettings::kDefaultTemplateId)) >= 0
+            && combo->findData(AcpAgentRegistry::builtinClaudeCodeId()) < 0) {
+            return combo;
+        }
+    }
+    return nullptr;
+}
+
+QString TestSendWithGoalDialog::storedPromptTemplateId(ApplicationSettings &settings)
+{
+    const QString json = settings.get("Ai/GoalAgentSettings", QString());
+    return GoalAgentSettings::fromJson(QJsonDocument::fromJson(json.toUtf8()).object()).promptTemplateId;
+}
+
+void TestSendWithGoalDialog::seedClassifyTemplate(ApplicationSettings &settings)
+{
+    GoalAgentSettings goalSettings;
+    GoalPromptTemplate tpl;
+    tpl.id = QStringLiteral("tpl-classify");
+    tpl.name = QStringLiteral("classify");
+    tpl.content = QStringLiteral("classify {{goal}}");
+    goalSettings.promptTemplates.append(tpl);
+    settings.setValue(
+        QStringLiteral("Ai/GoalAgentSettings"),
+        QString::fromUtf8(QJsonDocument(goalSettings.toJson()).toJson(QJsonDocument::Compact)));
+}
+
+void TestSendWithGoalDialog::selectClassify(SendWithGoalDialog &dialog)
+{
+    QComboBox *combo = templateCombo(dialog);
+    QVERIFY(combo);
+    const int idx = combo->findData(QStringLiteral("tpl-classify"));
+    QVERIFY(idx >= 0);
+    combo->setCurrentIndex(idx);
 }
 
 void TestSendWithGoalDialog::changedAgent_isRestoredAfterCancel()
@@ -355,6 +410,244 @@ void TestSendWithGoalDialog::useNativeGoal_missingKeyStaysChecked()
     QVERIFY(check);
     QVERIFY(check->isChecked());
     QCOMPARE(dialog.goalResult().useNativeGoal, true);
+}
+
+void TestSendWithGoalDialog::changedTemplate_isRestoredAfterCancel()
+{
+    ApplicationSettings settings;
+    seedClassifyTemplate(settings);
+    AcpAgentRegistry registry(&settings);
+
+    SendWithGoalDialog first(&registry, &settings);
+    selectClassify(first);
+    QCOMPARE(storedPromptTemplateId(settings), QStringLiteral("tpl-classify"));
+    QVERIFY(dialogButton(first, QStringLiteral("Cancel")));
+    QTest::mouseClick(dialogButton(first, QStringLiteral("Cancel")), Qt::LeftButton);
+    QCOMPARE(first.result(), QDialog::Rejected);
+
+    SendWithGoalDialog reopened(&registry, &settings);
+    QCOMPARE(templateCombo(reopened)->currentData().toString(), QStringLiteral("tpl-classify"));
+}
+
+void TestSendWithGoalDialog::changedTemplate_isRestoredAfterAccept()
+{
+    ApplicationSettings settings;
+    seedClassifyTemplate(settings);
+    AcpAgentRegistry registry(&settings);
+
+    SendWithGoalDialog first(&registry, &settings);
+    selectClassify(first);
+    QCOMPARE(storedPromptTemplateId(settings), QStringLiteral("tpl-classify"));
+    const auto criteria = first.findChildren<QPlainTextEdit *>();
+    QVERIFY(!criteria.isEmpty());
+    criteria.first()->setPlainText(QStringLiteral("Confirm selected template"));
+    QVERIFY(dialogButton(first, QStringLiteral("Start Goal")));
+    QTest::mouseClick(dialogButton(first, QStringLiteral("Start Goal")), Qt::LeftButton);
+    QCOMPARE(first.result(), QDialog::Accepted);
+    QCOMPARE(first.goalResult().promptTemplateId, QStringLiteral("tpl-classify"));
+
+    SendWithGoalDialog reopened(&registry, &settings);
+    QCOMPARE(templateCombo(reopened)->currentData().toString(), QStringLiteral("tpl-classify"));
+}
+
+void TestSendWithGoalDialog::removedStoredTemplate_fallsBackToDefault()
+{
+    ApplicationSettings settings;
+    GoalAgentSettings goalSettings;
+    goalSettings.promptTemplateId = QStringLiteral("removed-template");
+    settings.setValue(
+        QStringLiteral("Ai/GoalAgentSettings"),
+        QString::fromUtf8(QJsonDocument(goalSettings.toJson()).toJson(QJsonDocument::Compact)));
+    AcpAgentRegistry registry(&settings);
+
+    SendWithGoalDialog dialog(&registry, &settings);
+    QCOMPARE(templateCombo(dialog)->currentData().toString(),
+             QString::fromLatin1(GoalAgentSettings::kDefaultTemplateId));
+    QCOMPARE(storedPromptTemplateId(settings),
+             QString::fromLatin1(GoalAgentSettings::kDefaultTemplateId));
+}
+
+void TestSendWithGoalDialog::missingTemplateKey_openDoesNotMutateSettings()
+{
+    ApplicationSettings settings;
+    const QString original = QStringLiteral("{\"futureFlag\":true}");
+    settings.setValue(QStringLiteral("Ai/GoalAgentSettings"), original);
+    AcpAgentRegistry registry(&settings);
+
+    const QString before = settings.get("Ai/GoalAgentSettings", QString());
+    SendWithGoalDialog dialog(&registry, &settings);
+    QCOMPARE(templateCombo(dialog)->currentData().toString(),
+             QString::fromLatin1(GoalAgentSettings::kDefaultTemplateId));
+    QCOMPARE(settings.get("Ai/GoalAgentSettings", QString()), before);
+    QVERIFY(!before.contains(QStringLiteral("promptTemplateId")));
+}
+
+void TestSendWithGoalDialog::switchedBackToDefault_isRestored()
+{
+    ApplicationSettings settings;
+    seedClassifyTemplate(settings);
+    GoalAgentSettings seeded = GoalAgentSettings::fromJson(
+        QJsonDocument::fromJson(settings.get("Ai/GoalAgentSettings", QString()).toUtf8()).object());
+    seeded.promptTemplateId = QStringLiteral("tpl-classify");
+    settings.setValue(
+        QStringLiteral("Ai/GoalAgentSettings"),
+        QString::fromUtf8(QJsonDocument(seeded.toJson()).toJson(QJsonDocument::Compact)));
+    AcpAgentRegistry registry(&settings);
+
+    SendWithGoalDialog first(&registry, &settings);
+    QComboBox *combo = templateCombo(first);
+    QVERIFY(combo);
+    const int defaultIdx = combo->findData(QLatin1String(GoalAgentSettings::kDefaultTemplateId));
+    QVERIFY(defaultIdx >= 0);
+    combo->setCurrentIndex(defaultIdx);
+    QCOMPARE(storedPromptTemplateId(settings),
+             QString::fromLatin1(GoalAgentSettings::kDefaultTemplateId));
+    QTest::mouseClick(dialogButton(first, QStringLiteral("Cancel")), Qt::LeftButton);
+
+    SendWithGoalDialog reopened(&registry, &settings);
+    QCOMPARE(templateCombo(reopened)->currentData().toString(),
+             QString::fromLatin1(GoalAgentSettings::kDefaultTemplateId));
+}
+
+void TestSendWithGoalDialog::corruptJson_openLeavesBlob()
+{
+    ApplicationSettings settings;
+    const QString corrupt = QStringLiteral("not-json");
+    settings.setValue(QStringLiteral("Ai/GoalAgentSettings"), corrupt);
+    AcpAgentRegistry registry(&settings);
+
+    SendWithGoalDialog dialog(&registry, &settings);
+    QCOMPARE(templateCombo(dialog)->currentData().toString(),
+             QString::fromLatin1(GoalAgentSettings::kDefaultTemplateId));
+    QCOMPARE(settings.get("Ai/GoalAgentSettings", QString()), corrupt);
+    QVERIFY(!GoalAgentSettings::rememberPromptTemplateId(
+        &settings, QStringLiteral("tpl-classify")));
+    QCOMPARE(settings.get("Ai/GoalAgentSettings", QString()), corrupt);
+}
+
+void TestSendWithGoalDialog::remember_preservesUnknownKey_andIsIdempotent()
+{
+    ApplicationSettings settings;
+    settings.setValue(QStringLiteral("Ai/GoalAgentSettings"),
+                      QStringLiteral("{\"agentId\":\"keep-me\",\"futureFlag\":true}"));
+
+    QVERIFY(GoalAgentSettings::rememberPromptTemplateId(
+        &settings, QStringLiteral("tpl-classify")));
+    const QString once = settings.get("Ai/GoalAgentSettings", QString());
+    const QJsonObject obj = QJsonDocument::fromJson(once.toUtf8()).object();
+    QCOMPARE(obj.value(QStringLiteral("agentId")).toString(), QStringLiteral("keep-me"));
+    QCOMPARE(obj.value(QStringLiteral("futureFlag")).toBool(), true);
+    QCOMPARE(obj.value(QStringLiteral("promptTemplateId")).toString(), QStringLiteral("tpl-classify"));
+
+    QVERIFY(!GoalAgentSettings::rememberPromptTemplateId(
+        &settings, QStringLiteral("tpl-classify")));
+    QCOMPARE(settings.get("Ai/GoalAgentSettings", QString()), once);
+}
+
+void TestSendWithGoalDialog::remember_rejectsNullEmptyAndCorrupt()
+{
+    QVERIFY(!GoalAgentSettings::rememberPromptTemplateId(nullptr, QStringLiteral("tpl-classify")));
+
+    ApplicationSettings settings;
+    settings.setValue(QStringLiteral("Ai/GoalAgentSettings"),
+                      QStringLiteral("{\"agentId\":\"keep-me\"}"));
+    const QString before = settings.get("Ai/GoalAgentSettings", QString());
+    QVERIFY(!GoalAgentSettings::rememberPromptTemplateId(&settings, QStringLiteral("  ")));
+    QCOMPARE(settings.get("Ai/GoalAgentSettings", QString()), before);
+
+    settings.setValue(QStringLiteral("Ai/GoalAgentSettings"), QStringLiteral("[1,2]"));
+    QVERIFY(!GoalAgentSettings::rememberPromptTemplateId(&settings, QStringLiteral("tpl-classify")));
+    QCOMPARE(settings.get("Ai/GoalAgentSettings", QString()), QStringLiteral("[1,2]"));
+}
+
+void TestSendWithGoalDialog::failedStart_keepsSelectedTemplate()
+{
+    ApplicationSettings settings;
+    seedClassifyTemplate(settings);
+    AcpAgentRegistry registry(&settings);
+
+    SendWithGoalDialog dialog(&registry, &settings);
+    selectClassify(dialog);
+    QCOMPARE(storedPromptTemplateId(settings), QStringLiteral("tpl-classify"));
+    QTest::mouseClick(dialogButton(dialog, QStringLiteral("Start Goal")), Qt::LeftButton);
+    QCOMPARE(dialog.result(), QDialog::Rejected);
+    QCOMPARE(storedPromptTemplateId(settings), QStringLiteral("tpl-classify"));
+}
+
+void TestSendWithGoalDialog::untouchedDefault_startWritesOnce()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+
+    SendWithGoalDialog first(&registry, &settings);
+    const auto criteria = first.findChildren<QPlainTextEdit *>();
+    QVERIFY(!criteria.isEmpty());
+    criteria.first()->setPlainText(QStringLiteral("Save default template"));
+    QTest::mouseClick(dialogButton(first, QStringLiteral("Start Goal")), Qt::LeftButton);
+    QCOMPARE(first.result(), QDialog::Accepted);
+    QCOMPARE(storedPromptTemplateId(settings),
+             QString::fromLatin1(GoalAgentSettings::kDefaultTemplateId));
+    const QString afterStart = settings.get("Ai/GoalAgentSettings", QString());
+
+    SendWithGoalDialog reopened(&registry, &settings);
+    QCOMPARE(templateCombo(reopened)->currentData().toString(),
+             QString::fromLatin1(GoalAgentSettings::kDefaultTemplateId));
+    QCOMPARE(settings.get("Ai/GoalAgentSettings", QString()), afterStart);
+}
+
+void TestSendWithGoalDialog::scheduledTaskDialog_doesNotClobberSendTemplate()
+{
+    ApplicationSettings settings;
+    seedClassifyTemplate(settings);
+    GoalAgentSettings seeded = GoalAgentSettings::fromJson(
+        QJsonDocument::fromJson(settings.get("Ai/GoalAgentSettings", QString()).toUtf8()).object());
+    GoalPromptTemplate other;
+    other.id = QStringLiteral("tpl-other");
+    other.name = QStringLiteral("other");
+    other.content = QStringLiteral("other");
+    seeded.promptTemplates.append(other);
+    seeded.promptTemplateId = QStringLiteral("tpl-classify");
+    settings.setValue(
+        QStringLiteral("Ai/GoalAgentSettings"),
+        QString::fromUtf8(QJsonDocument(seeded.toJson()).toJson(QJsonDocument::Compact)));
+    const QString before = settings.get("Ai/GoalAgentSettings", QString());
+    AcpAgentRegistry registry(&settings);
+
+    ScheduledTaskGoalConfig task;
+    task.promptTemplateId = QStringLiteral("tpl-other");
+    task.agentId = AcpAgentRegistry::builtinClaudeCodeId();
+    task.criteriaList = QStringList{QStringLiteral("task criterion")};
+    GoalAgentConfigDialog dialog(task, &registry, &settings);
+    QComboBox *tplCombo = nullptr;
+    for (QComboBox *combo : dialog.findChildren<QComboBox *>()) {
+        if (combo->findData(QStringLiteral("tpl-other")) >= 0)
+            tplCombo = combo;
+    }
+    QVERIFY(tplCombo);
+    QCOMPARE(tplCombo->currentData().toString(), QStringLiteral("tpl-other"));
+    QCOMPARE(dialog.goalConfig().promptTemplateId, QStringLiteral("tpl-other"));
+    QCOMPARE(settings.get("Ai/GoalAgentSettings", QString()), before);
+
+    tplCombo->setCurrentIndex(tplCombo->findData(QStringLiteral("tpl-classify")));
+    QCOMPARE(storedPromptTemplateId(settings), QStringLiteral("tpl-classify"));
+    QCOMPARE(settings.get("Ai/GoalAgentSettings", QString()), before);
+
+    ScheduledTaskGoalConfig missing = task;
+    missing.promptTemplateId = QStringLiteral("gone");
+    GoalAgentConfigDialog missingDialog(missing, &registry, &settings);
+    QComboBox *missingCombo = nullptr;
+    for (QComboBox *combo : missingDialog.findChildren<QComboBox *>()) {
+        if (combo->findData(QLatin1String(GoalAgentSettings::kDefaultTemplateId)) >= 0
+            && combo->findData(AcpAgentRegistry::builtinClaudeCodeId()) < 0) {
+            missingCombo = combo;
+        }
+    }
+    QVERIFY(missingCombo);
+    QCOMPARE(missingCombo->currentData().toString(),
+             QString::fromLatin1(GoalAgentSettings::kDefaultTemplateId));
+    QCOMPARE(missingDialog.goalConfig().promptTemplateId,
+             QString::fromLatin1(GoalAgentSettings::kDefaultTemplateId));
+    QCOMPARE(storedPromptTemplateId(settings), QStringLiteral("tpl-classify"));
 }
 
 QTEST_MAIN(TestSendWithGoalDialog)

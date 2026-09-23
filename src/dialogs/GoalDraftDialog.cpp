@@ -39,6 +39,7 @@
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QtGlobal>
@@ -136,7 +137,12 @@ GoalDraftDialog::GoalDraftDialog(AcpAgentManager *manager,
                 updateGenerateButton();
             });
     connect(m_templateCombo, qOverload<int>(&QComboBox::currentIndexChanged),
-            this, &GoalDraftDialog::updateGenerateButton);
+            this, [this](int) {
+                updateGenerateButton();
+                if (m_templateCombo)
+                    GoalAgentSettings::rememberPromptTemplateId(
+                        m_settings, m_templateCombo->currentData().toString());
+            });
     updateGenerateButton();
 }
 
@@ -165,6 +171,11 @@ void GoalDraftDialog::onGenerateClicked()
     persistPendingCustomApi();
     if (!validate())
         return;
+
+    if (m_templateCombo) {
+        GoalAgentSettings::rememberPromptTemplateId(
+            m_settings, m_templateCombo->currentData().toString());
+    }
 
     m_statusLabel->setText(tr("Generating prompt..."));
     m_statusLabel->show();
@@ -275,23 +286,32 @@ void GoalDraftDialog::populateTemplates()
     if (!m_templateCombo)
         return;
 
-    m_templateCombo->clear();
+    const QString selectedId = GoalAgentSettings::promptTemplateIdForUi(m_settings);
 
     GoalAgentSettings goalSettings;
     if (m_settings) {
         const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
         if (!settingsJson.isEmpty()) {
-            goalSettings = GoalAgentSettings::fromJson(
-                QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+            const QJsonDocument doc = QJsonDocument::fromJson(settingsJson.toUtf8());
+            if (doc.isObject())
+                goalSettings = GoalAgentSettings::fromJson(doc.object());
         }
     }
 
-    for (const auto &tpl : goalSettings.promptTemplates) {
+    const QSignalBlocker blocker(m_templateCombo);
+    m_templateCombo->clear();
+    int selectedIdx = 0;
+    for (int i = 0; i < goalSettings.promptTemplates.size(); ++i) {
+        const auto &tpl = goalSettings.promptTemplates.at(i);
         QString label = tpl.name;
         if (tpl.id == QLatin1String(GoalAgentSettings::kDefaultTemplateId))
             label += tr(" (default)");
         m_templateCombo->addItem(label, tpl.id);
+        if (tpl.id == selectedId)
+            selectedIdx = i;
     }
+    if (m_templateCombo->count() > 0)
+        m_templateCombo->setCurrentIndex(selectedIdx);
 }
 
 bool GoalDraftDialog::validate()
