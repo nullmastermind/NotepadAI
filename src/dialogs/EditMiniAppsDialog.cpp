@@ -19,16 +19,58 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QObject>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSet>
 #include <QSpinBox>
 #include <QSplitter>
-#include <QTcpSocket>
+#include <QTcpServer>
 #include <QHostAddress>
 #include <QTimer>
 #include <QUuid>
 #include <QVBoxLayout>
+
+namespace {
+
+// QGroupBox::setChecked does nothing when the flag is already that value, so it
+// will not disable a child that was explicitly setEnabled(true). Force the
+// child state, and clear WA_ForceDisabled: QGroupBox only re-enables children
+// that do not have that attribute (qgroupbox.cpp _q_setChildrenEnabled).
+void applyGroupChecked(QGroupBox *group, bool checked)
+{
+    group->setChecked(checked);
+    const auto children = group->findChildren<QWidget *>(Qt::FindDirectChildrenOnly);
+    for (QWidget *child : children) {
+        child->setEnabled(checked);
+        if (!checked)
+            child->setAttribute(Qt::WA_ForceDisabled, false);
+    }
+}
+
+// One listen on port 0: the kernel assigns an unused ephemeral port. No scan.
+// Ports already chosen by other mini apps are held for the duration so the
+// kernel cannot hand the same port back.
+int allocateFreeLocalPort(const QSet<int> &exclude)
+{
+    QObject held;
+    for (int port : exclude) {
+        if (port <= 0 || port > 65535)
+            continue;
+        auto *reserved = new QTcpServer(&held);
+        if (!reserved->listen(QHostAddress::LocalHost, static_cast<quint16>(port)))
+            delete reserved;
+    }
+
+    QTcpServer server;
+    if (!server.listen(QHostAddress::LocalHost, 0))
+        return 0;
+    const int port = static_cast<int>(server.serverPort());
+    server.close();
+    return port;
+}
+
+} // namespace
 
 EditMiniAppsDialog::EditMiniAppsDialog(MiniAppRegistry *registry,
                                        const QString &workspacePath,
@@ -153,7 +195,7 @@ EditMiniAppsDialog::EditMiniAppsDialog(MiniAppRegistry *registry,
     m_debugPortSpin->setToolTip(tr("0 = disabled. Set a port to enable Chrome DevTools Protocol debugging."));
     portLayout->addWidget(m_debugPortSpin, 1);
     m_randomPortBtn = new QPushButton(tr("Random"), m_debugGroup);
-    m_randomPortBtn->setToolTip(tr("Find an available port in range 9222-9322"));
+    m_randomPortBtn->setToolTip(tr("Assign a free local port"));
     portLayout->addWidget(m_randomPortBtn);
     debugLayout->addLayout(portLayout);
     m_portWarningLabel = new QLabel(m_debugGroup);
@@ -312,8 +354,9 @@ void EditMiniAppsDialog::commitCurrentApp()
     def.command = m_commandEdit->text().trimmed();
     def.cwd = m_cwdEdit->text().trimmed();
     def.env = m_envEdit->toPlainText();
-    def.healthCheckUrl = m_advancedGroup->isChecked() ? m_healthUrlEdit->text().trimmed() : QString();
-    def.healthTimeoutMs = m_advancedGroup->isChecked() ? m_timeoutSpin->value() * 1000 : 60000;
+    def.healthCheckUrl = m_healthUrlEdit->text().trimmed();
+    def.healthTimeoutMs = m_timeoutSpin->value() * 1000;
+    def.advancedEnabled = m_advancedGroup->isChecked();
     def.debugPort = m_debugGroup->isChecked() ? m_debugPortSpin->value() : 0;
     def.proxyType = m_proxyGroup->isChecked() ? m_proxyTypeCombo->currentData().toInt() : 0;
     def.proxyHost = m_proxyGroup->isChecked() ? m_proxyHostEdit->text().trimmed() : QString();
@@ -341,10 +384,9 @@ void EditMiniAppsDialog::loadApp(int row)
     m_cwdEdit->setEnabled(valid);
     m_browseCwdBtn->setEnabled(valid);
     m_envEdit->setEnabled(valid);
-    m_healthUrlEdit->setEnabled(valid);
-    m_timeoutSpin->setEnabled(valid);
-    m_debugPortSpin->setEnabled(valid);
-    m_randomPortBtn->setEnabled(valid);
+    m_advancedGroup->setEnabled(valid);
+    m_debugGroup->setEnabled(valid);
+    m_proxyGroup->setEnabled(valid);
     m_crossOriginCheck->setEnabled(valid);
 
     if (!valid) {
@@ -355,8 +397,10 @@ void EditMiniAppsDialog::loadApp(int row)
         m_envEdit->clear();
         m_healthUrlEdit->clear();
         m_timeoutSpin->setValue(60);
+        applyGroupChecked(m_advancedGroup, false);
         m_debugPortSpin->setValue(0);
-        m_proxyGroup->setChecked(false);
+        applyGroupChecked(m_debugGroup, false);
+        applyGroupChecked(m_proxyGroup, false);
         m_proxyTypeCombo->setCurrentIndex(0);
         m_proxyHostEdit->clear();
         m_proxyPortSpin->setValue(0);
@@ -377,10 +421,10 @@ void EditMiniAppsDialog::loadApp(int row)
     m_envEdit->setPlainText(def.env);
     m_healthUrlEdit->setText(def.healthCheckUrl);
     m_timeoutSpin->setValue(def.healthTimeoutMs / 1000);
-    m_advancedGroup->setChecked(!def.healthCheckUrl.isEmpty() || def.healthTimeoutMs != 60000);
+    applyGroupChecked(m_advancedGroup, def.advancedEnabled);
     m_debugPortSpin->setValue(def.debugPort);
-    m_debugGroup->setChecked(def.debugPort > 0);
-    m_proxyGroup->setChecked(def.proxyType > 0);
+    applyGroupChecked(m_debugGroup, def.debugPort > 0);
+    applyGroupChecked(m_proxyGroup, def.proxyType > 0);
     {
         int idx = m_proxyTypeCombo->findData(def.proxyType > 0 ? def.proxyType : 1);
         m_proxyTypeCombo->setCurrentIndex(idx == -1 ? 0 : idx);
@@ -551,21 +595,12 @@ void EditMiniAppsDialog::onRandomPortClicked()
             usedPorts.insert(m_apps[i].debugPort);
     }
 
-    // Scan 9222-9322 for an available port
-    for (int port = 9222; port <= 9322; ++port) {
-        if (usedPorts.contains(port))
-            continue;
-
-        // Bind-test: check if port is actually free on the system
-        QTcpSocket sock;
-        if (sock.bind(QHostAddress::LocalHost, static_cast<quint16>(port))) {
-            sock.close();
-            m_debugPortSpin->setValue(port);
-            return;
-        }
+    const int port = allocateFreeLocalPort(usedPorts);
+    if (port > 0) {
+        m_debugPortSpin->setValue(port);
+        return;
     }
 
-    // All ports exhausted
     QMessageBox::warning(this, tr("No Available Port"),
-        tr("No available port in range 9222-9322. Please enter a port manually."));
+        tr("No free local port is available. Please enter a port manually."));
 }

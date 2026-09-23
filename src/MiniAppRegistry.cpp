@@ -14,6 +14,73 @@
 #include <QJsonObject>
 #include <QUuid>
 
+namespace {
+
+MiniAppDefinition definitionFromJson(const QJsonObject &obj)
+{
+    MiniAppDefinition def;
+    def.id = obj.value(QStringLiteral("id")).toString();
+    def.name = obj.value(QStringLiteral("name")).toString();
+    def.url = obj.value(QStringLiteral("url")).toString();
+    def.command = obj.value(QStringLiteral("command")).toString();
+    def.env = obj.value(QStringLiteral("env")).toString();
+    def.cwd = obj.value(QStringLiteral("cwd")).toString();
+    def.icon = obj.value(QStringLiteral("icon")).toString();
+    def.healthCheckUrl = obj.value(QStringLiteral("healthCheckUrl")).toString();
+    def.healthTimeoutMs = obj.value(QStringLiteral("healthTimeoutMs")).toInt(60000);
+    // Older JSON has no flag. A non-default health field meant the section was on.
+    if (obj.contains(QStringLiteral("advancedEnabled")))
+        def.advancedEnabled = obj.value(QStringLiteral("advancedEnabled")).toBool();
+    else
+        def.advancedEnabled = !def.healthCheckUrl.isEmpty() || def.healthTimeoutMs != 60000;
+    def.debugPort = obj.value(QStringLiteral("debugPort")).toInt(0);
+    def.autoKillOnClose = obj.value(QStringLiteral("autoKillOnClose")).toBool(true);
+    const QString pt = obj.value(QStringLiteral("proxyType")).toString();
+    if (pt == QLatin1String("http")) def.proxyType = 1;
+    else if (pt == QLatin1String("https")) def.proxyType = 2;
+    else if (pt == QLatin1String("socks4")) def.proxyType = 3;
+    else if (pt == QLatin1String("socks5")) def.proxyType = 4;
+    else def.proxyType = 0;
+    def.proxyHost = obj.value(QStringLiteral("proxyHost")).toString();
+    def.proxyPort = obj.value(QStringLiteral("proxyPort")).toInt(0);
+    def.proxyBypassList = obj.value(QStringLiteral("proxyBypassList")).toString();
+    def.allowCrossOrigin = obj.value(QStringLiteral("allowCrossOrigin")).toBool(false);
+    return def;
+}
+
+QJsonObject definitionToJson(const MiniAppDefinition &def)
+{
+    QJsonObject obj;
+    obj.insert(QStringLiteral("id"), def.id.isEmpty()
+        ? QUuid::createUuid().toString(QUuid::WithoutBraces) : def.id);
+    obj.insert(QStringLiteral("name"), def.name);
+    obj.insert(QStringLiteral("url"), def.url);
+    if (!def.command.isEmpty()) obj.insert(QStringLiteral("command"), def.command);
+    if (!def.env.isEmpty()) obj.insert(QStringLiteral("env"), def.env);
+    if (!def.cwd.isEmpty()) obj.insert(QStringLiteral("cwd"), def.cwd);
+    if (!def.icon.isEmpty()) obj.insert(QStringLiteral("icon"), def.icon);
+    if (!def.healthCheckUrl.isEmpty()) obj.insert(QStringLiteral("healthCheckUrl"), def.healthCheckUrl);
+    if (def.healthTimeoutMs != 60000) obj.insert(QStringLiteral("healthTimeoutMs"), def.healthTimeoutMs);
+    // Persist off+remembered so a reload does not derive enabled from the leftover fields.
+    if (def.advancedEnabled)
+        obj.insert(QStringLiteral("advancedEnabled"), true);
+    else if (!def.healthCheckUrl.isEmpty() || def.healthTimeoutMs != 60000)
+        obj.insert(QStringLiteral("advancedEnabled"), false);
+    if (def.debugPort > 0) obj.insert(QStringLiteral("debugPort"), def.debugPort);
+    if (!def.autoKillOnClose) obj.insert(QStringLiteral("autoKillOnClose"), false);
+    if (def.proxyType > 0 && !def.proxyHost.isEmpty()) {
+        static const char *typeStrings[] = {"none", "http", "https", "socks4", "socks5"};
+        obj.insert(QStringLiteral("proxyType"), QLatin1String(typeStrings[qBound(0, def.proxyType, 4)]));
+        obj.insert(QStringLiteral("proxyHost"), def.proxyHost);
+        if (def.proxyPort > 0) obj.insert(QStringLiteral("proxyPort"), def.proxyPort);
+        if (!def.proxyBypassList.isEmpty()) obj.insert(QStringLiteral("proxyBypassList"), def.proxyBypassList);
+    }
+    if (def.allowCrossOrigin) obj.insert(QStringLiteral("allowCrossOrigin"), true);
+    return obj;
+}
+
+} // namespace
+
 MiniAppRegistry::MiniAppRegistry(ApplicationSettings *settings)
     : m_settings(settings)
 {
@@ -50,29 +117,7 @@ QList<MiniAppDefinition> MiniAppRegistry::workspaceApps(const QString &workspace
     QList<MiniAppDefinition> result;
     result.reserve(arr.size());
     for (const auto &v : arr) {
-        const QJsonObject obj = v.toObject();
-        MiniAppDefinition def;
-        def.id = obj.value(QStringLiteral("id")).toString();
-        def.name = obj.value(QStringLiteral("name")).toString();
-        def.url = obj.value(QStringLiteral("url")).toString();
-        def.command = obj.value(QStringLiteral("command")).toString();
-        def.env = obj.value(QStringLiteral("env")).toString();
-        def.cwd = obj.value(QStringLiteral("cwd")).toString();
-        def.icon = obj.value(QStringLiteral("icon")).toString();
-        def.healthCheckUrl = obj.value(QStringLiteral("healthCheckUrl")).toString();
-        def.healthTimeoutMs = obj.value(QStringLiteral("healthTimeoutMs")).toInt(60000);
-        def.debugPort = obj.value(QStringLiteral("debugPort")).toInt(0);
-        def.autoKillOnClose = obj.value(QStringLiteral("autoKillOnClose")).toBool(true);
-        const QString pt = obj.value(QStringLiteral("proxyType")).toString();
-        if (pt == QLatin1String("http")) def.proxyType = 1;
-        else if (pt == QLatin1String("https")) def.proxyType = 2;
-        else if (pt == QLatin1String("socks4")) def.proxyType = 3;
-        else if (pt == QLatin1String("socks5")) def.proxyType = 4;
-        else def.proxyType = 0;
-        def.proxyHost = obj.value(QStringLiteral("proxyHost")).toString();
-        def.proxyPort = obj.value(QStringLiteral("proxyPort")).toInt(0);
-        def.proxyBypassList = obj.value(QStringLiteral("proxyBypassList")).toString();
-        def.allowCrossOrigin = obj.value(QStringLiteral("allowCrossOrigin")).toBool(false);
+        const MiniAppDefinition def = definitionFromJson(v.toObject());
         if (!def.name.isEmpty())
             result.append(def);
     }
@@ -101,27 +146,7 @@ void MiniAppRegistry::setWorkspaceApps(const QString &workspacePath, const QList
     QJsonArray arr;
     for (const MiniAppDefinition &def : apps) {
         if (def.name.isEmpty()) continue;
-        QJsonObject obj;
-        obj.insert(QStringLiteral("id"), def.id.isEmpty() ? QUuid::createUuid().toString(QUuid::WithoutBraces) : def.id);
-        obj.insert(QStringLiteral("name"), def.name);
-        obj.insert(QStringLiteral("url"), def.url);
-        if (!def.command.isEmpty()) obj.insert(QStringLiteral("command"), def.command);
-        if (!def.env.isEmpty()) obj.insert(QStringLiteral("env"), def.env);
-        if (!def.cwd.isEmpty()) obj.insert(QStringLiteral("cwd"), def.cwd);
-        if (!def.icon.isEmpty()) obj.insert(QStringLiteral("icon"), def.icon);
-        if (!def.healthCheckUrl.isEmpty()) obj.insert(QStringLiteral("healthCheckUrl"), def.healthCheckUrl);
-        if (def.healthTimeoutMs != 60000) obj.insert(QStringLiteral("healthTimeoutMs"), def.healthTimeoutMs);
-        if (def.debugPort > 0) obj.insert(QStringLiteral("debugPort"), def.debugPort);
-        if (!def.autoKillOnClose) obj.insert(QStringLiteral("autoKillOnClose"), false);
-        if (def.proxyType > 0 && !def.proxyHost.isEmpty()) {
-            static const char *typeStrings[] = {"none", "http", "https", "socks4", "socks5"};
-            obj.insert(QStringLiteral("proxyType"), QLatin1String(typeStrings[qBound(0, def.proxyType, 4)]));
-            obj.insert(QStringLiteral("proxyHost"), def.proxyHost);
-            if (def.proxyPort > 0) obj.insert(QStringLiteral("proxyPort"), def.proxyPort);
-            if (!def.proxyBypassList.isEmpty()) obj.insert(QStringLiteral("proxyBypassList"), def.proxyBypassList);
-        }
-        if (def.allowCrossOrigin) obj.insert(QStringLiteral("allowCrossOrigin"), true);
-        arr.append(obj);
+        arr.append(definitionToJson(def));
     }
 
     if (arr.isEmpty())
@@ -197,29 +222,7 @@ QList<MiniAppDefinition> MiniAppRegistry::parseJson(const QString &json)
     QList<MiniAppDefinition> result;
     result.reserve(arr.size());
     for (const auto &v : arr) {
-        const QJsonObject obj = v.toObject();
-        MiniAppDefinition def;
-        def.id = obj.value(QStringLiteral("id")).toString();
-        def.name = obj.value(QStringLiteral("name")).toString();
-        def.url = obj.value(QStringLiteral("url")).toString();
-        def.command = obj.value(QStringLiteral("command")).toString();
-        def.env = obj.value(QStringLiteral("env")).toString();
-        def.cwd = obj.value(QStringLiteral("cwd")).toString();
-        def.icon = obj.value(QStringLiteral("icon")).toString();
-        def.healthCheckUrl = obj.value(QStringLiteral("healthCheckUrl")).toString();
-        def.healthTimeoutMs = obj.value(QStringLiteral("healthTimeoutMs")).toInt(60000);
-        def.debugPort = obj.value(QStringLiteral("debugPort")).toInt(0);
-        def.autoKillOnClose = obj.value(QStringLiteral("autoKillOnClose")).toBool(true);
-        const QString pt2 = obj.value(QStringLiteral("proxyType")).toString();
-        if (pt2 == QLatin1String("http")) def.proxyType = 1;
-        else if (pt2 == QLatin1String("https")) def.proxyType = 2;
-        else if (pt2 == QLatin1String("socks4")) def.proxyType = 3;
-        else if (pt2 == QLatin1String("socks5")) def.proxyType = 4;
-        else def.proxyType = 0;
-        def.proxyHost = obj.value(QStringLiteral("proxyHost")).toString();
-        def.proxyPort = obj.value(QStringLiteral("proxyPort")).toInt(0);
-        def.proxyBypassList = obj.value(QStringLiteral("proxyBypassList")).toString();
-        def.allowCrossOrigin = obj.value(QStringLiteral("allowCrossOrigin")).toBool(false);
+        const MiniAppDefinition def = definitionFromJson(v.toObject());
         if (!def.name.isEmpty())
             result.append(def);
     }
@@ -231,27 +234,7 @@ QString MiniAppRegistry::toJson(const QList<MiniAppDefinition> &apps)
     QJsonArray arr;
     for (const MiniAppDefinition &def : apps) {
         if (def.name.isEmpty()) continue;
-        QJsonObject obj;
-        obj.insert(QStringLiteral("id"), def.id.isEmpty() ? QUuid::createUuid().toString(QUuid::WithoutBraces) : def.id);
-        obj.insert(QStringLiteral("name"), def.name);
-        obj.insert(QStringLiteral("url"), def.url);
-        if (!def.command.isEmpty()) obj.insert(QStringLiteral("command"), def.command);
-        if (!def.env.isEmpty()) obj.insert(QStringLiteral("env"), def.env);
-        if (!def.cwd.isEmpty()) obj.insert(QStringLiteral("cwd"), def.cwd);
-        if (!def.icon.isEmpty()) obj.insert(QStringLiteral("icon"), def.icon);
-        if (!def.healthCheckUrl.isEmpty()) obj.insert(QStringLiteral("healthCheckUrl"), def.healthCheckUrl);
-        if (def.healthTimeoutMs != 60000) obj.insert(QStringLiteral("healthTimeoutMs"), def.healthTimeoutMs);
-        if (def.debugPort > 0) obj.insert(QStringLiteral("debugPort"), def.debugPort);
-        if (!def.autoKillOnClose) obj.insert(QStringLiteral("autoKillOnClose"), false);
-        if (def.proxyType > 0 && !def.proxyHost.isEmpty()) {
-            static const char *typeStrings[] = {"none", "http", "https", "socks4", "socks5"};
-            obj.insert(QStringLiteral("proxyType"), QLatin1String(typeStrings[qBound(0, def.proxyType, 4)]));
-            obj.insert(QStringLiteral("proxyHost"), def.proxyHost);
-            if (def.proxyPort > 0) obj.insert(QStringLiteral("proxyPort"), def.proxyPort);
-            if (!def.proxyBypassList.isEmpty()) obj.insert(QStringLiteral("proxyBypassList"), def.proxyBypassList);
-        }
-        if (def.allowCrossOrigin) obj.insert(QStringLiteral("allowCrossOrigin"), true);
-        arr.append(obj);
+        arr.append(definitionToJson(def));
     }
     return QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }

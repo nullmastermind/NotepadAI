@@ -48,7 +48,7 @@ QString MiniAppInstance::debugInfo() const
         info += QStringLiteral("Process: (none)\n");
     }
     info += QStringLiteral("WebView: %1\n").arg(m_webView ? QStringLiteral("created") : QStringLiteral("(null)"));
-    info += QStringLiteral("Health Timeout: %1 ms\n").arg(m_def.healthTimeoutMs);
+    info += QStringLiteral("Health Timeout: %1 ms\n").arg(m_def.effectiveHealthTimeoutMs());
     if (m_pollStartTime > 0) {
         const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - m_pollStartTime;
         info += QStringLiteral("Poll Elapsed: %1 ms\n").arg(elapsed);
@@ -265,10 +265,10 @@ void MiniAppInstance::onHealthPoll()
 
     // Check timeout
     const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - m_pollStartTime;
-    if (elapsed > m_def.healthTimeoutMs) {
+    if (elapsed > m_def.effectiveHealthTimeoutMs()) {
         m_pollTimer->stop();
         m_lastError = tr("Health check timed out after %1 seconds")
-                          .arg(m_def.healthTimeoutMs / 1000);
+                          .arg(m_def.effectiveHealthTimeoutMs() / 1000);
         setState(Failed);
         return;
     }

@@ -165,6 +165,25 @@ target_sources(test_edit_tasks_dialog PRIVATE
 )
 add_test(NAME EditTasksDialog COMMAND test_edit_tasks_dialog)
 
+# --- EditMiniAppsDialog: timeout survives Advanced off; random port is not 922x ---
+qt_add_executable(test_edit_miniapps_dialog test_edit_miniapps_dialog.cpp)
+target_include_directories(test_edit_miniapps_dialog PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/dialogs
+)
+target_link_libraries(test_edit_miniapps_dialog PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Test)
+target_sources(test_edit_miniapps_dialog PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/dialogs/EditMiniAppsDialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/dialogs/EditMiniAppsDialog.h
+    ${CMAKE_SOURCE_DIR}/src/MiniAppRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/MiniAppRegistry.h
+    ${CMAKE_SOURCE_DIR}/src/MiniAppDefinition.h
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
+    ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
+)
+add_test(NAME EditMiniAppsDialog COMMAND test_edit_miniapps_dialog)
+
 # --- ScrollbackBuffer: bounded history ring used by TerminalWidget for sb_pushline/sb_popline ---
 qt_add_executable(test_scrollback_buffer test_scrollback_buffer.cpp)
 target_include_directories(test_scrollback_buffer PRIVATE ${CMAKE_SOURCE_DIR}/src/widgets)
