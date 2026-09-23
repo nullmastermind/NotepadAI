@@ -83,6 +83,7 @@ typedef interface ICoreWebView2_15 ICoreWebView2_15;
 typedef interface ICoreWebView2ContainsFullScreenElementChangedEventHandler ICoreWebView2ContainsFullScreenElementChangedEventHandler;
 typedef interface ICoreWebView2WebResourceRequestedEventHandler ICoreWebView2WebResourceRequestedEventHandler;
 typedef interface ICoreWebView2WindowCloseRequestedEventHandler ICoreWebView2WindowCloseRequestedEventHandler;
+typedef interface ICoreWebView2Deferral ICoreWebView2Deferral;
 
 // --- Interface definitions ---
 
@@ -352,6 +353,47 @@ public:
     virtual HRESULT STDMETHODCALLTYPE CreateCoreWebView2Controller(
         HWND parentWindow,
         ICoreWebView2CreateCoreWebView2ControllerCompletedHandler *handler) = 0;
+};
+
+// New-window args. Vtable order matches SDK 1.0.2903.40 (after IUnknown).
+// Without put_NewWindow, WebView2 opens an uncontrolled popup.
+MIDL_INTERFACE("34acb11c-fc37-4418-9132-f9c21d1eafb9")
+ICoreWebView2NewWindowRequestedEventArgs : public IUnknown
+{
+public:
+    virtual HRESULT STDMETHODCALLTYPE get_Uri(LPWSTR *uri) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_NewWindow(ICoreWebView2 *newWindow) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_NewWindow(ICoreWebView2 **newWindow) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_Handled(BOOL handled) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_Handled(BOOL *handled) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsUserInitiated(BOOL *isUserInitiated) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetDeferral(ICoreWebView2Deferral **deferral) = 0;
+};
+
+MIDL_INTERFACE("c10e7f7b-b585-46f0-a623-8befbf3e4ee0")
+ICoreWebView2Deferral : public IUnknown
+{
+public:
+    virtual HRESULT STDMETHODCALLTYPE Complete() = 0;
+};
+
+static const IID IID_ICoreWebView2NewWindowRequestedEventHandler =
+    {0xd4c185fe,0xc81c,0x4989,{0x97,0xaf,0x2d,0x3f,0xa7,0xab,0x56,0x51}};
+MIDL_INTERFACE("d4c185fe-c81c-4989-97af-2d3fa7ab5651")
+ICoreWebView2NewWindowRequestedEventHandler : public IUnknown
+{
+public:
+    virtual HRESULT STDMETHODCALLTYPE Invoke(
+        ICoreWebView2 *sender, ICoreWebView2NewWindowRequestedEventArgs *args) = 0;
+};
+
+static const IID IID_ICoreWebView2WindowCloseRequestedEventHandler =
+    {0x5c19e9e0,0x092f,0x486b,{0xaf,0xfa,0xca,0x82,0x31,0x91,0x30,0x39}};
+MIDL_INTERFACE("5c19e9e0-092f-486b-affa-ca8231913039")
+ICoreWebView2WindowCloseRequestedEventHandler : public IUnknown
+{
+public:
+    virtual HRESULT STDMETHODCALLTYPE Invoke(ICoreWebView2 *sender, IUnknown *args) = 0;
 };
 
 // --- Handler (callback) interfaces ---

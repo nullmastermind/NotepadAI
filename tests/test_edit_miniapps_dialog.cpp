@@ -36,6 +36,7 @@ private slots:
     void randomPort_isOutsideLegacy9222Range();
     void debugOff_persistsPortAndDoesNotApplyIt();
     void proxyOff_persistsFieldsAndDoesNotApplyThem();
+    void healthReady_commandWaitsFor2xx();
 
 private:
     static QPushButton *buttonWithText(QWidget &root, const QString &text);
@@ -338,6 +339,14 @@ void TestEditMiniAppsDialog::proxyOff_persistsFieldsAndDoesNotApplyThem()
     auto *type = proxy->findChild<QComboBox *>();
     QVERIFY(type);
     QCOMPARE(type->currentData().toInt(), 4);
+}
+
+void TestEditMiniAppsDialog::healthReady_commandWaitsFor2xx()
+{
+    QVERIFY(miniAppHealthReady(200));
+    QVERIFY(miniAppHealthReady(302));
+    QVERIFY(!miniAppHealthReady(403));
+    QVERIFY(!miniAppHealthReady(0));
 }
 
 QTEST_MAIN(TestEditMiniAppsDialog)

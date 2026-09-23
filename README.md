@@ -32,7 +32,7 @@ Right-click a folder in the file tree to pack it as a zip (honors .gitignore, sk
 
 CSV and TSV files open in a sortable, filterable spreadsheet preview that handles large files without loading them entirely into memory.
 
-You can define mini-apps (small HTML/JS tools that run in a native WebView inside the editor), pin Quick Browse and mini-app tabs (favicon only, like Chrome), fire AI agent sessions on a cron schedule, and keep several folder-as-workspace roots open at the same time. A fuzzy picker opens a recent workspace. Another application's window can be embedded in a tab.
+You can define mini-apps (small HTML/JS tools that run in a native WebView inside the editor), pin Quick Browse and mini-app tabs (favicon only, like Chrome), fire AI agent sessions on a cron schedule, and keep several folder-as-workspace roots open at the same time. A fuzzy picker opens a recent workspace. Another application's window can be embedded in a tab. A link that would open a new browser window opens as another tab in that same mini-app or Quick Browse view.
 
 ## Installation
 

@@ -58,3 +58,10 @@ struct MiniAppDefinition
         return proxyEnabled ? proxyType : 0;
     }
 };
+
+// Health polling only runs after a command is spawned, to wait until that
+// process is actually serving. 2xx/3xx means ready.
+inline bool miniAppHealthReady(int httpStatus)
+{
+    return httpStatus >= 200 && httpStatus < 400;
+}

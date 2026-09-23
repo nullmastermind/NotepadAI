@@ -76,6 +76,8 @@ signals:
     void urlChanged(const QString &url);
     void copilotCommandRequested(const QString &command);
     void copilotResult(bool success, const QString &data);
+    // The page called window.close() on the last in-widget tab.
+    void closeRequested();
 
 public:
     void showCdpUrl(const QString &httpUrl);

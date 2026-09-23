@@ -9,6 +9,7 @@
 #include "widgets/WebViewWidget.h"
 
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QMetaEnum>
 #include <QNetworkAccessManager>
@@ -84,10 +85,14 @@ void MiniAppInstance::start()
     }
 
     if (!m_def.command.isEmpty()) {
+        qInfo("MiniApp: %s spawning command", qUtf8Printable(m_def.name));
         spawnProcess();
     } else {
-        // No command — go straight to health polling
-        startHealthPolling();
+        // Nothing to wait for. Health polling only exists so a spawned server
+        // can finish booting; a bare URL opens in the webview immediately.
+        qInfo("MiniApp: %s no command, opening %s",
+              qUtf8Printable(m_def.name), qUtf8Printable(m_def.url));
+        createWebView();
     }
 }
 
@@ -140,6 +145,11 @@ void MiniAppInstance::destroy()
 void MiniAppInstance::setState(State s)
 {
     if (m_state == s) return;
+    const QMetaEnum me = QMetaEnum::fromType<State>();
+    qInfo("MiniApp: %s %s -> %s",
+          qUtf8Printable(m_def.name),
+          me.valueToKey(m_state),
+          me.valueToKey(s));
     m_state = s;
 
     // Clear CDP URLs on terminal/idle states per spec
@@ -269,6 +279,10 @@ void MiniAppInstance::onHealthPoll()
         m_pollTimer->stop();
         m_lastError = tr("Health check timed out after %1 seconds")
                           .arg(m_def.effectiveHealthTimeoutMs() / 1000);
+        qWarning("MiniApp: %s health timeout after %lld ms url=%s",
+                 qUtf8Printable(m_def.name),
+                 static_cast<long long>(elapsed),
+                 qUtf8Printable(m_def.effectiveHealthUrl()));
         setState(Failed);
         return;
     }
@@ -281,7 +295,23 @@ void MiniAppInstance::onHealthPoll()
         if (m_state != Polling) return;
 
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (status >= 200 && status < 400) {
+        const int netErr = static_cast<int>(reply->error());
+        const bool ready = miniAppHealthReady(status);
+
+        const QString signature = QString::number(status) + QLatin1Char('|')
+            + QString::number(netErr);
+        if (property("nnHealthLog").toString() != signature) {
+            setProperty("nnHealthLog", signature);
+            qInfo("MiniApp: %s health %s status=%d error=%s (%d) ready=%d",
+                  qUtf8Printable(m_def.name),
+                  qUtf8Printable(m_def.effectiveHealthUrl()),
+                  status,
+                  qUtf8Printable(reply->errorString()),
+                  netErr,
+                  ready ? 1 : 0);
+        }
+
+        if (ready) {
             m_pollTimer->stop();
             setState(Ready);
             createWebView();
@@ -296,10 +326,13 @@ void MiniAppInstance::createWebView()
                                       m_def.effectiveProxyType(), m_def.proxyHost, m_def.proxyPort, m_def.proxyBypassList,
                                       m_allowCrossOrigin);
     if (!m_webView) {
-        // Platform doesn't support embedded webview (Linux)
+        qWarning("MiniApp: %s webview unavailable on this platform", qUtf8Printable(m_def.name));
         setState(Running);
         return;
     }
+
+    qInfo("MiniApp: %s webview created for %s",
+          qUtf8Printable(m_def.name), qUtf8Printable(m_def.url));
 
     connect(m_webView, &WebViewWidget::navigationCompleted,
             this, &MiniAppInstance::onWebViewNavigationCompleted);

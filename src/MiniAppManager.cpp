@@ -527,6 +527,8 @@ void MiniAppManager::onInstanceStateChanged(MiniAppInstance *instance)
                     [this, dw](const QIcon &icon) { applyTabFavicon(dw, icon); });
 
             webView->initialize();
+            qInfo("MiniApp: %s webview initialize", qUtf8Printable(instance->appName()));
+            connect(webView, &WebViewWidget::closeRequested, dw, &ads::CDockWidget::closeDockWidget);
         }
     }
 }
@@ -800,6 +802,7 @@ void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
     wireDockTabPinRefresh(dw);
 
     webView->initialize();
+    connect(webView, &WebViewWidget::closeRequested, dw, &ads::CDockWidget::closeDockWidget);
 }
 
 void MiniAppManager::retintAllIcons()
