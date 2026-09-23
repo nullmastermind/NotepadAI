@@ -38,7 +38,7 @@
 #include <QProcess>
 #include <QSet>
 #include <QStandardPaths>
-#include <QTcpSocket>
+#include <QTcpServer>
 #include <QTimer>
 #include <QUrl>
 #include <QUuid>
@@ -427,7 +427,7 @@ void MiniAppManager::launchApp(const MiniAppDefinition &def)
             layout->addWidget(text);
             dlg.exec();
         });
-        if (instance->definition().debugPort > 0) {
+        if (instance->definition().effectiveDebugPort() > 0) {
             auto *mainWin = qobject_cast<MainWindow *>(parent());
             AiAgentDock *aiDock = mainWin ? mainWin->activeAiDock() : nullptr;
             if (aiDock && !instance->cdpHttpUrl().isEmpty()) {
@@ -604,15 +604,20 @@ void MiniAppManager::launchQuickBrowser(const QUrl &url, bool enableCdp,
             if (inst->definition().debugPort > 0)
                 reserved.insert(inst->definition().debugPort);
         }
-        QTcpSocket sock;
-        for (int port = 9222; port <= 9322; ++port) {
-            if (reserved.contains(port))
+        // Hold reserved ports so the kernel cannot hand one back, then take
+        // whatever free ephemeral port it assigns. No 9222-9322 scan.
+        QObject held;
+        for (int port : reserved) {
+            if (port <= 0 || port > 65535)
                 continue;
-            if (sock.bind(QHostAddress::LocalHost, port)) {
-                debugPort = port;
-                sock.close();
-                break;
-            }
+            auto *blocker = new QTcpServer(&held);
+            if (!blocker->listen(QHostAddress::LocalHost, static_cast<quint16>(port)))
+                delete blocker;
+        }
+        QTcpServer server;
+        if (server.listen(QHostAddress::LocalHost, 0)) {
+            debugPort = static_cast<int>(server.serverPort());
+            server.close();
         }
     }
 

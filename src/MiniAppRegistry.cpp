@@ -34,6 +34,10 @@ MiniAppDefinition definitionFromJson(const QJsonObject &obj)
     else
         def.advancedEnabled = !def.healthCheckUrl.isEmpty() || def.healthTimeoutMs != 60000;
     def.debugPort = obj.value(QStringLiteral("debugPort")).toInt(0);
+    if (obj.contains(QStringLiteral("debugEnabled")))
+        def.debugEnabled = obj.value(QStringLiteral("debugEnabled")).toBool();
+    else
+        def.debugEnabled = def.debugPort > 0;
     def.autoKillOnClose = obj.value(QStringLiteral("autoKillOnClose")).toBool(true);
     const QString pt = obj.value(QStringLiteral("proxyType")).toString();
     if (pt == QLatin1String("http")) def.proxyType = 1;
@@ -44,6 +48,10 @@ MiniAppDefinition definitionFromJson(const QJsonObject &obj)
     def.proxyHost = obj.value(QStringLiteral("proxyHost")).toString();
     def.proxyPort = obj.value(QStringLiteral("proxyPort")).toInt(0);
     def.proxyBypassList = obj.value(QStringLiteral("proxyBypassList")).toString();
+    if (obj.contains(QStringLiteral("proxyEnabled")))
+        def.proxyEnabled = obj.value(QStringLiteral("proxyEnabled")).toBool();
+    else
+        def.proxyEnabled = def.proxyType > 0 && !def.proxyHost.isEmpty();
     def.allowCrossOrigin = obj.value(QStringLiteral("allowCrossOrigin")).toBool(false);
     return def;
 }
@@ -67,13 +75,24 @@ QJsonObject definitionToJson(const MiniAppDefinition &def)
     else if (!def.healthCheckUrl.isEmpty() || def.healthTimeoutMs != 60000)
         obj.insert(QStringLiteral("advancedEnabled"), false);
     if (def.debugPort > 0) obj.insert(QStringLiteral("debugPort"), def.debugPort);
+    if (def.debugEnabled)
+        obj.insert(QStringLiteral("debugEnabled"), true);
+    else if (def.debugPort > 0)
+        obj.insert(QStringLiteral("debugEnabled"), false);
     if (!def.autoKillOnClose) obj.insert(QStringLiteral("autoKillOnClose"), false);
-    if (def.proxyType > 0 && !def.proxyHost.isEmpty()) {
+    // The type combo defaults to HTTP, so an untouched section must not be written.
+    // An enabled section, or any non-default field, is remembered even when off.
+    const bool proxyRemembered = def.proxyEnabled || def.proxyType > 1
+        || !def.proxyHost.isEmpty() || def.proxyPort > 0 || !def.proxyBypassList.isEmpty();
+    if (proxyRemembered) {
         static const char *typeStrings[] = {"none", "http", "https", "socks4", "socks5"};
-        obj.insert(QStringLiteral("proxyType"), QLatin1String(typeStrings[qBound(0, def.proxyType, 4)]));
-        obj.insert(QStringLiteral("proxyHost"), def.proxyHost);
+        const int type = qBound(0, def.proxyType, 4);
+        if (type > 0)
+            obj.insert(QStringLiteral("proxyType"), QLatin1String(typeStrings[type]));
+        if (!def.proxyHost.isEmpty()) obj.insert(QStringLiteral("proxyHost"), def.proxyHost);
         if (def.proxyPort > 0) obj.insert(QStringLiteral("proxyPort"), def.proxyPort);
         if (!def.proxyBypassList.isEmpty()) obj.insert(QStringLiteral("proxyBypassList"), def.proxyBypassList);
+        obj.insert(QStringLiteral("proxyEnabled"), def.proxyEnabled);
     }
     if (def.allowCrossOrigin) obj.insert(QStringLiteral("allowCrossOrigin"), true);
     return obj;

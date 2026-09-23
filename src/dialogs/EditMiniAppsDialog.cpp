@@ -357,11 +357,13 @@ void EditMiniAppsDialog::commitCurrentApp()
     def.healthCheckUrl = m_healthUrlEdit->text().trimmed();
     def.healthTimeoutMs = m_timeoutSpin->value() * 1000;
     def.advancedEnabled = m_advancedGroup->isChecked();
-    def.debugPort = m_debugGroup->isChecked() ? m_debugPortSpin->value() : 0;
-    def.proxyType = m_proxyGroup->isChecked() ? m_proxyTypeCombo->currentData().toInt() : 0;
-    def.proxyHost = m_proxyGroup->isChecked() ? m_proxyHostEdit->text().trimmed() : QString();
-    def.proxyPort = m_proxyGroup->isChecked() ? m_proxyPortSpin->value() : 0;
-    def.proxyBypassList = m_proxyGroup->isChecked() ? m_proxyBypassEdit->text().trimmed() : QString();
+    def.debugPort = m_debugPortSpin->value();
+    def.debugEnabled = m_debugGroup->isChecked();
+    def.proxyType = m_proxyTypeCombo->currentData().toInt();
+    def.proxyHost = m_proxyHostEdit->text().trimmed();
+    def.proxyPort = m_proxyPortSpin->value();
+    def.proxyBypassList = m_proxyBypassEdit->text().trimmed();
+    def.proxyEnabled = m_proxyGroup->isChecked();
     def.allowCrossOrigin = m_crossOriginCheck->isChecked();
 
     // Ensure ID
@@ -423,8 +425,8 @@ void EditMiniAppsDialog::loadApp(int row)
     m_timeoutSpin->setValue(def.healthTimeoutMs / 1000);
     applyGroupChecked(m_advancedGroup, def.advancedEnabled);
     m_debugPortSpin->setValue(def.debugPort);
-    applyGroupChecked(m_debugGroup, def.debugPort > 0);
-    applyGroupChecked(m_proxyGroup, def.proxyType > 0);
+    applyGroupChecked(m_debugGroup, def.debugEnabled);
+    applyGroupChecked(m_proxyGroup, def.proxyEnabled);
     {
         int idx = m_proxyTypeCombo->findData(def.proxyType > 0 ? def.proxyType : 1);
         m_proxyTypeCombo->setCurrentIndex(idx == -1 ? 0 : idx);

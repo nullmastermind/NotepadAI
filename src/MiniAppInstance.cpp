@@ -73,10 +73,10 @@ void MiniAppInstance::start()
     setState(Idle);
 
     // Pre-launch bind-test for CDP debug port
-    if (m_def.debugPort > 0) {
+    if (m_def.effectiveDebugPort() > 0) {
         QTcpSocket sock;
-        if (!sock.bind(QHostAddress::LocalHost, static_cast<quint16>(m_def.debugPort))) {
-            m_lastError = tr("Debug port %1 is in use").arg(m_def.debugPort);
+        if (!sock.bind(QHostAddress::LocalHost, static_cast<quint16>(m_def.effectiveDebugPort()))) {
+            m_lastError = tr("Debug port %1 is in use").arg(m_def.effectiveDebugPort());
             setState(Failed);
             return;
         }
@@ -292,8 +292,8 @@ void MiniAppInstance::onHealthPoll()
 
 void MiniAppInstance::createWebView()
 {
-    m_webView = WebViewWidget::create(m_def.id, QUrl(m_def.url), m_def.debugPort, nullptr, QString(),
-                                      m_def.proxyType, m_def.proxyHost, m_def.proxyPort, m_def.proxyBypassList,
+    m_webView = WebViewWidget::create(m_def.id, QUrl(m_def.url), m_def.effectiveDebugPort(), nullptr, QString(),
+                                      m_def.effectiveProxyType(), m_def.proxyHost, m_def.proxyPort, m_def.proxyBypassList,
                                       m_allowCrossOrigin);
     if (!m_webView) {
         // Platform doesn't support embedded webview (Linux)

@@ -7,6 +7,7 @@
 
 #include <QtTest>
 
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDialogButtonBox>
 #include <QGroupBox>
@@ -33,6 +34,8 @@ private slots:
     void advancedOff_persistsTimeoutAndRestoresOnRecheck();
     void legacyJson_withoutFlag_treatsCustomTimeoutAsEnabled();
     void randomPort_isOutsideLegacy9222Range();
+    void debugOff_persistsPortAndDoesNotApplyIt();
+    void proxyOff_persistsFieldsAndDoesNotApplyThem();
 
 private:
     static QPushButton *buttonWithText(QWidget &root, const QString &text);
@@ -244,6 +247,97 @@ void TestEditMiniAppsDialog::randomPort_isOutsideLegacy9222Range()
     QVERIFY(assigned <= 65535);
     QVERIFY(assigned < 9222 || assigned > 9322);
     QVERIFY(assigned != before);
+}
+
+void TestEditMiniAppsDialog::debugOff_persistsPortAndDoesNotApplyIt()
+{
+    ApplicationSettings settings;
+    MiniAppRegistry registry(&settings);
+    {
+        EditMiniAppsDialog dialog(&registry, QString());
+        buttonWithText(dialog, QStringLiteral("+"))->click();
+        editWithPlaceholder(dialog, QStringLiteral("Display name (required)"))
+            ->setText(QStringLiteral("Google"));
+        editWithPlaceholder(dialog, QStringLiteral("http://localhost:3000"))
+            ->setText(QStringLiteral("https://g.ai"));
+
+        QGroupBox *debug = groupByTitle(dialog, QStringLiteral("Debug"));
+        QVERIFY(debug);
+        debug->setChecked(true);
+        debugPortSpin(dialog)->setValue(42648);
+        debug->setChecked(false);
+        QCOMPARE(debugPortSpin(dialog)->value(), 42648);
+        QVERIFY(!debugPortSpin(dialog)->isEnabled());
+
+        dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        QCOMPARE(dialog.result(), static_cast<int>(QDialog::Accepted));
+    }
+
+    const MiniAppDefinition saved = registry.globalApps().at(0);
+    QCOMPARE(saved.debugPort, 42648);
+    QVERIFY(!saved.debugEnabled);
+    QCOMPARE(saved.effectiveDebugPort(), 0);
+
+    EditMiniAppsDialog again(&registry, QString());
+    QGroupBox *debug = groupByTitle(again, QStringLiteral("Debug"));
+    QVERIFY(debug);
+    QVERIFY(!debug->isChecked());
+    QCOMPARE(debugPortSpin(again)->value(), 42648);
+    debug->setChecked(true);
+    QVERIFY(debugPortSpin(again)->isEnabled());
+    QCOMPARE(debugPortSpin(again)->value(), 42648);
+}
+
+void TestEditMiniAppsDialog::proxyOff_persistsFieldsAndDoesNotApplyThem()
+{
+    ApplicationSettings settings;
+    MiniAppRegistry registry(&settings);
+    {
+        EditMiniAppsDialog dialog(&registry, QString());
+        buttonWithText(dialog, QStringLiteral("+"))->click();
+        editWithPlaceholder(dialog, QStringLiteral("Display name (required)"))
+            ->setText(QStringLiteral("Google"));
+        editWithPlaceholder(dialog, QStringLiteral("http://localhost:3000"))
+            ->setText(QStringLiteral("https://g.ai"));
+
+        QGroupBox *proxy = groupByTitle(dialog, QStringLiteral("Proxy"));
+        QVERIFY(proxy);
+        proxy->setChecked(true);
+        auto *type = proxy->findChild<QComboBox *>();
+        QVERIFY(type);
+        type->setCurrentIndex(type->findData(4));
+        editWithPlaceholder(dialog, QStringLiteral("proxy.example.com"))
+            ->setText(QStringLiteral("10.0.0.8"));
+        QSpinBox *port = nullptr;
+        for (QSpinBox *spin : dialog.findChildren<QSpinBox *>()) {
+            if (spin->specialValueText() == QStringLiteral("Default"))
+                port = spin;
+        }
+        QVERIFY(port);
+        port->setValue(1080);
+        proxy->setChecked(false);
+
+        dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        QCOMPARE(dialog.result(), static_cast<int>(QDialog::Accepted));
+    }
+
+    const MiniAppDefinition saved = registry.globalApps().at(0);
+    QCOMPARE(saved.proxyType, 4);
+    QCOMPARE(saved.proxyHost, QStringLiteral("10.0.0.8"));
+    QCOMPARE(saved.proxyPort, 1080);
+    QVERIFY(!saved.proxyEnabled);
+    QCOMPARE(saved.effectiveProxyType(), 0);
+
+    EditMiniAppsDialog again(&registry, QString());
+    QGroupBox *proxy = groupByTitle(again, QStringLiteral("Proxy"));
+    QVERIFY(proxy);
+    QVERIFY(!proxy->isChecked());
+    QCOMPARE(editWithPlaceholder(again, QStringLiteral("proxy.example.com"))->text(),
+             QStringLiteral("10.0.0.8"));
+    proxy->setChecked(true);
+    auto *type = proxy->findChild<QComboBox *>();
+    QVERIFY(type);
+    QCOMPARE(type->currentData().toInt(), 4);
 }
 
 QTEST_MAIN(TestEditMiniAppsDialog)
