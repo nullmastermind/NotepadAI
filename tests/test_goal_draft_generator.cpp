@@ -23,6 +23,7 @@
 #include "GoalDraftGenerator.h"
 #include "GoalHttpJudge.h"
 #include "GoalHttpJudgeRunner.h"
+#include "GoalPromptRenderer.h"
 #include "ai/CredentialStore.h"
 #include "ai/IAnthropicMessagesClient.h"
 
@@ -70,6 +71,19 @@ private slots:
     void conversationSummary_doesNotWatermarkUnmarkedGoalAchievedText();
     void conversationSummary_dropsMessagesBeforeCompact();
     void conversationSummary_watermarkUsesLatestBoundary();
+    void developerRequests_keepsHumanOrderAndDropsGoalAgentTurns();
+    void developerRequests_dropsMessagesAtOrBeforeGoalAchieved();
+    void developerRequests_secondMarkerWins();
+    void developerRequests_unmarkedAchievedTextDoesNotCut();
+    void developerRequests_compactCutsAfterEarlierMarker();
+    void developerRequests_attachDropsMatchingLastRequest();
+    void developerRequests_emptySuffixOriginalIsNotProvided();
+    void developerRequests_omitsOldestBeyondEight();
+    void developerRequests_escapesMarkup();
+    void developerRequests_truncatesAtFourThousandChars();
+    void developerRequests_truncatesOriginalAtFourThousandChars();
+    void renderPrompt_developerRequestsUseLatestHumanAfterBoundary();
+    void renderJudgePrompt_keepsOriginalPlainAndSubstitutesRequests();
     void cancel_isIdempotentAndDeletesConnection();
     void start_customApiContinue_emitsDraft();
     void start_customApiComplete_emitsAlreadyComplete();
@@ -886,6 +900,261 @@ void TestGoalDraftGenerator::conversationSummary_watermarkUsesLatestBoundary()
     QVERIFY2(!xml.contains(QStringLiteral("round2")), qPrintable(xml));
     QVERIFY2(xml.contains(QStringLiteral("/compact")), qPrintable(xml));
     QVERIFY2(xml.contains(QStringLiteral("round3")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::developerRequests_keepsHumanOrderAndDropsGoalAgentTurns()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("developer-requests-order"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("first request"), {});
+    model.appendUserMessage(QStringLiteral("goal follow-up"), {}, /*fromGoalAgent=*/true);
+    model.onPromptStarted();
+    model.onMessageChunk(QStringLiteral("assistant reply"));
+    model.onPromptEnded();
+    model.appendUserMessage(QStringLiteral("second request"), {});
+
+    const QString xml = GoalConversationSummary::developerRequestsXml(
+        model.messages(), QStringLiteral("add a button"));
+    QCOMPARE(xml, QStringLiteral(
+        "<developer-requests>\n"
+        "  <request>first request</request>\n"
+        "  <request>second request</request>\n"
+        "  <original-message>add a button</original-message>\n"
+        "</developer-requests>"));
+}
+
+void TestGoalDraftGenerator::developerRequests_dropsMessagesAtOrBeforeGoalAchieved()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("developer-requests-achieved"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("old request"), {});
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: done"),
+                             QLatin1String(kAcpMarkerGoalAchieved));
+    model.appendUserMessage(QStringLiteral("new request"), {});
+
+    const QString xml = GoalConversationSummary::developerRequestsXml(
+        model.messages(), QStringLiteral("add a button"));
+    QVERIFY2(!xml.contains(QStringLiteral("old request")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("<request>new request</request>")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::developerRequests_secondMarkerWins()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("developer-requests-second-marker"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("round1"), {});
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: first"),
+                             QLatin1String(kAcpMarkerGoalAchieved));
+    model.appendUserMessage(QStringLiteral("round2"), {});
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: second"),
+                             QLatin1String(kAcpMarkerGoalAchieved));
+    model.appendUserMessage(QStringLiteral("round3"), {});
+
+    const QString xml = GoalConversationSummary::developerRequestsXml(
+        model.messages(), QStringLiteral("add a button"));
+    QVERIFY2(!xml.contains(QStringLiteral("round1")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("round2")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("<request>round3</request>")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::developerRequests_unmarkedAchievedTextDoesNotCut()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("developer-requests-unmarked"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("old request"), {});
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: done"));
+    model.appendUserMessage(QStringLiteral("new request"), {});
+
+    const QString xml = GoalConversationSummary::developerRequestsXml(
+        model.messages(), QStringLiteral("add a button"));
+    QVERIFY2(xml.contains(QStringLiteral("<request>old request</request>")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("<request>new request</request>")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::developerRequests_compactCutsAfterEarlierMarker()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("developer-requests-compact"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("before achieved"), {});
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: done"),
+                             QLatin1String(kAcpMarkerGoalAchieved));
+    model.appendUserMessage(QStringLiteral("before compact"), {});
+    model.appendUserMessage(QStringLiteral("/compact"), {}, /*fromGoalAgent=*/true);
+    model.appendUserMessage(QStringLiteral("after compact"), {});
+
+    const QString xml = GoalConversationSummary::developerRequestsXml(
+        model.messages(), QStringLiteral("add a button"));
+    QVERIFY2(!xml.contains(QStringLiteral("before achieved")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("before compact")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("<request>after compact</request>")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::developerRequests_attachDropsMatchingLastRequest()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("developer-requests-attach"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("earlier"), {});
+    model.appendUserMessage(QStringLiteral("the objective"), {});
+
+    const QString xml = GoalConversationSummary::developerRequestsXml(
+        model.messages(), QStringLiteral("the objective"));
+    QCOMPARE(xml, QStringLiteral(
+        "<developer-requests>\n"
+        "  <request>earlier</request>\n"
+        "  <original-message>the objective</original-message>\n"
+        "</developer-requests>"));
+}
+
+void TestGoalDraftGenerator::developerRequests_emptySuffixOriginalIsNotProvided()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("developer-requests-empty-suffix"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("old request"), {});
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: done"),
+                             QLatin1String(kAcpMarkerGoalAchieved));
+
+    const QString xml = GoalConversationSummary::developerRequestsXml(model.messages(), QString());
+    QCOMPARE(xml, QStringLiteral(
+        "<developer-requests>\n"
+        "  <original-message>(not provided)</original-message>\n"
+        "</developer-requests>"));
+}
+
+void TestGoalDraftGenerator::developerRequests_omitsOldestBeyondEight()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("developer-requests-cap"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    for (int i = 1; i <= 9; ++i)
+        model.appendUserMessage(QStringLiteral("request %1").arg(i), {});
+
+    const QString xml = GoalConversationSummary::developerRequestsXml(
+        model.messages(), QStringLiteral("add a button"));
+    QVERIFY2(xml.startsWith(QStringLiteral("<developer-requests omitted=\"1\">")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("<request>request 1</request>")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("<request>request 2</request>")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("<request>request 9</request>")), qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::developerRequests_escapesMarkup()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("developer-requests-escape"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("use <xml> & quotes"), {});
+
+    const QString xml = GoalConversationSummary::developerRequestsXml(
+        model.messages(), QStringLiteral("a < b"));
+    QVERIFY2(xml.contains(QStringLiteral("<request>use &lt;xml&gt; &amp; quotes</request>")),
+             qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("<original-message>a &lt; b</original-message>")),
+             qPrintable(xml));
+}
+
+void TestGoalDraftGenerator::developerRequests_truncatesAtFourThousandChars()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("developer-requests-chars"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QString(4001, QLatin1Char('a')), {});
+
+    const QString xml = GoalConversationSummary::developerRequestsXml(
+        model.messages(), QStringLiteral("goal"));
+    QVERIFY(xml.contains(QString(4000, QLatin1Char('a')) + QChar(0x2026)));
+    QVERIFY(!xml.contains(QString(4001, QLatin1Char('a'))));
+}
+
+void TestGoalDraftGenerator::developerRequests_truncatesOriginalAtFourThousandChars()
+{
+    const QString xml = GoalConversationSummary::developerRequestsXml(
+        {}, QString(4001, QLatin1Char('b')));
+    QVERIFY(xml.contains(QStringLiteral("<original-message>")
+                         + QString(4000, QLatin1Char('b')) + QChar(0x2026)
+                         + QStringLiteral("</original-message>")));
+    QVERIFY(!xml.contains(QString(4001, QLatin1Char('b'))));
+}
+
+void TestGoalDraftGenerator::renderPrompt_developerRequestsUseLatestHumanAfterBoundary()
+{
+    GoalAgentSettings goalSettings;
+    GoalPromptTemplate tpl;
+    tpl.id = QStringLiteral("req-template");
+    tpl.name = QStringLiteral("Requests");
+    tpl.content = QStringLiteral("{{developerRequests}}");
+    goalSettings.promptTemplates.append(tpl);
+
+    ApplicationSettings settings;
+    settings.setValue(QStringLiteral("Ai/GoalAgentSettings"),
+                      QString::fromUtf8(QJsonDocument(goalSettings.toJson())
+                                            .toJson(QJsonDocument::Compact)));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("draft-requests"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("old request"), {});
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: done"),
+                             QLatin1String(kAcpMarkerGoalAchieved));
+    model.appendUserMessage(QStringLiteral("new request"), {});
+
+    GoalDraftGenerator generator(nullptr, &settings);
+    GoalDraftGenerator::Request req;
+    req.criteria = QStringLiteral("done");
+    req.promptTemplateId = tpl.id;
+    req.targetModel = &model;
+
+    const QString prompt = generator.renderPromptForTesting(req);
+    QVERIFY2(prompt.contains(QStringLiteral("<original-message>new request</original-message>")),
+             qPrintable(prompt));
+    QVERIFY2(!prompt.contains(QStringLiteral("old request")), qPrintable(prompt));
+    QVERIFY2(!prompt.contains(QStringLiteral("<request>new request</request>")), qPrintable(prompt));
+    QVERIFY2(!prompt.contains(QStringLiteral("(not provided)")), qPrintable(prompt));
+}
+
+void TestGoalDraftGenerator::renderJudgePrompt_keepsOriginalPlainAndSubstitutesRequests()
+{
+    const QString prompt = GoalPromptRenderer::renderJudgePrompt(
+        QStringLiteral("orig={{originalUserMessage}}\nblock={{developerRequests}}"),
+        QStringLiteral("criterion"),
+        QStringLiteral("<conversation />"),
+        1,
+        3,
+        1,
+        1,
+        QStringLiteral("fix the crash"),
+        QStringLiteral("<developer-requests>\n  <original-message>fix the crash</original-message>\n</developer-requests>"));
+    QVERIFY(prompt.contains(QStringLiteral("orig=fix the crash")));
+    QVERIFY(prompt.contains(QStringLiteral("block=<developer-requests>")));
+    QVERIFY(!prompt.contains(QStringLiteral("{{developerRequests}}")));
+    QVERIFY(!prompt.contains(QStringLiteral("{{originalUserMessage}}")));
 }
 
 void TestGoalDraftGenerator::cancel_isIdempotentAndDeletesConnection()

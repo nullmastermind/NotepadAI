@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/prompts">
+        <!-- none: QResource::data() is the file bytes. A compressed entry
+             makes data() unusable and the loader aborts. -->
+        <file alias="goal-agent.md" compression-algorithm="none">goal-agent.md</file>
+    </qresource>
+</RCC>

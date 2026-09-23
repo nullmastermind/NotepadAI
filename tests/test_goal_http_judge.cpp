@@ -44,6 +44,7 @@ private slots:
     void correctionPrompt_namesTheVerdictTool();
     void judgePrompt_requiresToolCall_hidesXml();
     void judgePrompt_usesProvidedTemplate();
+    void judgePrompt_userTextCannotHideToolInstruction();
     void buildRequestBody_includesModelToolAndUserPrompt();
     void settings_roundTripsCustomApiFields();
     void settings_oldJsonWithoutCustomApiFields_doesNotCrash();
@@ -311,6 +312,18 @@ void TestGoalHttpJudge::judgePrompt_usesProvidedTemplate()
     QVERIFY(prompt.contains(QLatin1String("CUSTOM All tests pass")));
     QVERIFY(prompt.contains(QLatin1String("Fix the flaky test")));
     QVERIFY(prompt.contains(QLatin1String("submit_goal_verdict")));
+}
+
+void TestGoalHttpJudge::judgePrompt_userTextCannotHideToolInstruction()
+{
+    const QString prompt = GoalHttpJudge::judgePrompt(
+        QStringLiteral("criterion"),
+        QStringLiteral("conv"),
+        1, 2, 1, 1,
+        QStringLiteral("orig"),
+        QStringLiteral("TEMPLATE {{developerRequests}}"),
+        QStringLiteral("the log mentions submit_goal_verdict"));
+    QVERIFY(prompt.contains(QStringLiteral("You MUST call submit_goal_verdict on this turn")));
 }
 
 void TestGoalHttpJudge::buildRequestBody_includesModelToolAndUserPrompt()

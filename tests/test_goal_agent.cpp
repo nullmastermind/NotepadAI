@@ -9,6 +9,7 @@
  */
 
 #include <QtTest>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include "AcpConnection.h"
@@ -75,6 +76,8 @@ private slots:
     void start_attachToExistingConversation_whenIdle_evaluatesImmediately();
     void start_attachToExistingConversation_whenProcessing_waitsForPromptEnded();
     void start_attachToExistingConversation_usesLastUserMessageAsOriginal();
+    void start_attach_ignoresRequestsBeforeGoalAchieved();
+    void start_snapshotsDeveloperRequestsBeforeLaterUserMessage();
     void launchAction_emptyIdleNoHistory_needsComposer();
     void launchAction_emptyWithHistory_attaches();
     void launchAction_emptyWhileProcessing_attaches();
@@ -732,13 +735,13 @@ void TestGoalAgent::completeUnmetPrefix_stopsWithoutAchieving()
 void TestGoalAgent::builtinPrompt_matchesGoalAgentSpec()
 {
     const QString &prompt = GoalAgentSettings::builtinPromptContent();
-    QVERIFY(prompt.startsWith(QStringLiteral(
-        "You are an automated goal evaluator. A developer has started a goal-driven session "
-        "with a coding agent. Classify whether the success criterion has been met.")));
-    QVERIFY(prompt.contains(QStringLiteral("need human-in-the-loop:")));
-    QVERIFY(prompt.contains(QStringLiteral("max iterations reached:")));
+    QFile file(QStringLiteral(GOAL_AGENT_PROMPT_FILE));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(prompt.toUtf8(), file.readAll());
+    QVERIFY(prompt.contains(QStringLiteral("{{developerRequests}}")));
+    QVERIFY(prompt.contains(QStringLiteral("<original-message>")));
     QVERIFY(prompt.contains(QStringLiteral("{{criterionIndex}}")));
-    QVERIFY(prompt.contains(QStringLiteral("{{originalUserMessage}}")));
+    QVERIFY(prompt.contains(QStringLiteral("{{totalCriteria}}")));
     QVERIFY(prompt.contains(QStringLiteral("{{goal}}")));
     QVERIFY(prompt.contains(QStringLiteral("{{iteration}}")));
     QVERIFY(prompt.contains(QStringLiteral("{{maxIterations}}")));
@@ -877,6 +880,73 @@ void TestGoalAgent::start_attachToExistingConversation_usesLastUserMessageAsOrig
     req.attachToExistingConversation = true;
     QVERIFY(goal.start(req));
     QCOMPARE(goal.m_originalUserMessage, QStringLiteral("fix the crash"));
+}
+
+void TestGoalAgent::start_attach_ignoresRequestsBeforeGoalAchieved()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    model.appendUserMessage(QStringLiteral("old request"), {});
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: done"),
+                             QLatin1String(kAcpMarkerGoalAchieved));
+    model.appendUserMessage(QStringLiteral("new request"), {});
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.attachToExistingConversation = true;
+    QVERIFY(goal.start(req));
+    QCOMPARE(goal.m_originalUserMessage, QStringLiteral("new request"));
+    QVERIFY(!goal.m_developerRequests.contains(QStringLiteral("old request")));
+    QVERIFY(goal.m_developerRequests.contains(
+        QStringLiteral("<original-message>new request</original-message>")));
+    QVERIFY(!goal.m_developerRequests.contains(QStringLiteral("<request>new request</request>")));
+}
+
+void TestGoalAgent::start_snapshotsDeveloperRequestsBeforeLaterUserMessage()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    model.appendUserMessage(QStringLiteral("old request"), {});
+    model.appendSystemMessage(QStringLiteral("✓ Goal achieved: done"),
+                             QLatin1String(kAcpMarkerGoalAchieved));
+    model.appendUserMessage(QStringLiteral("after achieved"), {});
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.originalUserMessage = QStringLiteral("add a button");
+    QVERIFY(goal.start(req));
+
+    const QString snapshot = goal.m_developerRequests;
+    model.appendUserMessage(QStringLiteral("typed mid loop"), {});
+    QCOMPARE(goal.m_developerRequests, snapshot);
+    QVERIFY(snapshot.contains(QStringLiteral("<request>after achieved</request>")));
+    QVERIFY(!snapshot.contains(QStringLiteral("old request")));
+    QVERIFY(!snapshot.contains(QStringLiteral("typed mid loop")));
+    QVERIFY(snapshot.contains(QStringLiteral("<original-message>add a button</original-message>")));
 }
 
 void TestGoalAgent::launchAction_emptyIdleNoHistory_needsComposer()

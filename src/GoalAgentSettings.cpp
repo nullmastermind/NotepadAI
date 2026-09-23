@@ -4,6 +4,7 @@
 
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QResource>
 #include <QUuid>
 
 // --- GoalPromptTemplate ---
@@ -55,50 +56,17 @@ GoalCriteriaPreset GoalCriteriaPreset::fromJson(const QJsonObject &obj)
 
 const QString &GoalAgentSettings::builtinPromptContent()
 {
-    static const QString s = QStringLiteral(
-        "You are an automated goal evaluator. A developer has started a goal-driven session "
-        "with a coding agent. Classify whether the success criterion has been met. "
-        "Leave the fix to the agent.\n\n"
-        "You are evaluating criterion {{criterionIndex}} of {{totalCriteria}}.\n\n"
-        "The developer's original message (the request that started this session):\n"
-        "{{originalUserMessage}}\n\n"
-        "Success criterion:\n"
-        "{{goal}}\n\n"
-        "Iteration: {{iteration}} of {{maxIterations}}\n"
-        "When {{iteration}} equals {{maxIterations}}, emit complete. Do not continue.\n\n"
-        "Conversation since last evaluation:\n"
-        "{{conversation}}\n\n"
-        "Respond with EXACTLY ONE of the following XML actions and nothing else. "
-        "No narration, and nothing outside the action tag.\n\n"
-        "  <action type=\"continue\">Use one of the two lists below, and nothing else. "
-        "Keep the heading as written. Each bullet is one real item from the success criterion, "
-        "in the language of the developer's original message. Do not pick an option.\n\n"
-        "If the agent is waiting on a choice, a question, or a confirmation:\n\n"
-        "Make the choice for this task based on these criteria:\n"
-        "- ...\n\n"
-        "If the criterion is not yet met, list only the unmet parts:\n\n"
-        "The following criteria are not met:\n"
-        "- ...</action>\n\n"
-        "OR\n\n"
-        "  <action type=\"complete\">Brief reason the criterion is met, based on the conversation. "
-        "If the unmet part is an action the agent is unable to perform, start the reason with exactly "
-        "`need human-in-the-loop:` and say what the developer has to do. If the iteration cap is "
-        "reached and neither of those applies, start the reason with exactly `max iterations reached:`. "
-        "Those two completes stop the loop and hand back with the criterion still unmet.</action>\n\n"
-        "OR\n\n"
-        "  <action type=\"restart\">Write a first-person prompt for a fresh coding-agent session. "
-        "Use this when the current session hit a context-length error, stopped suddenly, or is "
-        "otherwise unusable. The coding agent will be restarted and this text will be sent as the "
-        "first message. Include enough context for it to resume the criterion. Match the language "
-        "and tone of the developer's original message above.</action>\n\n"
-        "Use `need human-in-the-loop:` only when the unmet part is an action the agent is unable to "
-        "perform. A question, a preference, or waiting for confirmation stays with the agent: "
-        "continue with the choice list, drawn from the success criterion. The agent saying it did "
-        "an action it cannot perform is not evidence.\n\n"
-        "If you are not sure, the remaining work is still the agent's, and {{iteration}} is below "
-        "{{maxIterations}}, emit continue with the unmet list. Do not emit a success complete unless "
-        "the conversation shows the criterion is satisfied. A success reason must not start with "
-        "`need human-in-the-loop` or `max iterations reached`.\n");
+    // prompts/prompts.qrc must be compiled into this binary; Q_INIT_RESOURCE
+    // turns a missing qrc into a link error instead of an empty prompt.
+    static const QString s = [] {
+        Q_INIT_RESOURCE(prompts);
+        const QResource res(QStringLiteral(":/prompts/goal-agent.md"));
+        if (!res.isValid() || res.size() <= 0 || res.data() == nullptr
+            || res.compressionAlgorithm() != QResource::NoCompression)
+            qFatal("builtin goal prompt resource missing");
+        return QString::fromUtf8(reinterpret_cast<const char *>(res.data()),
+                                 static_cast<qsizetype>(res.size()));
+    }();
     return s;
 }
 

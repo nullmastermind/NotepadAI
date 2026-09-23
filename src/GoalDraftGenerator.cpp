@@ -380,6 +380,9 @@ QString GoalDraftGenerator::renderPrompt(const Request &request) const
     if (criteria.isEmpty())
         return QString();
 
+    const QVector<AcpMessage> msgs = request.targetModel
+        ? request.targetModel->messages()
+        : QVector<AcpMessage>{};
     return GoalPromptRenderer::renderJudgePrompt(
         tpl->content,
         criteria.first(),
@@ -388,7 +391,9 @@ QString GoalDraftGenerator::renderPrompt(const Request &request) const
         goalSettings.defaultMaxIterations,
         1,
         criteria.size(),
-        sanitized.trimmed());
+        sanitized.trimmed(),
+        GoalConversationSummary::developerRequestsXml(
+            msgs, GoalConversationSummary::latestDeveloperText(msgs)));
 }
 
 void GoalDraftGenerator::finishWithError(const QString &message)

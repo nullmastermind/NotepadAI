@@ -111,6 +111,7 @@ qt_add_executable(NotepadAI
 	ShutdownDiagnostics.h
 	resources.qrc
 	scripts.qrc
+	prompts/prompts.qrc
 	ApplicationSettings.cpp
 	AcpAgentManager.cpp
 	AcpAgentRegistry.cpp

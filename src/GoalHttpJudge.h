@@ -50,7 +50,8 @@ public:
                                int criterionIndex,
                                int totalCriteria,
                                const QString &originalUserMessage,
-                               const QString &templateContent = QString());
+                               const QString &templateContent = QString(),
+                               const QString &developerRequests = QString());
     static QByteArray buildRequestBody(const QString &model, const QString &userPrompt);
     static QByteArray buildRetryBody(const QString &model,
                                     const QString &originalUserPrompt,

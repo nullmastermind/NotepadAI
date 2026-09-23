@@ -97,21 +97,12 @@ bool GoalAgent::start(const StartRequest &req)
     }
 
     if (req.attachToExistingConversation && m_originalUserMessage.isEmpty()) {
-        const auto &msgs = m_targetModel->messages();
-        for (int i = msgs.size() - 1; i >= 0; --i) {
-            const auto &msg = msgs[i];
-            if (msg.role != QLatin1String("user") || msg.fromGoalAgent)
-                continue;
-            QString text;
-            for (const auto &block : msg.content) {
-                if (block.kind == AcpProtocol::AcpContentBlock::Kind::Text)
-                    text += block.text;
-            }
-            m_originalUserMessage = text.trimmed();
-            if (!m_originalUserMessage.isEmpty())
-                break;
-        }
+        m_originalUserMessage = GoalConversationSummary::latestDeveloperText(
+            m_targetModel->messages());
     }
+
+    m_developerRequests = GoalConversationSummary::developerRequestsXml(
+        m_targetModel->messages(), m_originalUserMessage);
 
     // Subscribe to target's promptEnded signal.
     connect(m_targetConnection, &AcpConnection::promptEnded,
@@ -358,7 +349,8 @@ void GoalAgent::evaluateCurrentCriterion()
         m_maxIterations,
         m_currentCriterionIndex + 1,
         m_criteria.size(),
-        m_originalUserMessage);
+        m_originalUserMessage,
+        m_developerRequests);
 
     logDebug(QStringLiteral("evaluateCurrentCriterion: sending judge prompt (%1 chars)")
                  .arg(prompt.size()));
@@ -775,6 +767,17 @@ void GoalAgent::evaluateViaHttp()
 {
     ensureHttpJudge();
 
+    const QString settingsJson = m_appSettings->get(
+        "Ai/GoalAgentSettings", QString());
+    GoalAgentSettings goalSettings;
+    if (!settingsJson.isEmpty()) {
+        goalSettings = GoalAgentSettings::fromJson(
+            QJsonDocument::fromJson(settingsJson.toUtf8()).object());
+    }
+    const GoalPromptTemplate *tpl = goalSettings.findTemplate(m_promptTemplateId);
+    if (!tpl)
+        tpl = &goalSettings.defaultTemplate();
+
     const auto &crit = m_criteria[m_currentCriterionIndex];
     const QString conversation = buildConversationSummary();
     const QString prompt = GoalHttpJudge::judgePrompt(
@@ -784,7 +787,9 @@ void GoalAgent::evaluateViaHttp()
         m_maxIterations,
         m_currentCriterionIndex + 1,
         m_criteria.size(),
-        m_originalUserMessage);
+        m_originalUserMessage,
+        tpl->content,
+        m_developerRequests);
 
     m_awaitingJudgeResponse = true;
     logDebug(QStringLiteral("evaluateViaHttp: prompt=%1 chars").arg(prompt.size()));

@@ -185,6 +185,7 @@ private:
     QString m_promptTemplateId;
     bool m_autoCompact = false;
     QString m_originalUserMessage;
+    QString m_developerRequests;
     QString m_lastActionText;
 
     QPointer<AcpConnection> m_targetConnection;

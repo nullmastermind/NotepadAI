@@ -116,7 +116,8 @@ QString GoalHttpJudge::judgePrompt(const QString &goal,
                                    int criterionIndex,
                                    int totalCriteria,
                                    const QString &originalUserMessage,
-                                   const QString &templateContent)
+                                   const QString &templateContent,
+                                   const QString &developerRequests)
 {
     static const QString kHttpTemplate = QStringLiteral(
         "You are an automated goal evaluator. A developer has started a goal-driven session "
@@ -147,8 +148,10 @@ QString GoalHttpJudge::judgePrompt(const QString &goal,
         maxIterations,
         criterionIndex,
         totalCriteria,
-        originalUserMessage);
-    if (!templateContent.isEmpty() && !core.contains(QLatin1String("submit_goal_verdict"))) {
+        originalUserMessage,
+        developerRequests);
+    if (!templateContent.isEmpty()
+        && !templateContent.contains(QLatin1String("submit_goal_verdict"))) {
         return core + QStringLiteral(
             "\nYou MUST call submit_goal_verdict on this turn with status "
             "\"continue\" or \"complete\" and a text field. Do not answer in prose.\n");

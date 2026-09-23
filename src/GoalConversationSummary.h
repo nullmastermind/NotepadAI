@@ -19,9 +19,10 @@
 #ifndef GOAL_CONVERSATION_SUMMARY_H
 #define GOAL_CONVERSATION_SUMMARY_H
 
-#include <QString>
+#include "AcpSessionModel.h"
 
-class AcpSessionModel;
+#include <QString>
+#include <QVector>
 
 // Target-session XML for the Goal judge / draft enhancer.
 // User + assistant text only (thought/system omitted from the XML body).
@@ -34,6 +35,13 @@ class GoalConversationSummary
 {
 public:
     static QString fromModel(const AcpSessionModel *model, int startIndex = 0);
+
+    // Developer-typed requests after the latest round boundary, plus the
+    // resolved original text. Goal-agent prompts are omitted.
+    static QString developerRequestsXml(const QVector<AcpMessage> &messages,
+                                        const QString &originalText);
+    static QString latestDeveloperText(const QVector<AcpMessage> &messages);
+    static int latestRoundBoundaryIndex(const QVector<AcpMessage> &messages);
 };
 
 #endif // GOAL_CONVERSATION_SUMMARY_H

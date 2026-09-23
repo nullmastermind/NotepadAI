@@ -1968,3 +1968,19 @@ target_sources(test_watched_path_delete PRIVATE
     ${CMAKE_SOURCE_DIR}/src/WatchedPathDelete.h
 )
 add_test(NAME WatchedPathDelete COMMAND test_watched_path_delete)
+
+# GoalAgentSettings.cpp calls Q_INIT_RESOURCE(prompts). Every target that
+# compiles that file must also compile the qrc, or the link fails.
+foreach(goal_prompt_test
+        test_goal_draft_generator
+        test_send_with_goal_dialog
+        test_acp_agent_manager
+        test_acp_agent_exit_restart
+        test_acp_dock_close_event
+        test_goal_http_judge
+        test_goal_agent)
+    target_sources(${goal_prompt_test} PRIVATE ${CMAKE_SOURCE_DIR}/src/prompts/prompts.qrc)
+endforeach()
+file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}/src/prompts/goal-agent.md" GOAL_AGENT_PROMPT_FILE)
+target_compile_definitions(test_goal_agent PRIVATE
+    "GOAL_AGENT_PROMPT_FILE=\"${GOAL_AGENT_PROMPT_FILE}\"")

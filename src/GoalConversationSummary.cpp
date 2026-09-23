@@ -242,11 +242,23 @@ QString GoalConversationSummary::fromModel(const AcpSessionModel *model, int sta
     if (startIndex > msgs.size())
         startIndex = msgs.size();
     const int watermark = lastRoundBoundaryIndex(msgs);
-    if (watermark > startIndex)
+    const bool raisedToBoundary = watermark > startIndex;
+    if (raisedToBoundary)
         startIndex = watermark;
 
     const auto &timeline = model->timeline();
-    const int begin = timelineBegin(timeline, startIndex);
+    int begin = timelineBegin(timeline, startIndex);
+    if (raisedToBoundary) {
+        begin = timeline.size();
+        for (int i = 0; i < timeline.size(); ++i) {
+            const auto &entry = timeline.at(i);
+            if (entry.kind == AcpTimelineEntry::Kind::Message
+                && entry.messageIndex == startIndex) {
+                begin = i;
+                break;
+            }
+        }
+    }
 
     QString xml;
     xml.reserve(32 + (timeline.size() - begin) * 96);
@@ -267,4 +279,87 @@ QString GoalConversationSummary::fromModel(const AcpSessionModel *model, int sta
 
     xml += QStringLiteral("</conversation>");
     return xml;
+}
+
+QString GoalConversationSummary::developerRequestsXml(const QVector<AcpMessage> &messages,
+                                                      const QString &originalText)
+{
+    constexpr int kMaxRequests = 8;
+    constexpr int kMaxChars = 4000;
+    const auto capText = [](QString text) {
+        if (text.size() <= kMaxChars)
+            return text;
+        text.truncate(kMaxChars);
+        if (!text.isEmpty() && text.back().isHighSurrogate())
+            text.chop(1);
+        text.append(QChar(0x2026));
+        return text;
+    };
+
+    const int begin = latestRoundBoundaryIndex(messages) + 1;
+    QStringList human;
+    for (int i = begin; i < messages.size(); ++i) {
+        const AcpMessage &msg = messages.at(i);
+        if (msg.role != QLatin1String("user") || msg.fromGoalAgent)
+            continue;
+        const QString text = textContent(msg).trimmed();
+        if (!text.isEmpty())
+            human.append(text);
+    }
+
+    QString original = originalText.trimmed();
+    if (!human.isEmpty() && human.last() == original)
+        human.removeLast();
+    if (original.isEmpty())
+        original = QStringLiteral("(not provided)");
+    else
+        original = capText(std::move(original));
+
+    int omitted = 0;
+    if (human.size() > kMaxRequests) {
+        omitted = human.size() - kMaxRequests;
+        human = human.mid(omitted);
+    }
+    for (QString &text : human) {
+        if (text.size() <= kMaxChars)
+            continue;
+        text = capText(std::move(text));
+    }
+
+    QString xml;
+    if (omitted > 0) {
+        xml = QStringLiteral("<developer-requests omitted=\"%1\">\n").arg(omitted);
+    } else {
+        xml = QStringLiteral("<developer-requests>\n");
+    }
+    for (const QString &text : human) {
+        xml += QStringLiteral("  <request>")
+               + text.toHtmlEscaped()
+               + QStringLiteral("</request>\n");
+    }
+    xml += QStringLiteral("  <original-message>")
+           + original.toHtmlEscaped()
+           + QStringLiteral("</original-message>\n");
+    xml += QStringLiteral("</developer-requests>");
+    return xml;
+}
+
+int GoalConversationSummary::latestRoundBoundaryIndex(const QVector<AcpMessage> &messages)
+{
+    return lastRoundBoundaryIndex(messages);
+}
+
+QString GoalConversationSummary::latestDeveloperText(const QVector<AcpMessage> &messages)
+{
+    const int begin = latestRoundBoundaryIndex(messages) + 1;
+    QString latest;
+    for (int i = begin; i < messages.size(); ++i) {
+        const AcpMessage &msg = messages.at(i);
+        if (msg.role != QLatin1String("user") || msg.fromGoalAgent)
+            continue;
+        const QString text = textContent(msg).trimmed();
+        if (!text.isEmpty())
+            latest = text;
+    }
+    return latest;
 }

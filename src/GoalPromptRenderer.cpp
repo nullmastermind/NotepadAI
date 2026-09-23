@@ -34,7 +34,8 @@ QString GoalPromptRenderer::renderJudgePrompt(const QString &templateContent,
                                               int maxIterations,
                                               int criterionIndex,
                                               int totalCriteria,
-                                              const QString &originalUserMessage)
+                                              const QString &originalUserMessage,
+                                              const QString &developerRequests)
 {
     QHash<QString, QString> vars;
     vars.insert(QStringLiteral("goal"), goal);
@@ -47,6 +48,7 @@ QString GoalPromptRenderer::renderJudgePrompt(const QString &templateContent,
                 originalUserMessage.isEmpty()
                     ? QStringLiteral("(not provided)")
                     : originalUserMessage);
+    vars.insert(QStringLiteral("developerRequests"), developerRequests);
     return singlePassReplace(templateContent, vars);
 }
 
