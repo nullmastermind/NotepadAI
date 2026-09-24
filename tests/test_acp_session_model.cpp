@@ -41,6 +41,12 @@ private slots:
     void loadRoundTrip();
     void imageBlocksSurviveRoundTrip();
     void detachingHistoryStoreFlushesPendingSnapshot();
+    void usageReplace_zeroUsedSameSizeDuringTurnDoesNotClobberOccupancy();
+    void usageReplace_smallerNonZeroDuringTurnReplacesOccupancy();
+    void usageReplace_zeroUsedWhileIdleReplacesOccupancy();
+    void usageReplace_zeroUsedDifferentSizeDuringTurnReplacesOccupancy();
+    void usageUpdate_promptTurnTotalDoesNotClobberContextOccupancy();
+    void usageUpdate_promptTurnTotalAppliesWhenNoContextWindow();
 };
 
 void TestAcpSessionModel::emptySessionDoesNotPersist()
@@ -282,6 +288,129 @@ void TestAcpSessionModel::imageBlocksSurviveRoundTrip()
     QCOMPARE(content.at(1).kind, AcpProtocol::AcpContentBlock::Kind::Image);
     QCOMPARE(content.at(1).imageData, imgBytes);
     QCOMPARE(content.at(1).mimeType, QStringLiteral("image/png"));
+}
+
+void TestAcpSessionModel::usageReplace_zeroUsedSameSizeDuringTurnDoesNotClobberOccupancy()
+{
+    // claude-agent-acp emits usage_update {used:0, size:same} at each assistant
+    // message_start, before the stream snapshot is populated. Applying it makes
+    // the context bar flash to 0% and back for the rest of the turn.
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("usage"), QStringLiteral("proj"), tmp.path());
+
+    AcpProtocol::AcpUsage context;
+    context.totalTokens = 149700;
+    context.maxTokens = 1000000;
+    model.onUsageReplaced(context);
+    model.onPromptStarted();
+
+    AcpProtocol::AcpUsage flash;
+    flash.totalTokens = 0;
+    flash.maxTokens = 1000000;
+    model.onUsageReplaced(flash);
+
+    QVERIFY(model.usage().has_value());
+    QCOMPARE(model.usage()->totalTokens, std::optional<int>(149700));
+    QCOMPARE(model.usage()->maxTokens, std::optional<int>(1000000));
+}
+
+void TestAcpSessionModel::usageReplace_smallerNonZeroDuringTurnReplacesOccupancy()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("usage"), QStringLiteral("proj"), tmp.path());
+
+    AcpProtocol::AcpUsage context;
+    context.totalTokens = 149700;
+    context.maxTokens = 1000000;
+    model.onUsageReplaced(context);
+    model.onPromptStarted();
+
+    AcpProtocol::AcpUsage compacted;
+    compacted.totalTokens = 42000;
+    compacted.maxTokens = 1000000;
+    model.onUsageReplaced(compacted);
+
+    QCOMPARE(model.usage()->totalTokens, std::optional<int>(42000));
+    QCOMPARE(model.usage()->maxTokens, std::optional<int>(1000000));
+}
+
+void TestAcpSessionModel::usageReplace_zeroUsedWhileIdleReplacesOccupancy()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("usage"), QStringLiteral("proj"), tmp.path());
+
+    AcpProtocol::AcpUsage context;
+    context.totalTokens = 149700;
+    context.maxTokens = 1000000;
+    model.onUsageReplaced(context);
+
+    AcpProtocol::AcpUsage cleared;
+    cleared.totalTokens = 0;
+    cleared.maxTokens = 1000000;
+    model.onUsageReplaced(cleared);
+
+    QCOMPARE(model.usage()->totalTokens, std::optional<int>(0));
+    QCOMPARE(model.usage()->maxTokens, std::optional<int>(1000000));
+}
+
+void TestAcpSessionModel::usageReplace_zeroUsedDifferentSizeDuringTurnReplacesOccupancy()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("usage"), QStringLiteral("proj"), tmp.path());
+
+    AcpProtocol::AcpUsage context;
+    context.totalTokens = 149700;
+    context.maxTokens = 1000000;
+    model.onUsageReplaced(context);
+    model.onPromptStarted();
+
+    AcpProtocol::AcpUsage switched;
+    switched.totalTokens = 0;
+    switched.maxTokens = 200000;
+    model.onUsageReplaced(switched);
+
+    QCOMPARE(model.usage()->totalTokens, std::optional<int>(0));
+    QCOMPARE(model.usage()->maxTokens, std::optional<int>(200000));
+}
+
+void TestAcpSessionModel::usageUpdate_promptTurnTotalDoesNotClobberContextOccupancy()
+{
+    // session/prompt usage.totalTokens is turn accounting (sum of each round),
+    // not tokens currently in context. Merging it over a usage_update occupancy
+    // jumps the bar at the end of the turn.
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("usage"), QStringLiteral("proj"), tmp.path());
+
+    AcpProtocol::AcpUsage context;
+    context.totalTokens = 149700;
+    context.maxTokens = 1000000;
+    model.onUsageReplaced(context);
+
+    AcpProtocol::AcpUsage turn;
+    turn.inputTokens = 500000;
+    turn.outputTokens = 2000;
+    turn.totalTokens = 502000;
+    model.onUsageUpdated(turn);
+
+    QVERIFY(model.usage().has_value());
+    QCOMPARE(model.usage()->totalTokens, std::optional<int>(149700));
+    QCOMPARE(model.usage()->maxTokens, std::optional<int>(1000000));
+}
+
+void TestAcpSessionModel::usageUpdate_promptTurnTotalAppliesWhenNoContextWindow()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("usage"), QStringLiteral("proj"), tmp.path());
+
+    AcpProtocol::AcpUsage turn;
+    turn.inputTokens = 1000;
+    turn.outputTokens = 801;
+    turn.totalTokens = 1801;
+    model.onUsageUpdated(turn);
+
+    QVERIFY(model.usage().has_value());
+    QCOMPARE(model.usage()->totalTokens, std::optional<int>(1801));
+    QVERIFY(!model.usage()->maxTokens.has_value());
 }
 
 void TestAcpSessionModel::detachingHistoryStoreFlushesPendingSnapshot()

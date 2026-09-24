@@ -756,9 +756,16 @@ void AcpSessionModel::onUsageUpdated(const AcpUsage &usage)
     // not identical fields. Replacing wholesale would drop e.g. maxTokens
     // when a later event only reports totalTokens.
     AcpUsage merged = m_usage.value_or(AcpUsage{});
+    // session/prompt usage is turn accounting and never carries maxTokens.
+    // Once usage_update has established context occupancy, that total is what
+    // the bar shows — a later turn sum must not replace it.
+    const bool turnAccountingOnly = !usage.maxTokens.has_value();
+    const bool contextOccupancyKnown = merged.maxTokens.has_value() && *merged.maxTokens > 0
+        && merged.totalTokens.has_value();
     if (usage.inputTokens.has_value())  merged.inputTokens  = usage.inputTokens;
     if (usage.outputTokens.has_value()) merged.outputTokens = usage.outputTokens;
-    if (usage.totalTokens.has_value())  merged.totalTokens  = usage.totalTokens;
+    if (usage.totalTokens.has_value() && !(turnAccountingOnly && contextOccupancyKnown))
+        merged.totalTokens = usage.totalTokens;
     if (usage.maxTokens.has_value())    merged.maxTokens    = usage.maxTokens;
     if (usage.costAmount.has_value())   merged.costAmount   = usage.costAmount;
     if (usage.costCurrency.has_value()) merged.costCurrency = usage.costCurrency;
@@ -769,8 +776,19 @@ void AcpSessionModel::onUsageUpdated(const AcpUsage &usage)
 
 void AcpSessionModel::onUsageReplaced(const AcpUsage &usage)
 {
-    // `usage_update` is the agent's authoritative running total — overwrite
-    // the snapshot so stale fields (e.g. a previous turn's cost) don't linger.
+    // claude-agent-acp emits usage_update {used:0, size:<unchanged>} at each
+    // assistant message_start, before that message's usage snapshot exists.
+    // The next delta corrects it. Applying the zero mid-turn flashes the
+    // context bar to 0%. A real clear while idle, a size change, or a
+    // non-zero compaction still replaces.
+    if (m_isProcessing
+        && m_usage.has_value()
+        && usage.totalTokens.has_value() && *usage.totalTokens == 0
+        && m_usage->totalTokens.value_or(0) > 0
+        && usage.maxTokens.has_value()
+        && m_usage->maxTokens == usage.maxTokens) {
+        return;
+    }
     m_usage = usage;
     emit usageChanged();
     schedulePersistIfNeeded();

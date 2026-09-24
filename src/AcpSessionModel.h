@@ -145,8 +145,9 @@ public slots:
     void onConfigOptionsUpdated(const QList<AcpProtocol::AcpConfigOption> &options);
     void onUsageUpdated(const AcpProtocol::AcpUsage &usage);
     // Authoritative replacement (from `usage_update` notifications). Overwrites
-    // m_usage wholesale instead of merging — used when the agent reports a
-    // running total that supersedes earlier partial info.
+    // m_usage wholesale instead of merging — except a mid-turn used:0 with an
+    // unchanged size, which claude-agent-acp emits before the real snapshot
+    // and which must not flash the context bar to 0%.
     void onUsageReplaced(const AcpProtocol::AcpUsage &usage);
     void onPromptStarted();
     void onPromptEnded();
