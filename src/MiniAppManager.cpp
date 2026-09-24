@@ -340,21 +340,6 @@ void MiniAppManager::launchApp(const MiniAppDefinition &def)
         }
     }
 
-    // Warning at 4th instance (3 already running, counting quick browser tabs).
-    // Skip during pin-restore so restart does not pop a dialog per extra app.
-    const int totalWebViews = m_instances.size() + m_quickBrowserTabs.size();
-    if (!m_restoringPins && totalWebViews >= 3) {
-        QMessageBox::StandardButton btn = QMessageBox::warning(
-            nullptr,
-            tr("Mini Apps"),
-            tr("Each Mini App uses ~100MB RAM. You have %1 WebView2 instances running. Continue?")
-                .arg(totalWebViews),
-            QMessageBox::Yes | QMessageBox::Cancel,
-            QMessageBox::Cancel);
-        if (btn != QMessageBox::Yes)
-            return;
-    }
-
 #ifdef Q_OS_LINUX
     // Linux fallback: spawn command (if any) detached, then xdg-open
     if (!def.command.isEmpty()) {

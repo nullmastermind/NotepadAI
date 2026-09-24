@@ -9,7 +9,9 @@
 
 #include "ai/OpenaiAnthropicBridge.h"
 
+#include <QAbstractButton>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QClipboard>
 #include <QDialogButtonBox>
 #include <QEvent>
@@ -133,6 +135,7 @@ void WebViewWidget::changeEvent(QEvent *event)
     case QEvent::StyleChange:
     case QEvent::ApplicationPaletteChange:
         rebuildToolbarIcons();
+        applyViewport();
         break;
     default:
         break;
@@ -261,6 +264,31 @@ void WebViewWidget::setupToolbar()
     connect(m_stopBtn, &QToolButton::clicked, this, &WebViewWidget::stop);
     m_toolbarLayout->addWidget(m_stopBtn);
 
+    m_viewportGroup = new QButtonGroup(this);
+    m_viewportGroup->setExclusive(true);
+    auto addViewportBtn = [this, toolbarWidget](ViewportMode mode, const QString &label, const QString &tip) {
+        auto *btn = new QToolButton(toolbarWidget);
+        btn->setAutoRaise(true);
+        btn->setCheckable(true);
+        btn->setText(label);
+        btn->setToolTip(tip);
+        QFont f = btn->font();
+        f.setPointSize(qMax(1, f.pointSize() - 1));
+        btn->setFont(f);
+        m_viewportGroup->addButton(btn, static_cast<int>(mode));
+        m_toolbarLayout->addWidget(btn);
+        return btn;
+    };
+    addViewportBtn(ViewportMode::Fit, tr("Fit"), tr("Fit to tab"));
+    addViewportBtn(ViewportMode::Mobile, tr("Mobile"), tr("Mobile (390px)"));
+    addViewportBtn(ViewportMode::Tablet, tr("Tablet"), tr("Tablet (768px)"));
+    addViewportBtn(ViewportMode::Pc, tr("PC"), tr("PC (1280px)"));
+    if (QAbstractButton *fit = m_viewportGroup->button(static_cast<int>(ViewportMode::Fit)))
+        fit->setChecked(true);
+    connect(m_viewportGroup, &QButtonGroup::idClicked, this, [this](int id) {
+        setViewportMode(static_cast<ViewportMode>(id));
+    });
+
     m_cdpBtn = new QToolButton(toolbarWidget);
     m_cdpBtn->setAutoRaise(true);
     m_cdpBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -283,6 +311,28 @@ void WebViewWidget::setupToolbar()
 
     m_mainLayout->addWidget(toolbarWidget);
     rebuildToolbarIcons();
+}
+
+void WebViewWidget::setViewportMode(ViewportMode mode)
+{
+    if (m_viewportGroup) {
+        if (QAbstractButton *btn = m_viewportGroup->button(static_cast<int>(mode)))
+            btn->setChecked(true);
+    }
+    if (m_viewportMode == mode)
+        return;
+    m_viewportMode = mode;
+    applyViewport();
+}
+
+void WebViewWidget::styleViewportHost(QWidget *host) const
+{
+    if (!host)
+        return;
+    host->setAutoFillBackground(true);
+    QPalette p = host->palette();
+    p.setColor(QPalette::Window, palette().color(QPalette::Window).darker(125));
+    host->setPalette(p);
 }
 
 void WebViewWidget::setLoading(bool loading)
@@ -575,11 +625,11 @@ void WebViewWidget::executeCopilotCommand(const QString &command, const QString 
 
 void WebViewWidget::handleCopilotMessage(const QString &json)
 {
-    copilotLog(QStringLiteral("[handleCopilotMessage] received: %1").arg(json.left(200)));
     QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
     if (!doc.isObject()) return;
     QJsonObject obj = doc.object();
     const QString type = obj.value(QStringLiteral("type")).toString();
+    copilotLog(QStringLiteral("[handleCopilotMessage] received: %1").arg(json.left(200)));
 
     if (type == QStringLiteral("nai-fetch")) {
         handleNativeFetch(json);

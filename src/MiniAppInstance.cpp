@@ -350,14 +350,14 @@ void MiniAppInstance::createWebView()
 
 void MiniAppInstance::onWebViewNavigationCompleted(bool success, const QString &error)
 {
-    if (m_state == Initializing) {
-        if (success) {
-            setState(Running);
-        } else {
-            m_lastError = error;
-            setState(Failed);
-        }
-    }
+    // WebView2 reports IsSuccess=FALSE for superseded navigations (redirect,
+    // SPA replace, OPERATION_CANCELED). That is not a mini-app failure — the
+    // page is often already usable. Failed is spawn/health only.
+    if (m_state != Initializing && m_state != Failed)
+        return;
+    if (!success && !error.isEmpty())
+        m_lastError = error;
+    setState(Running);
 }
 
 void MiniAppInstance::onWebViewProcessFailed(const QString &description)

@@ -7,6 +7,7 @@
 
 #include "WebViewWidget.h"
 
+#include <QResizeEvent>
 #include <QUrl>
 #include <QWindow>
 #include <QUuid>
@@ -85,9 +86,10 @@ public:
             m_webView.navigationDelegate = m_navDelegate;
 
             QWindow *foreignWindow = QWindow::fromWinId(reinterpret_cast<WId>(m_webView));
-            m_container = QWidget::createWindowContainer(foreignWindow, this);
-            m_container->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-            mainLayout()->addWidget(m_container, 1);
+            m_viewportHost = new QWidget(this);
+            styleViewportHost(m_viewportHost);
+            mainLayout()->addWidget(m_viewportHost, 1);
+            m_container = QWidget::createWindowContainer(foreignWindow, m_viewportHost);
 
             setLoading(true);
             NSURL *nsUrl = [NSURL URLWithString:initialUrl().toString().toNSString()];
@@ -171,6 +173,20 @@ public:
     }
 
 protected:
+    void applyViewport() override
+    {
+        if (!m_viewportHost || !m_container)
+            return;
+        styleViewportHost(m_viewportHost);
+        m_container->setGeometry(viewportBounds(m_viewportHost->width(), m_viewportHost->height()));
+    }
+
+    void resizeEvent(QResizeEvent *event) override
+    {
+        WebViewWidget::resizeEvent(event);
+        applyViewport();
+    }
+
     void focusInEvent(QFocusEvent *event) override
     {
         WebViewWidget::focusInEvent(event);
@@ -183,6 +199,7 @@ private:
     WKWebView *m_webView = nil;
     MiniAppNavDelegate *m_navDelegate = nil;
     CopilotMessageHandler *m_msgHandler = nil;
+    QWidget *m_viewportHost = nullptr;
     QWidget *m_container = nullptr;
 };
 

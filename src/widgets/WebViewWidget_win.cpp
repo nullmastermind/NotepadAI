@@ -125,6 +125,17 @@ void closeBorrowedController(ICoreWebView2Controller *controller)
     controller->Release();
 }
 
+void injectPageScripts(ICoreWebView2 *webView)
+{
+    if (!webView)
+        return;
+    static const wchar_t kFetchJs[] =
+        L"Object.defineProperty(window,'__nai_fetch',{"
+        L"value:window.fetch.bind(window),"
+        L"writable:false,configurable:false,enumerable:false});";
+    webView->AddScriptToExecuteOnDocumentCreated(kFetchJs, nullptr);
+}
+
 // WebView2 Windows implementation using the COM SDK directly.
 // Async initialization: HWND → Environment → Controller → WebView → Navigate.
 class WebViewWidgetWin : public WebViewWidget
@@ -168,6 +179,7 @@ public:
         m_hostWidget->setAttribute(Qt::WA_NativeWindow);
         m_hostWidget->setAttribute(Qt::WA_DontCreateNativeAncestors, false);
         m_hostWidget->setFocusPolicy(Qt::ClickFocus);
+        styleViewportHost(m_hostWidget);
         m_stack->addWidget(m_hostWidget);
     }
 
@@ -361,17 +373,111 @@ public:
     }
 
 protected:
+    void applyControllerBounds(ICoreWebView2Controller *controller, QWidget *host)
+    {
+        if (!controller || !host)
+            return;
+        const QRect r = viewportBounds(host->width(), host->height());
+        RECT bounds;
+        bounds.left = r.x();
+        bounds.top = r.y();
+        bounds.right = r.x() + r.width();
+        bounds.bottom = r.y() + r.height();
+        controller->put_Bounds(bounds);
+    }
+
+    void applyTouchEmulation(ICoreWebView2 *webView)
+    {
+        if (!webView)
+            return;
+        const bool touch = touchViewport();
+        const bool modeChanged = (webView != m_touchView || touch != m_touchOn);
+        if (modeChanged) {
+            m_touchView = webView;
+            m_touchOn = touch;
+            const wchar_t *mouseParams = touch
+                ? L"{\"enabled\":true,\"configuration\":\"mobile\"}"
+                : L"{\"enabled\":false}";
+            const wchar_t *touchParams = touch ? L"{\"enabled\":true}" : L"{\"enabled\":false}";
+            webView->CallDevToolsProtocolMethod(
+                L"Emulation.setEmitTouchEventsForMouse", mouseParams, nullptr);
+            webView->CallDevToolsProtocolMethod(
+                L"Emulation.setTouchEmulationEnabled", touchParams, nullptr);
+            QString uaJson;
+            if (!touch) {
+                uaJson = QStringLiteral("{\"userAgent\":\"\"}");
+            } else if (viewportMode() == ViewportMode::Mobile) {
+                uaJson = QStringLiteral(
+                    "{\"userAgent\":\"Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1\","
+                    "\"platform\":\"iPhone\"}");
+            } else {
+                uaJson = QStringLiteral(
+                    "{\"userAgent\":\"Mozilla/5.0 (iPad; CPU OS 17_6 like Mac OS X) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1\","
+                    "\"platform\":\"iPad\"}");
+            }
+            webView->CallDevToolsProtocolMethod(
+                L"Emulation.setUserAgentOverride", uaJson.toStdWString().c_str(), nullptr);
+        }
+
+        const QRect r = m_hostWidget
+            ? viewportBounds(m_hostWidget->width(), m_hostWidget->height())
+            : QRect();
+        const int w = qMax(1, r.width());
+        const int h = qMax(1, r.height());
+        const int dpr = (viewportMode() == ViewportMode::Mobile) ? 3 : 2;
+        if (!touch) {
+            if (m_metricsOn) {
+                m_metricsOn = false;
+                webView->CallDevToolsProtocolMethod(
+                    L"Emulation.clearDeviceMetricsOverride", L"{}", nullptr);
+            }
+            return;
+        }
+        if (m_metricsOn && webView == m_metricsView && w == m_metricsW && h == m_metricsH && dpr == m_metricsDpr)
+            return;
+        m_metricsOn = true;
+        m_metricsView = webView;
+        m_metricsW = w;
+        m_metricsH = h;
+        m_metricsDpr = dpr;
+        const QString metrics = QStringLiteral(
+            "{\"width\":%1,\"height\":%2,\"deviceScaleFactor\":%3,\"mobile\":true,"
+            "\"screenWidth\":%1,\"screenHeight\":%2,"
+            "\"screenOrientation\":{\"type\":\"portraitPrimary\",\"angle\":0}}")
+                                    .arg(w)
+                                    .arg(h)
+                                    .arg(dpr);
+        webView->CallDevToolsProtocolMethod(
+            L"Emulation.setDeviceMetricsOverride", metrics.toStdWString().c_str(), nullptr);
+    }
+
+    void applyViewport() override
+    {
+        styleViewportHost(m_hostWidget);
+        applyControllerBounds(m_controller, m_hostWidget);
+        if (!m_webView)
+            return;
+        if (m_webView != m_touchView || touchViewport() != m_touchOn) {
+            applyTouchEmulation(m_webView);
+            return;
+        }
+        if (!m_emulationTimer) {
+            m_emulationTimer = new QTimer(this);
+            m_emulationTimer->setSingleShot(true);
+            m_emulationTimer->setInterval(50);
+            connect(m_emulationTimer, &QTimer::timeout, this, [this]() {
+                applyTouchEmulation(m_webView);
+            });
+        }
+        m_emulationTimer->start();
+    }
+
     void resizeEvent(QResizeEvent *event) override
     {
         QWidget::resizeEvent(event);
-        if (m_controller && m_hostWidget) {
-            RECT bounds;
-            bounds.left = 0;
-            bounds.top = 0;
-            bounds.right = m_hostWidget->width();
-            bounds.bottom = m_hostWidget->height();
-            m_controller->put_Bounds(bounds);
-        }
+        applyViewport();
     }
 
     bool eventFilter(QObject *watched, QEvent *event) override
@@ -527,12 +633,8 @@ private:
         }
 
         // Set initial bounds
-        RECT bounds;
-        bounds.left = 0;
-        bounds.top = 0;
-        bounds.right = m_hostWidget->width();
-        bounds.bottom = m_hostWidget->height();
-        m_controller->put_Bounds(bounds);
+        applyControllerBounds(m_controller, m_hostWidget);
+        applyTouchEmulation(m_webView);
 
         // Subscribe to NavigationCompleted
         EventRegistrationToken navToken;
@@ -575,11 +677,8 @@ private:
         m_webView->add_SourceChanged(
             new SourceChangedHandler(this), &srcToken);
 
-        // Inject pristine fetch reference before any page script runs
-        const std::wstring pristineFetchJs = L"Object.defineProperty(window,'__nai_fetch',{"
-            L"value:window.fetch.bind(window),"
-            L"writable:false,configurable:false,enumerable:false});";
-        m_webView->AddScriptToExecuteOnDocumentCreated(pristineFetchJs.c_str(), nullptr);
+        // Inject page scripts before any page script runs
+        injectPageScripts(m_webView);
 
         // NOTE: We deliberately do NOT pre-create a Trusted Types 'default' policy at
         // document creation. 'default' is a per-realm singleton — claiming it first makes
@@ -1067,6 +1166,7 @@ private:
         host->setAttribute(Qt::WA_NativeWindow);
         host->setAttribute(Qt::WA_DontCreateNativeAncestors, false);
         host->setFocusPolicy(Qt::ClickFocus);
+        styleViewportHost(host);
         m_stack->addWidget(host);
 
         QString title = tr("New tab");
@@ -1156,14 +1256,11 @@ private:
             settings->Release();
         }
 
-        RECT bounds{0, 0, page.host->width(), page.host->height()};
-        page.controller->put_Bounds(bounds);
+        applyControllerBounds(page.controller, page.host);
+        applyTouchEmulation(page.webView);
         wirePageEvents(page.webView, page.controller);
 
-        const std::wstring pristineFetchJs = L"Object.defineProperty(window,'__nai_fetch',{"
-            L"value:window.fetch.bind(window),"
-            L"writable:false,configurable:false,enumerable:false});";
-        page.webView->AddScriptToExecuteOnDocumentCreated(pristineFetchJs.c_str(), nullptr);
+        injectPageScripts(page.webView);
 
         // Hand the still-unnavigated view to WebView2 only after this returns.
         // Completing the deferral is what lets the opener navigate it; doing that
@@ -1280,10 +1377,8 @@ private:
             if (m_pages[i].hwnd)
                 ShowWindow(m_pages[i].hwnd, i == index ? SW_SHOW : SW_HIDE);
         }
-        if (m_controller && page.host) {
-            RECT bounds{0, 0, page.host->width(), page.host->height()};
-            m_controller->put_Bounds(bounds);
-        }
+        applyControllerBounds(m_controller, page.host);
+        applyTouchEmulation(m_webView);
         if (m_tabBar && m_tabBar->currentIndex() != index) {
             m_switching = true;
             m_tabBar->setCurrentIndex(index);
@@ -1458,6 +1553,14 @@ private:
     ICoreWebView2Environment *m_environment = nullptr;
     ICoreWebView2Controller *m_controller = nullptr;
     ICoreWebView2 *m_webView = nullptr;
+    ICoreWebView2 *m_touchView = nullptr;
+    bool m_touchOn = false;
+    ICoreWebView2 *m_metricsView = nullptr;
+    bool m_metricsOn = false;
+    int m_metricsW = 0;
+    int m_metricsH = 0;
+    int m_metricsDpr = 0;
+    QTimer *m_emulationTimer = nullptr;
     QTabBar *m_tabBar = nullptr;
     QStackedWidget *m_stack = nullptr;
     QVector<Page> m_pages;

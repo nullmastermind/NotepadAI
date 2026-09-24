@@ -14,6 +14,7 @@
 #include <QLineEdit>
 #include <QNetworkAccessManager>
 #include <QPlainTextEdit>
+#include <QRect>
 #include <QTimer>
 #include <QToolButton>
 #include <QUrl>
@@ -21,6 +22,8 @@
 #include <QWidget>
 
 #include <functional>
+
+class QButtonGroup;
 
 // Abstract webview widget. Platform implementations live in
 // WebViewWidget_win.cpp (WebView2) and WebViewWidget_mac.mm (WKWebView).
@@ -66,6 +69,30 @@ public:
 
     QString currentUrl() const { return m_urlEdit ? m_urlEdit->text() : QString(); }
 
+    enum class ViewportMode : quint8 {
+        Fit = 0,
+        Mobile,
+        Tablet,
+        Pc
+    };
+
+    ViewportMode viewportMode() const { return m_viewportMode; }
+    void setViewportMode(ViewportMode mode);
+
+    static QRect viewportBoundsFor(ViewportMode mode, int availW, int availH)
+    {
+        int target = 0;
+        switch (mode) {
+        case ViewportMode::Mobile: target = 390; break;
+        case ViewportMode::Tablet: target = 768; break;
+        case ViewportMode::Pc:     target = 1280; break;
+        case ViewportMode::Fit:    break;
+        }
+        const int w = (target <= 0) ? qMax(0, availW) : qMin(qMax(0, availW), target);
+        const int x = (availW - w) / 2;
+        return {x, 0, w, qMax(0, availH)};
+    }
+
 signals:
     void navigationCompleted(bool success, const QString &error);
     void processFailed(const QString &description);
@@ -98,6 +125,16 @@ protected:
 
     void setLoading(bool loading);
     void changeEvent(QEvent *event) override;
+    QRect viewportBounds(int availW, int availH) const
+    {
+        return viewportBoundsFor(m_viewportMode, availW, availH);
+    }
+    bool touchViewport() const
+    {
+        return m_viewportMode == ViewportMode::Mobile || m_viewportMode == ViewportMode::Tablet;
+    }
+    virtual void applyViewport() {}
+    void styleViewportHost(QWidget *host) const;
 
 private:
     void setupToolbar();
@@ -119,6 +156,8 @@ private:
     QToolButton *m_cdpBtn = nullptr;
     QString m_cdpHttpUrl;
     QString m_cdpDisplayText;
+    ViewportMode m_viewportMode = ViewportMode::Fit;
+    QButtonGroup *m_viewportGroup = nullptr;
 
     // AI copilot
     QToolButton *m_aiBtn = nullptr;
