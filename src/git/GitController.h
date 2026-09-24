@@ -20,9 +20,11 @@
 #define GIT_CONTROLLER_H
 
 #include "GitError.h"
+#include "GitRefreshCoalescer.h"
 #include "GitRepoInfo.h"
 #include "GitStatusEntry.h"
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QQueue>
 #include <QString>
@@ -185,7 +187,9 @@ private:
     GitRepoModel *m_repos;
     GitStatusModel *m_status;
     GitWatcher *m_watcher;
-    QTimer *m_refreshDebounce;
+    QTimer *m_refreshDebounce = nullptr;
+    QElapsedTimer m_refreshClock;
+    GitRefreshCoalescer m_coalescer;
 
     QString m_currentRepo;
     QString m_currentBranch;
@@ -209,7 +213,6 @@ private:
     QQueue<Op> m_queue;
     bool m_busy = false;
     Op m_current;
-    bool m_refreshScheduled = false;
 
     void setState(State s);
     void enqueue(const Op &op);
@@ -247,6 +250,7 @@ private:
     bool m_lastHeadShaExitNonZero = false;
 
     void scheduleDebouncedRefresh();
+    void applyCoalescedRefresh(GitRefreshCoalescer::Decision d);
 };
 
 #endif // GIT_CONTROLLER_H

@@ -338,6 +338,7 @@ qt_add_executable(NotepadAI
 	git/GitBlameFetcher.h
 	git/GitController.cpp
 	git/GitController.h
+	git/GitRefreshCoalescer.h
 	git/GitCommitDetail.h
 	git/GitCommitFetcher.cpp
 	git/GitCommitFetcher.h

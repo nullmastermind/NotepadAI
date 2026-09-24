@@ -69,10 +69,10 @@ GitController::GitController(const QString &workspaceRoot, QObject *parent)
 
     m_refreshDebounce = new QTimer(this);
     m_refreshDebounce->setSingleShot(true);
-    m_refreshDebounce->setInterval(200);
+    m_refreshDebounce->setInterval(static_cast<int>(GitRefreshCoalescer::kQuietMs));
+    m_refreshClock.start();
     connect(m_refreshDebounce, &QTimer::timeout, this, [this]() {
-        m_refreshScheduled = false;
-        refresh();
+        applyCoalescedRefresh(m_coalescer.onQuietElapsed(m_refreshClock.elapsed(), m_busy));
     });
 
     // progressLine lives on the concrete runner (the interface can't carry Qt
@@ -119,7 +119,15 @@ GitController::GitController(const QString &workspaceRoot, QObject *parent)
                 });
 }
 
-GitController::~GitController() = default;
+GitController::~GitController()
+{
+    // Member destruction runs before the QTimer child is deleted. A timeout
+    // delivered in that window would call into m_coalescer after it is gone.
+    if (m_refreshDebounce == nullptr)
+        return;
+    m_refreshDebounce->stop();
+    disconnect(m_refreshDebounce, nullptr, this, nullptr);
+}
 
 void GitController::setRunnerForTesting(IGitProcessRunner *runner)
 {
@@ -140,9 +148,18 @@ bool GitController::hasConflicts() const
 
 void GitController::scheduleDebouncedRefresh()
 {
-    if (m_refreshScheduled) return;
-    m_refreshScheduled = true;
-    m_refreshDebounce->start();
+    applyCoalescedRefresh(m_coalescer.onDirty(m_refreshClock.elapsed(), m_busy));
+}
+
+void GitController::applyCoalescedRefresh(GitRefreshCoalescer::Decision d)
+{
+    if (d == GitRefreshCoalescer::Decision::Fire) {
+        m_refreshDebounce->stop();
+        refresh();
+        return;
+    }
+    if (m_coalescer.pending())
+        m_refreshDebounce->start();
 }
 
 void GitController::initialize()
@@ -256,6 +273,10 @@ void GitController::applySelectRepo(const QString &cleanToplevel)
 {
     m_currentRepo = cleanToplevel;
     m_watcher->setRepo(m_currentRepo);
+    // The switch enqueues its own refresh. Drop a burst aimed at the previous
+    // repo so it cannot schedule a second refresh of this one.
+    m_coalescer.acknowledgeRefresh();
+    m_refreshDebounce->stop();
     // Clear stale ahead/behind before the next status fetch fills it. Without
     // this the UI would briefly show counts from the prior repo.
     if (m_ahead != 0 || m_behind != 0 || m_hasUpstream) {
@@ -271,9 +292,11 @@ void GitController::refresh()
 {
     if (m_currentRepo.isEmpty()) return;
     if (m_busy) {
-        m_refreshScheduled = true;
+        m_coalescer.requestImmediateFollowUp();
         return;
     }
+    m_coalescer.acknowledgeRefresh();
+    m_refreshDebounce->stop();
     enqueueFullRefresh();
 }
 
@@ -612,7 +635,7 @@ void GitController::runNext()
         m_busy = false;
         if (m_state == State::Running || m_state == State::Refreshing) setState(State::Idle);
         // Apply a repo switch the user requested while we were busy. Done
-        // before honoring m_refreshScheduled so a stale refresh of the old
+        // before a coalesced follow-up refresh so a stale refresh of the old
         // repo doesn't race with the switch.
         if (!m_pendingRepoSwitch.isEmpty() && m_pendingRepoSwitch != m_currentRepo) {
             const QString target = m_pendingRepoSwitch;
@@ -621,10 +644,8 @@ void GitController::runNext()
             return;
         }
         m_pendingRepoSwitch.clear();
-        if (m_refreshScheduled) {
-            m_refreshScheduled = false;
-            refresh();
-        }
+        if (m_coalescer.pending())
+            applyCoalescedRefresh(m_coalescer.onRefreshDrained(m_refreshClock.elapsed()));
         return;
     }
     m_busy = true;
@@ -1020,7 +1041,7 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
         }
         if (kind == OpKind::Pull && e.kind == GitError::MergeConflict) {
             setState(State::Idle);
-            scheduleDebouncedRefresh();
+            refresh();
             emit pullConflicted();
             popAndAdvance();
             return;
@@ -1177,7 +1198,7 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
                     emit app->gitHeadChanged();
             }
             if (!humanName.isEmpty()) emit opSucceeded(humanName);
-            scheduleDebouncedRefresh();
+            refresh();
             break;
         default: break;
     }

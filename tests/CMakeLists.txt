@@ -83,6 +83,14 @@ target_include_directories(test_commit_submit_policy PRIVATE
 target_link_libraries(test_commit_submit_policy PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME CommitSubmitPolicy COMMAND test_commit_submit_policy)
 
+# --- GitRefreshCoalescer: trailing debounce + max-wait for status refresh ---
+qt_add_executable(test_git_refresh_coalescer test_git_refresh_coalescer.cpp)
+target_include_directories(test_git_refresh_coalescer PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/git
+)
+target_link_libraries(test_git_refresh_coalescer PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME GitRefreshCoalescer COMMAND test_git_refresh_coalescer)
+
 # --- TerminalCwdResolver: pure path-resolution logic for the Terminal menu actions ---
 qt_add_executable(test_terminal_cwd_resolver test_terminal_cwd_resolver.cpp)
 target_include_directories(test_terminal_cwd_resolver PRIVATE ${CMAKE_SOURCE_DIR}/src)
