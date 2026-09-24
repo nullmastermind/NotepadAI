@@ -152,6 +152,8 @@ public:
 
     DEFINE_SETTING(ShellCommand, shellCommand, QString)
     DEFINE_SETTING(TerminalFont, terminalFont, QString)
+    // GiB commit ceiling for processes launched from a local terminal. 0 = no limit.
+    DEFINE_SETTING(TerminalChildMemoryLimitGb, terminalChildMemoryLimitGb, int)
 
     DEFINE_SETTING(LastProxyType, lastProxyType, int)
     DEFINE_SETTING(LastProxyHost, lastProxyHost, QString)

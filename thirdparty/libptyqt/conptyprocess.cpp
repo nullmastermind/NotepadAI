@@ -3,8 +3,10 @@
  */
 
 #include "conptyprocess.h"
+#include "commitjob.h"
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -68,24 +70,29 @@ HRESULT ConPtyProcess::createPseudoConsoleAndPipes(HPCON *phPC, HANDLE *phPipeIn
     return hr;
 }
 
-HRESULT ConPtyProcess::initializeStartupInfoAttachedToPseudoConsole(STARTUPINFOEXW *pStartupInfo, HPCON hPC)
+HRESULT ConPtyProcess::initializeStartupInfoAttachedToPseudoConsole(STARTUPINFOEXW *pStartupInfo, HPCON hPC,
+                                                                     HANDLE *jobList, DWORD jobCount)
 {
     if (!pStartupInfo) {
         return E_UNEXPECTED;
     }
 
+    const DWORD attrCount = jobCount > 0 ? 2u : 1u;
     SIZE_T attrListSize = 0;
     pStartupInfo->StartupInfo.cb = sizeof(STARTUPINFOEXW);
 
-    InitializeProcThreadAttributeList(nullptr, 1, 0, &attrListSize);
+    InitializeProcThreadAttributeList(nullptr, attrCount, 0, &attrListSize);
 
     pStartupInfo->lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(malloc(attrListSize));
     if (!pStartupInfo->lpAttributeList) {
         return E_OUTOFMEMORY;
     }
 
-    if (!InitializeProcThreadAttributeList(pStartupInfo->lpAttributeList, 1, 0, &attrListSize)) {
-        return HRESULT_FROM_WIN32(GetLastError());
+    if (!InitializeProcThreadAttributeList(pStartupInfo->lpAttributeList, attrCount, 0, &attrListSize)) {
+        const DWORD err = GetLastError();
+        free(pStartupInfo->lpAttributeList);
+        pStartupInfo->lpAttributeList = nullptr;
+        return HRESULT_FROM_WIN32(err);
     }
 
     if (!UpdateProcThreadAttribute(
@@ -96,7 +103,28 @@ HRESULT ConPtyProcess::initializeStartupInfoAttachedToPseudoConsole(STARTUPINFOE
             sizeof(HPCON),
             nullptr,
             nullptr)) {
-        return HRESULT_FROM_WIN32(GetLastError());
+        const DWORD err = GetLastError();
+        DeleteProcThreadAttributeList(pStartupInfo->lpAttributeList);
+        free(pStartupInfo->lpAttributeList);
+        pStartupInfo->lpAttributeList = nullptr;
+        return HRESULT_FROM_WIN32(err);
+    }
+
+    if (jobCount > 0 && jobList) {
+        if (!UpdateProcThreadAttribute(
+                pStartupInfo->lpAttributeList,
+                0,
+                PROC_THREAD_ATTRIBUTE_JOB_LIST,
+                jobList,
+                sizeof(HANDLE) * jobCount,
+                nullptr,
+                nullptr)) {
+            const DWORD err = GetLastError();
+            DeleteProcThreadAttributeList(pStartupInfo->lpAttributeList);
+            free(pStartupInfo->lpAttributeList);
+            pStartupInfo->lpAttributeList = nullptr;
+            return HRESULT_FROM_WIN32(err);
+        }
     }
 
     return S_OK;
@@ -193,14 +221,12 @@ bool ConPtyProcess::startProcess(const QString &shellPath, const QString &workin
         return false;
     }
 
-    STARTUPINFOEXW startupInfo{};
-    hr = initializeStartupInfoAttachedToPseudoConsole(&startupInfo, m_ptyHandler);
-    if (hr != S_OK) {
-        m_lastError = QStringLiteral("ConPty Error: InitializeStartupInfoAttachedToPseudoConsole failed");
-        return false;
+    if (m_childCommitLimit > 0) {
+        m_job = static_cast<HANDLE>(createCommitLimitedJob(m_childCommitLimit));
+        if (!m_job) {
+            qWarning("Terminal: could not create memory-limit job; launching uncapped");
+        }
     }
-
-    PROCESS_INFORMATION piClient{};
 
     std::wstring cmdLine = shellPath.toStdWString();
     std::vector<wchar_t> cmdMutable(cmdLine.begin(), cmdLine.end());
@@ -213,21 +239,74 @@ bool ConPtyProcess::startProcess(const QString &shellPath, const QString &workin
         cwd = cwdStr.c_str();
     }
 
-    BOOL created = CreateProcessW(
-        nullptr,
-        cmdMutable.data(),
-        nullptr,
-        nullptr,
-        FALSE,
-        EXTENDED_STARTUPINFO_PRESENT | extraFlags,
-        lpEnvironment,
-        cwd,
-        &startupInfo.StartupInfo,
-        &piClient);
+    // jobList must outlive CreateProcess; the attribute list holds the pointer.
+    HANDLE jobList[1] = { m_job };
 
-    if (!created) {
-        DWORD err = GetLastError();
-        m_lastError = QStringLiteral("ConPty Error: CreateProcess failed (%1)").arg(err);
+    auto spawn = [&](HANDLE job, PROCESS_INFORMATION *pi, DWORD *errOut) -> bool {
+        STARTUPINFOEXW startupInfo{};
+        const HRESULT hr = initializeStartupInfoAttachedToPseudoConsole(
+            &startupInfo, m_ptyHandler, job ? jobList : nullptr, job ? 1u : 0u);
+        if (hr != S_OK) {
+            if (errOut) {
+                *errOut = HRESULT_CODE(hr);
+            }
+            m_lastError = QStringLiteral("ConPty Error: InitializeStartupInfoAttachedToPseudoConsole failed");
+            return false;
+        }
+
+        const BOOL created = CreateProcessW(
+            nullptr,
+            cmdMutable.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            EXTENDED_STARTUPINFO_PRESENT | extraFlags,
+            lpEnvironment,
+            cwd,
+            &startupInfo.StartupInfo,
+            pi);
+
+        const DWORD err = created ? 0 : GetLastError();
+        if (startupInfo.lpAttributeList) {
+            DeleteProcThreadAttributeList(startupInfo.lpAttributeList);
+            free(startupInfo.lpAttributeList);
+        }
+        if (!created) {
+            if (errOut) {
+                *errOut = err;
+            }
+            m_lastError = QStringLiteral("ConPty Error: CreateProcess failed (%1)").arg(err);
+            return false;
+        }
+        return true;
+    };
+
+    PROCESS_INFORMATION piClient{};
+    DWORD spawnErr = 0;
+    bool spawned = false;
+    if (m_job) {
+        spawned = spawn(m_job, &piClient, &spawnErr);
+        if (!spawned) {
+            // ConPTY + JOB_LIST is rejected on some builds. Launch, then assign.
+            // The shell is idle until the first prompt, so the assign race does
+            // not let a grandchild escape before the cap is in place.
+            qWarning("Terminal: CreateProcess with job list failed (%lu); assigning after spawn", spawnErr);
+            spawned = spawn(nullptr, &piClient, &spawnErr);
+            if (spawned && !assignProcessToCommitJob(m_job, piClient.hProcess)) {
+                qWarning("Terminal: memory limit not applied (%lu)", GetLastError());
+                CloseHandle(m_job);
+                m_job = nullptr;
+            }
+        }
+    } else {
+        spawned = spawn(nullptr, &piClient, &spawnErr);
+    }
+
+    if (!spawned) {
+        if (m_job) {
+            CloseHandle(m_job);
+            m_job = nullptr;
+        }
         return false;
     }
     m_pid = piClient.dwProcessId;
@@ -240,9 +319,9 @@ bool ConPtyProcess::startProcess(const QString &shellPath, const QString &workin
     IPtyProcess *self = this;
 
     CloseHandle(piClient.hThread);
-    if (startupInfo.lpAttributeList) {
-        DeleteProcThreadAttributeList(startupInfo.lpAttributeList);
-        free(startupInfo.lpAttributeList);
+
+    if (m_job) {
+        startJobWatch();
     }
 
     m_readThread = QThread::create([hPipeIn, bufferPtr, mutexPtr, procHandle, self]() {
@@ -289,6 +368,13 @@ bool ConPtyProcess::resize(qint16 cols, qint16 rows)
 
 bool ConPtyProcess::kill()
 {
+    stopJobWatch();
+    // Last handle: KILL_ON_JOB_CLOSE reaps the shell and every descendant.
+    if (m_job) {
+        CloseHandle(m_job);
+        m_job = nullptr;
+    }
+
     if (m_ptyHandler == INVALID_HANDLE_VALUE) {
         return false;
     }
@@ -321,6 +407,90 @@ bool ConPtyProcess::kill()
     m_hPipeIn = INVALID_HANDLE_VALUE;
     m_hPipeOut = INVALID_HANDLE_VALUE;
     return true;
+}
+
+void ConPtyProcess::deliverMemoryLimitNotice()
+{
+    if (m_limitNoticeSent) {
+        return;
+    }
+    m_limitNoticeSent = true;
+    emit memoryLimitExceeded();
+}
+
+void ConPtyProcess::startJobWatch()
+{
+    if (!m_job || m_jobWatchThread) {
+        return;
+    }
+
+    m_jobPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1);
+    if (!m_jobPort) {
+        return;
+    }
+
+    JOBOBJECT_ASSOCIATE_COMPLETION_PORT assoc{};
+    assoc.CompletionKey = m_job;
+    assoc.CompletionPort = m_jobPort;
+    if (!SetInformationJobObject(m_job, JobObjectAssociateCompletionPortInformation, &assoc, sizeof(assoc))) {
+        CloseHandle(m_jobPort);
+        m_jobPort = nullptr;
+        return;
+    }
+
+    HANDLE port = m_jobPort;
+    HANDLE job = m_job;
+    ConPtyProcess *self = this;
+    void (ConPtyProcess::*notify)() = &ConPtyProcess::deliverMemoryLimitNotice;
+    m_jobWatchThread = QThread::create([port, job, self, notify]() {
+        for (;;) {
+            DWORD msg = 0;
+            ULONG_PTR key = 0;
+            LPOVERLAPPED ov = nullptr;
+            if (!GetQueuedCompletionStatus(port, &msg, &key, &ov, INFINITE) && ov == nullptr) {
+                break;
+            }
+            if (key == 0) {
+                break;
+            }
+            if (msg != JOB_OBJECT_MSG_JOB_MEMORY_LIMIT && msg != JOB_OBJECT_MSG_PROCESS_MEMORY_LIMIT) {
+                continue;
+            }
+            const DWORD pid = static_cast<DWORD>(reinterpret_cast<uintptr_t>(ov));
+            if (pid != 0) {
+                HANDLE ph = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+                if (ph) {
+                    TerminateProcess(ph, 1);
+                    CloseHandle(ph);
+                } else if (GetLastError() != ERROR_INVALID_PARAMETER) {
+                    // Still alive but not terminable from here. Drop the tree
+                    // rather than leave a process pinned at the commit ceiling.
+                    TerminateJobObject(job, 1);
+                }
+            }
+            QMetaObject::invokeMethod(self, notify, Qt::QueuedConnection);
+        }
+    });
+    m_jobWatchThread->start();
+}
+
+void ConPtyProcess::stopJobWatch()
+{
+    if (m_jobPort) {
+        PostQueuedCompletionStatus(m_jobPort, 0, 0, nullptr);
+    }
+    if (m_jobWatchThread) {
+        if (!m_jobWatchThread->wait(2000)) {
+            m_jobWatchThread->terminate();
+            m_jobWatchThread->wait(100);
+        }
+        delete m_jobWatchThread;
+        m_jobWatchThread = nullptr;
+    }
+    if (m_jobPort) {
+        CloseHandle(m_jobPort);
+        m_jobPort = nullptr;
+    }
 }
 
 IPtyProcess::PtyType ConPtyProcess::type() const

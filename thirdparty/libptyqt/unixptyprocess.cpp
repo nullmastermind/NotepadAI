@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
@@ -67,6 +68,16 @@ bool UnixPtyProcess::startProcess(const QString &shellPath, const QString &worki
     }
 
     if (pid == 0) {
+        if (m_childCommitLimit > 0) {
+            struct rlimit rl;
+            if (getrlimit(RLIMIT_AS, &rl) == 0) {
+                const rlim_t cap = static_cast<rlim_t>(m_childCommitLimit);
+                if (cap > 0 && (rl.rlim_max == RLIM_INFINITY || cap <= rl.rlim_max)) {
+                    rl.rlim_cur = cap;
+                    (void)setrlimit(RLIMIT_AS, &rl);
+                }
+            }
+        }
         if (!workingDir.isEmpty()) {
             (void)chdir(workingDir.toLocal8Bit().constData());
         }

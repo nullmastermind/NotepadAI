@@ -139,6 +139,16 @@ target_sources(test_application_settings_terminal PRIVATE
 )
 add_test(NAME ApplicationSettingsTerminal COMMAND test_application_settings_terminal)
 
+if(WIN32)
+    # Job commit ceiling: a child that would commit past the cap must fail the
+    # allocation. Links libptyqt for createCommitLimitedJob.
+    qt_add_executable(test_child_commit_job test_child_commit_job.cpp)
+    target_include_directories(test_child_commit_job PRIVATE
+        ${CMAKE_SOURCE_DIR}/thirdparty/libptyqt)
+    target_link_libraries(test_child_commit_job PRIVATE Qt6::Core Qt6::Test libptyqt psapi)
+    add_test(NAME ChildCommitJob COMMAND test_child_commit_job)
+endif()
+
 # --- TerminalTaskRegistry: addTask/tasksForWorkspace round-trip + path normalization ---
 qt_add_executable(test_terminal_task_registry test_terminal_task_registry.cpp)
 target_include_directories(test_terminal_task_registry PRIVATE ${CMAKE_SOURCE_DIR}/src)

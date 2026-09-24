@@ -19,6 +19,8 @@
 #include "TerminalWidget.h"
 
 #include "TerminalCellSource.h"
+#include "NotepadNextApplication.h"
+#include "ApplicationSettings.h"
 
 #include "remote/ExecutionContext.h"
 
@@ -399,6 +401,29 @@ bool TerminalWidget::start(const QString &shell, const QString &cwd, const QStri
         emit spawnFailed(m_errorMessage);
         viewport()->update();
         return false;
+    }
+
+    if (!(ctx && ctx->isRemote())) {
+        int limitGb = 0;
+        if (auto *app = qobject_cast<NotepadNextApplication *>(qApp)) {
+            if (ApplicationSettings *settings = app->getSettings()) {
+                limitGb = settings->terminalChildMemoryLimitGb();
+            }
+        }
+        if (limitGb < 0) {
+            limitGb = 0;
+        } else if (limitGb > 256) {
+            limitGb = 256;
+        }
+        if (limitGb > 0) {
+            m_pty->setChildCommitLimit(static_cast<quint64>(limitGb) << 30);
+        }
+        connect(m_pty, &IPtyProcess::memoryLimitExceeded, this, [this, limitGb]() {
+            const QString text = limitGb > 0
+                ? TerminalWidget::tr("Stopped: a program exceeded the %1 GB terminal memory limit.").arg(limitGb)
+                : TerminalWidget::tr("Stopped: a program exceeded the terminal memory limit.");
+            injectOutput(QStringLiteral("\r\n\x1b[31m%1\x1b[0m\r\n").arg(text).toUtf8());
+        });
     }
 
     if (!m_pty->startProcess(shell, cwd, env, static_cast<qint16>(m_cols), static_cast<qint16>(m_rows))) {

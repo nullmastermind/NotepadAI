@@ -44,6 +44,10 @@ private slots:
     void terminalFont_emitsChangedSignal();
     void terminalFont_emitsOnEverySet();
 
+    void childMemoryLimit_defaultIs16Gb();
+    void childMemoryLimit_setAndGetRoundTrip();
+    void childMemoryLimit_zeroMeansUnlimited();
+
 private:
     QTemporaryDir tempDir;
 };
@@ -150,6 +154,31 @@ void TestApplicationSettingsTerminal::terminalFont_emitsOnEverySet()
     QSignalSpy spy(&s, &ApplicationSettings::terminalFontChanged);
     s.setTerminalFont(val);
     QCOMPARE(spy.count(), 1);
+}
+
+void TestApplicationSettingsTerminal::childMemoryLimit_defaultIs16Gb()
+{
+    ApplicationSettings s;
+    QCOMPARE(s.terminalChildMemoryLimitGb(), 16);
+}
+
+void TestApplicationSettingsTerminal::childMemoryLimit_setAndGetRoundTrip()
+{
+    ApplicationSettings s;
+    s.setTerminalChildMemoryLimitGb(8);
+    QCOMPARE(s.terminalChildMemoryLimitGb(), 8);
+
+    QSignalSpy spy(&s, &ApplicationSettings::terminalChildMemoryLimitGbChanged);
+    s.setTerminalChildMemoryLimitGb(32);
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.takeFirst().at(0).toInt(), 32);
+}
+
+void TestApplicationSettingsTerminal::childMemoryLimit_zeroMeansUnlimited()
+{
+    ApplicationSettings s;
+    s.setTerminalChildMemoryLimitGb(0);
+    QCOMPARE(s.terminalChildMemoryLimitGb(), 0);
 }
 
 QTEST_MAIN(TestApplicationSettingsTerminal)

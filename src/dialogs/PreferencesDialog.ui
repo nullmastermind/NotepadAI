@@ -437,6 +437,41 @@
             </property>
            </widget>
           </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="labelTerminalMemoryLimit">
+            <property name="text">
+             <string>Memory limit</string>
+            </property>
+            <property name="buddy">
+             <cstring>spinBoxTerminalMemoryLimit</cstring>
+            </property>
+            <property name="toolTip">
+             <string>Caps programs launched from a local terminal so one of them cannot exhaust memory and close the editor. On Windows the program is stopped. Applies to terminals opened after this change. SSH terminals are not capped.</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QSpinBox" name="spinBoxTerminalMemoryLimit">
+            <property name="toolTip">
+             <string>Caps programs launched from a local terminal so one of them cannot exhaust memory and close the editor. On Windows the program is stopped. Applies to terminals opened after this change. SSH terminals are not capped. 0 means no limit.</string>
+            </property>
+            <property name="specialValueText">
+             <string>No limit</string>
+            </property>
+            <property name="suffix">
+             <string> GB</string>
+            </property>
+            <property name="minimum">
+             <number>0</number>
+            </property>
+            <property name="maximum">
+             <number>256</number>
+            </property>
+            <property name="value">
+             <number>16</number>
+            </property>
+           </widget>
+          </item>
          </layout>
         </widget>
        </item>

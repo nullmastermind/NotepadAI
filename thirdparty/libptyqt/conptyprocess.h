@@ -21,6 +21,11 @@ typedef VOID* HPCON;
 #define TOO_OLD_WINSDK
 #endif
 
+#ifndef PROC_THREAD_ATTRIBUTE_JOB_LIST
+#define PROC_THREAD_ATTRIBUTE_JOB_LIST \
+    ProcThreadAttributeValue(13, FALSE, TRUE, FALSE)
+#endif
+
 class WindowsContext
 {
 public:
@@ -90,19 +95,31 @@ public:
 signals:
     void requestInterruption();
 
+private slots:
+    void deliverMemoryLimitNotice();
+
 private:
     HRESULT createPseudoConsoleAndPipes(HPCON *phPC, HANDLE *phPipeIn, HANDLE *phPipeOut, qint16 cols, qint16 rows);
-    HRESULT initializeStartupInfoAttachedToPseudoConsole(STARTUPINFOEXW *pStartupInfo, HPCON hPC);
+    // jobList, when non-null, is stored by pointer in the attribute list and
+    // must outlive the following CreateProcess call.
+    HRESULT initializeStartupInfoAttachedToPseudoConsole(STARTUPINFOEXW *pStartupInfo, HPCON hPC,
+                                                         HANDLE *jobList, DWORD jobCount);
+    void startJobWatch();
+    void stopJobWatch();
 
     WindowsContext m_winContext;
     HPCON  m_ptyHandler;
     HANDLE m_hPipeIn;
     HANDLE m_hPipeOut;
     HANDLE m_processHandle = INVALID_HANDLE_VALUE;
+    HANDLE m_job = nullptr;
+    HANDLE m_jobPort = nullptr;
 
     QThread *m_readThread;
+    QThread *m_jobWatchThread = nullptr;
     QMutex m_bufferMutex;
     PtyBuffer m_buffer;
+    bool m_limitNoticeSent = false;
 };
 
 #endif

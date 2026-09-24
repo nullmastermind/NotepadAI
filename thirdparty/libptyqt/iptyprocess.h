@@ -47,14 +47,23 @@ public:
     QPair<qint16, qint16> size() const { return m_size; }
     QString lastError() const { return m_lastError; }
 
+    // 0 = uncapped. Windows: job-wide commit ceiling for the shell and every
+    // descendant. POSIX: RLIMIT_AS inherited by the shell and its children
+    // (per process, not a tree sum). Ignored by the SSH backend.
+    void setChildCommitLimit(quint64 bytes) { m_childCommitLimit = bytes; }
+    quint64 childCommitLimit() const { return m_childCommitLimit; }
+
 signals:
     void finished(int exitCode);
+    // A process in this terminal's tree was stopped for exceeding the commit cap.
+    void memoryLimitExceeded();
 
 protected:
     QString m_shellPath;
     QString m_lastError;
     qint64 m_pid;
     QPair<qint16, qint16> m_size;
+    quint64 m_childCommitLimit = 0;
 };
 
 #endif

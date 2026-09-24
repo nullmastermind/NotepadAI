@@ -124,6 +124,7 @@ CREATE_SETTING(Terminal, ShellCommand, shellCommand, QString, []() { return defa
 CREATE_SETTING(Terminal, TerminalFont, terminalFont, QString, []() {
     return QFontDatabase::systemFont(QFontDatabase::FixedFont).toString();
 })
+CREATE_SETTING(Terminal, TerminalChildMemoryLimitGb, terminalChildMemoryLimitGb, int, 16)
 
 // --- Quick Browser last-used proxy settings ------------------------------------
 

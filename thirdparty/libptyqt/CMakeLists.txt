@@ -17,6 +17,8 @@ if(WIN32)
     list(APPEND LIBPTYQT_SOURCES
         conptyprocess.h
         conptyprocess.cpp
+        commitjob.h
+        commitjob.cpp
     )
 else()
     list(APPEND LIBPTYQT_SOURCES

@@ -390,6 +390,18 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
         m_pendingTerminalFont = settings->terminalFont();
     });
 
+    ui->spinBoxTerminalMemoryLimit->setValue(settings->terminalChildMemoryLimitGb());
+    connect(ui->spinBoxTerminalMemoryLimit, QOverload<int>::of(&QSpinBox::valueChanged), this, [=](int) {
+        m_pending.markDirty();
+    });
+    m_pending.addApply([=]() {
+        settings->setTerminalChildMemoryLimitGb(ui->spinBoxTerminalMemoryLimit->value());
+    });
+    m_pending.addRevert([=]() {
+        QSignalBlocker blocker(ui->spinBoxTerminalMemoryLimit);
+        ui->spinBoxTerminalMemoryLimit->setValue(settings->terminalChildMemoryLimitGb());
+    });
+
     // --- Data Directory section ------------------------------------------------
 
     ui->lineEditDataDir->setText(QDir::toNativeSeparators(DataPaths::appDataLocation()));
