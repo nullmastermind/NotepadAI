@@ -311,30 +311,31 @@ public:
             }
         }
 
+        // Drop cached COM pointers before Close. Close can pump, and a
+        // resize or the emulation timer must not call into a dying view.
+        if (m_emulationTimer)
+            m_emulationTimer->stop();
+        m_touchView = nullptr;
+        m_touchOn = false;
+        m_metricsView = nullptr;
+        m_metricsOn = false;
         if (m_pages.isEmpty()) {
-            if (m_controller) {
-                m_controller->Close();
-                m_controller->Release();
-            }
-            if (m_webView)
-                m_webView->Release();
+            ICoreWebView2Controller *controller = m_controller;
+            ICoreWebView2 *webView = m_webView;
             m_controller = nullptr;
             m_webView = nullptr;
+            releaseOwnedView(controller, webView);
         } else {
+            m_controller = nullptr;
+            m_webView = nullptr;
             for (Page &page : m_pages) {
-                if (page.controller) {
-                    page.controller->Close();
-                    page.controller->Release();
-                    page.controller = nullptr;
-                }
-                if (page.webView) {
-                    page.webView->Release();
-                    page.webView = nullptr;
-                }
+                ICoreWebView2Controller *controller = page.controller;
+                ICoreWebView2 *webView = page.webView;
+                page.controller = nullptr;
+                page.webView = nullptr;
+                releaseOwnedView(controller, webView);
             }
             m_pages.clear();
-            m_controller = nullptr;
-            m_webView = nullptr;
         }
         m_inflightPages.clear();
         m_initialControllerPending = false;
@@ -373,6 +374,35 @@ public:
     }
 
 protected:
+    // Null live aliases first. Close pumps the message loop, and a resize or
+    // the emulation timer must not call into the view being destroyed.
+    void releaseOwnedView(ICoreWebView2Controller *controller, ICoreWebView2 *webView)
+    {
+        if (webView) {
+            if (webView == m_touchView) {
+                m_touchView = nullptr;
+                m_touchOn = false;
+            }
+            if (webView == m_metricsView) {
+                m_metricsView = nullptr;
+                m_metricsOn = false;
+            }
+            if (webView == m_webView) {
+                m_webView = nullptr;
+                if (m_emulationTimer)
+                    m_emulationTimer->stop();
+            }
+        }
+        if (controller && controller == m_controller)
+            m_controller = nullptr;
+        if (controller) {
+            controller->Close();
+            controller->Release();
+        }
+        if (webView)
+            webView->Release();
+    }
+
     void applyControllerBounds(ICoreWebView2Controller *controller, QWidget *host)
     {
         if (!controller || !host)
@@ -417,8 +447,9 @@ protected:
                     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1\","
                     "\"platform\":\"iPad\"}");
             }
+            const std::wstring ua = uaJson.toStdWString();
             webView->CallDevToolsProtocolMethod(
-                L"Emulation.setUserAgentOverride", uaJson.toStdWString().c_str(), nullptr);
+                L"Emulation.setUserAgentOverride", ua.c_str(), nullptr);
         }
 
         const QRect r = m_hostWidget
@@ -449,8 +480,9 @@ protected:
                                     .arg(w)
                                     .arg(h)
                                     .arg(dpr);
+        const std::wstring metricsW = metrics.toStdWString();
         webView->CallDevToolsProtocolMethod(
-            L"Emulation.setDeviceMetricsOverride", metrics.toStdWString().c_str(), nullptr);
+            L"Emulation.setDeviceMetricsOverride", metricsW.c_str(), nullptr);
     }
 
     void applyViewport() override
@@ -468,6 +500,8 @@ protected:
             m_emulationTimer->setSingleShot(true);
             m_emulationTimer->setInterval(50);
             connect(m_emulationTimer, &QTimer::timeout, this, [this]() {
+                if (!m_alive->load(std::memory_order_acquire))
+                    return;
                 applyTouchEmulation(m_webView);
             });
         }
@@ -1405,12 +1439,13 @@ private:
             m_tabBar->removeTab(index);
         m_switching = false;
         releasePending(takePending(id));
-        if (page.controller) {
-            page.controller->Close();
-            page.controller->Release();
+        if (page.controller || page.webView) {
+            ICoreWebView2Controller *controller = page.controller;
+            ICoreWebView2 *webView = page.webView;
+            page.controller = nullptr;
+            page.webView = nullptr;
+            releaseOwnedView(controller, webView);
         }
-        if (page.webView)
-            page.webView->Release();
         if (awaitingController && m_inflightPages.contains(id) && page.host) {
             page.host->hide();
             m_deferredHosts.insert(id, page.host);
@@ -1444,12 +1479,13 @@ private:
         if (m_tabBar && index < m_tabBar->count())
             m_tabBar->removeTab(index);
         m_switching = false;
-        if (page.controller) {
-            page.controller->Close();
-            page.controller->Release();
+        if (page.controller || page.webView) {
+            ICoreWebView2Controller *controller = page.controller;
+            ICoreWebView2 *webView = page.webView;
+            page.controller = nullptr;
+            page.webView = nullptr;
+            releaseOwnedView(controller, webView);
         }
-        if (page.webView)
-            page.webView->Release();
         if (page.host)
             page.host->deleteLater();
         if (m_pages.size() < 2 && m_tabBar)
