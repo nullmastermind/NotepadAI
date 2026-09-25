@@ -30,6 +30,13 @@ constexpr const char kBuiltinClaudeCodeId[] = "builtin:claude-code";
 constexpr const char kBuiltinCodexId[]      = "builtin:codex";
 constexpr const char kPolicyManual[]        = "manual";
 constexpr const char kPolicyAllowAll[]      = "allowAll";
+constexpr int kAgentsJsonVersion = 2;
+
+void seedFactoryAgents(QList<AcpAgentDefinition> *agents)
+{
+    agents->append(AcpAgentRegistry::builtinClaudeCodeDefinition());
+    agents->append(AcpAgentRegistry::builtinCodexDefinition());
+}
 }
 
 QString AcpAgentRegistry::builtinClaudeCodeId()
@@ -82,21 +89,45 @@ AcpAgentRegistry::AcpAgentRegistry(ApplicationSettings *settings, QObject *paren
 void AcpAgentRegistry::load()
 {
     m_agents.clear();
-    m_agents.append(builtinClaudeCodeDefinition());
-    m_agents.append(builtinCodexDefinition());
 
     if (!m_settings) {
+        seedFactoryAgents(&m_agents);
         return;
     }
 
     const QString json = m_settings->aiAgentsJson();
     if (json.isEmpty()) {
+        seedFactoryAgents(&m_agents);
         return;
     }
 
     QJsonParseError parseError{};
     const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !doc.isArray()) {
+    if (parseError.error != QJsonParseError::NoError) {
+        seedFactoryAgents(&m_agents);
+        return;
+    }
+
+    if (doc.isObject()) {
+        const QJsonObject obj = doc.object();
+        if (obj.value(QStringLiteral("version")).toInt() >= kAgentsJsonVersion) {
+            const QJsonArray arr = obj.value(QStringLiteral("agents")).toArray();
+            for (const auto &v : arr) {
+                if (!v.isObject()) {
+                    continue;
+                }
+                AcpAgentDefinition def = acpAgentDefinitionFromJson(v.toObject());
+                if (def.id.isEmpty()) {
+                    continue;
+                }
+                m_agents.append(def);
+            }
+            return;
+        }
+    }
+
+    seedFactoryAgents(&m_agents);
+    if (!doc.isArray()) {
         return;
     }
 
@@ -106,12 +137,10 @@ void AcpAgentRegistry::load()
             continue;
         }
         AcpAgentDefinition def = acpAgentDefinitionFromJson(v.toObject());
-        // User-saved entries are never built-ins, even if a stale file claims otherwise.
         def.builtin = false;
         if (def.id.isEmpty()) {
             continue;
         }
-        // Skip any duplicate of the seeded built-in id.
         bool duplicate = false;
         for (const AcpAgentDefinition &existing : m_agents) {
             if (existing.id == def.id) {
@@ -134,13 +163,13 @@ void AcpAgentRegistry::persistUserAgents()
 
     QJsonArray arr;
     for (const AcpAgentDefinition &def : m_agents) {
-        if (def.builtin) {
-            continue;
-        }
         arr.append(acpAgentDefinitionToJson(def));
     }
 
-    const QJsonDocument doc(arr);
+    QJsonObject root;
+    root.insert(QStringLiteral("version"), kAgentsJsonVersion);
+    root.insert(QStringLiteral("agents"), arr);
+    const QJsonDocument doc(root);
     const QString compact = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
     m_settings->setAiAgentsJson(compact);
 }
@@ -199,10 +228,6 @@ bool AcpAgentRegistry::updateAgent(const AcpAgentDefinition &def)
         if (m_agents[i].id != def.id) {
             continue;
         }
-        if (m_agents[i].builtin) {
-            // Built-ins are immutable.
-            return false;
-        }
         AcpAgentDefinition copy = def;
         copy.builtin = false;
         m_agents[i] = copy;
@@ -219,9 +244,6 @@ bool AcpAgentRegistry::removeAgent(const QString &id)
         if (m_agents[i].id != id) {
             continue;
         }
-        if (m_agents[i].builtin) {
-            return false;
-        }
         m_agents.removeAt(i);
         persistUserAgents();
         emit changed();
@@ -232,12 +254,18 @@ bool AcpAgentRegistry::removeAgent(const QString &id)
 
 QString AcpAgentRegistry::defaultAgentId() const
 {
+    auto fallback = [this]() -> QString {
+        if (m_agents.isEmpty()) {
+            return QString();
+        }
+        return m_agents.first().id;
+    };
     if (!m_settings) {
-        return builtinClaudeCodeId();
+        return fallback();
     }
     QString id = m_settings->defaultAiAgentId();
     if (id.isEmpty() || !contains(id)) {
-        return builtinClaudeCodeId();
+        return fallback();
     }
     return id;
 }

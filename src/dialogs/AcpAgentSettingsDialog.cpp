@@ -288,13 +288,9 @@ QString AcpAgentSettingsDialog::selectedAgentId() const
 void AcpAgentSettingsDialog::onSelectionChanged()
 {
     const QString id = selectedAgentId();
-    bool isBuiltin = false;
-    bool hasSelection = !id.isEmpty();
-    if (m_registry && hasSelection) {
-        isBuiltin = m_registry->agent(id).builtin;
-    }
-    ui->editButton->setEnabled(hasSelection && !isBuiltin);
-    ui->removeButton->setEnabled(hasSelection && !isBuiltin);
+    const bool hasSelection = !id.isEmpty();
+    ui->editButton->setEnabled(hasSelection);
+    ui->removeButton->setEnabled(hasSelection);
 }
 
 void AcpAgentSettingsDialog::onAdd()
@@ -326,7 +322,7 @@ void AcpAgentSettingsDialog::onEdit()
         return;
     }
     AcpAgentDefinition def = m_registry->agent(id);
-    if (def.id.isEmpty() || def.builtin) {
+    if (def.id.isEmpty()) {
         return;
     }
 
@@ -350,7 +346,7 @@ void AcpAgentSettingsDialog::onRemove()
         return;
     }
     const AcpAgentDefinition def = m_registry->agent(id);
-    if (def.builtin) {
+    if (def.id.isEmpty()) {
         return;
     }
     const auto answer = QMessageBox::question(this, tr("Remove agent"),

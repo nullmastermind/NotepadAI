@@ -25,11 +25,11 @@ The reference implementation itself spawns the agent as a child and talks to it 
    - **Env** (optional key/value pairs merged with the inherited environment)
    - **Icon** (optional)
 4. Optionally set the new agent as the **Default Agent** for the `AI → Open AI Agent in …` menu actions.
-5. Built-in agents (e.g. `builtin:claude-code`, `builtin:codex`) cannot be edited or deleted; you can clone their definition into a custom entry instead.
+5. Factory agents (Claude Code, Codex) can be edited or deleted like any other row. A delete persists across restarts; they are only re-seeded on a first launch with no saved agent list.
 
-Built-in agents:
+Factory agents:
 
-- **Claude Code** via `npx -y @agentclientprotocol/claude-agent-acp@latest` (the default fallback when no preferred default is configured).
+- **Claude Code** via `npx -y @agentclientprotocol/claude-agent-acp@latest` (the default when no preferred agent is set, if it is still in the list).
 - **Codex** via `npx -y @zed-industries/codex-acp`.
 
 ## Runtime requirements

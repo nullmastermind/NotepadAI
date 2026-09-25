@@ -37,9 +37,12 @@ private slots:
 
     void firstLaunch_seedsBuiltinAgents();
     void userAddRoundTrip_persistsAcrossInstances();
-    void removeBuiltin_isRefused();
+    void legacyUserAgentsArray_keepsFactorySeeds();
+    void removeSeededAgent_persistsAcrossReload();
+    void updateSeededAgent_persistsAcrossReload();
     void duplicateId_isRefused();
     void defaultAgentId_fallsBackToBuiltin();
+    void defaultAgentId_usesFirstRemainingAfterDefaultRemoved();
     void autoApprovePolicy_defaultsToManual();
     void setAutoApprovePolicy_persistsAndEmits();
 
@@ -107,16 +110,58 @@ void TestAcpAgentRegistry::userAddRoundTrip_persistsAcrossInstances()
     QCOMPARE(reloaded.agent(QStringLiteral("user:foo")).name, QStringLiteral("Foo"));
 }
 
-void TestAcpAgentRegistry::removeBuiltin_isRefused()
+void TestAcpAgentRegistry::legacyUserAgentsArray_keepsFactorySeeds()
 {
     ApplicationSettings s;
-    AcpAgentRegistry registry(&s);
+    s.setAiAgentsJson(QStringLiteral(
+        "[{\"id\":\"user:foo\",\"name\":\"Foo\",\"command\":\"foo\","
+        "\"args\":[],\"argsTokenized\":true,\"env\":{},\"icon\":\"\",\"builtin\":false}]"));
+    s.sync();
 
-    QVERIFY(!registry.removeAgent(AcpAgentRegistry::builtinClaudeCodeId()));
-    QVERIFY(!registry.removeAgent(AcpAgentRegistry::builtinCodexId()));
-    QCOMPARE(registry.agents().size(), 2);
+    AcpAgentRegistry registry(&s);
+    QCOMPARE(registry.agents().size(), 3);
     QVERIFY(registry.contains(AcpAgentRegistry::builtinClaudeCodeId()));
     QVERIFY(registry.contains(AcpAgentRegistry::builtinCodexId()));
+    QVERIFY(registry.contains(QStringLiteral("user:foo")));
+}
+
+void TestAcpAgentRegistry::removeSeededAgent_persistsAcrossReload()
+{
+    ApplicationSettings s;
+    {
+        AcpAgentRegistry registry(&s);
+        QVERIFY(registry.removeAgent(AcpAgentRegistry::builtinClaudeCodeId()));
+        QVERIFY(!registry.contains(AcpAgentRegistry::builtinClaudeCodeId()));
+        QVERIFY(registry.contains(AcpAgentRegistry::builtinCodexId()));
+        QCOMPARE(registry.agents().size(), 1);
+    }
+    s.sync();
+
+    AcpAgentRegistry reloaded(&s);
+    QVERIFY(!reloaded.contains(AcpAgentRegistry::builtinClaudeCodeId()));
+    QVERIFY(reloaded.contains(AcpAgentRegistry::builtinCodexId()));
+    QCOMPARE(reloaded.agents().size(), 1);
+}
+
+void TestAcpAgentRegistry::updateSeededAgent_persistsAcrossReload()
+{
+    ApplicationSettings s;
+    {
+        AcpAgentRegistry registry(&s);
+        AcpAgentDefinition def = registry.agent(AcpAgentRegistry::builtinClaudeCodeId());
+        def.command = QStringLiteral("claude");
+        def.args = QStringList{QStringLiteral("acp")};
+        QVERIFY(registry.updateAgent(def));
+        QCOMPARE(registry.agent(AcpAgentRegistry::builtinClaudeCodeId()).command,
+                 QStringLiteral("claude"));
+    }
+    s.sync();
+
+    AcpAgentRegistry reloaded(&s);
+    const AcpAgentDefinition got = reloaded.agent(AcpAgentRegistry::builtinClaudeCodeId());
+    QCOMPARE(got.command, QStringLiteral("claude"));
+    QCOMPARE(got.args, QStringList{QStringLiteral("acp")});
+    QCOMPARE(got.name, QStringLiteral("Claude Code"));
 }
 
 void TestAcpAgentRegistry::duplicateId_isRefused()
@@ -151,6 +196,17 @@ void TestAcpAgentRegistry::defaultAgentId_fallsBackToBuiltin()
     AcpAgentRegistry registry(&s);
 
     QCOMPARE(registry.defaultAgentId(), AcpAgentRegistry::builtinClaudeCodeId());
+}
+
+void TestAcpAgentRegistry::defaultAgentId_usesFirstRemainingAfterDefaultRemoved()
+{
+    ApplicationSettings s;
+    AcpAgentRegistry registry(&s);
+    QVERIFY(registry.removeAgent(AcpAgentRegistry::builtinClaudeCodeId()));
+    QCOMPARE(registry.defaultAgentId(), AcpAgentRegistry::builtinCodexId());
+
+    QVERIFY(registry.removeAgent(AcpAgentRegistry::builtinCodexId()));
+    QVERIFY(registry.defaultAgentId().isEmpty());
 }
 
 void TestAcpAgentRegistry::autoApprovePolicy_defaultsToManual()
