@@ -36,6 +36,7 @@ public:
     // Named goalResult() rather than result() to avoid shadowing
     // QDialog::result() (which returns the int accept/reject code).
     SendWithGoalResult goalResult() const;
+    void setProjectRoot(const QString &root);
 
 private slots:
     void onStart();

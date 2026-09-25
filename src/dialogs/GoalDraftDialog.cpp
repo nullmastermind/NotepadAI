@@ -26,6 +26,8 @@
 #include "GoalCustomApiFields.h"
 #include "GoalDraftGenerator.h"
 #include "GoalHttpJudge.h"
+#include "ProjectGoalPresets.h"
+#include "remote/ExecutionContext.h"
 
 #include <QAction>
 #include <QCloseEvent>
@@ -37,6 +39,7 @@
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalBlocker>
@@ -78,6 +81,7 @@ GoalDraftDialog::GoalDraftDialog(AcpAgentManager *manager,
     m_loadPresetBtn = new QPushButton(tr("Load preset"), this);
     m_presetMenu = new QMenu(this);
     m_loadPresetBtn->setMenu(m_presetMenu);
+    connect(m_presetMenu, &QMenu::aboutToShow, this, &GoalDraftDialog::populatePresets);
     populatePresets();
     presetLayout->addWidget(m_loadPresetBtn);
     presetLayout->addStretch();
@@ -265,7 +269,13 @@ void GoalDraftDialog::populatePresets()
         }
     }
 
-    if (goalSettings.criteriaPresets.isEmpty()) {
+    const bool remote = m_executionContext && m_executionContext->isRemote();
+    const bool projectOk = ProjectGoalPresets::projectScopeAvailable(m_workingDirectory, remote);
+    const QList<ProjectGoalPresets::Listed> project = projectOk
+        ? ProjectGoalPresets::list(m_workingDirectory)
+        : QList<ProjectGoalPresets::Listed>{};
+
+    if (goalSettings.criteriaPresets.isEmpty() && project.isEmpty()) {
         m_presetMenu->addAction(tr("No saved presets"))->setEnabled(false);
         return;
     }
@@ -274,6 +284,26 @@ void GoalDraftDialog::populatePresets()
         auto *action = m_presetMenu->addAction(
             QStringLiteral("%1 (%2)").arg(preset.name).arg(preset.criteria.size()));
         connect(action, &QAction::triggered, this, [this, criteria = preset.criteria]() {
+            m_criteriaEdit->setPlainText(criteria.join(QLatin1Char('\n')));
+            m_criteriaEdit->setFocus();
+            updateGenerateButton();
+        });
+    }
+
+    if (!goalSettings.criteriaPresets.isEmpty() && !project.isEmpty())
+        m_presetMenu->addSeparator();
+
+    for (const ProjectGoalPresets::Listed &preset : project) {
+        auto *action = m_presetMenu->addAction(
+            QStringLiteral("project/%1 (%2)").arg(preset.name).arg(preset.count));
+        connect(action, &QAction::triggered, this, [this, name = preset.name]() {
+            QStringList criteria;
+            QString error;
+            if (!ProjectGoalPresets::read(m_workingDirectory, name, &criteria, &error)) {
+                QMessageBox::warning(this, tr("Load preset"), error);
+                populatePresets();
+                return;
+            }
             m_criteriaEdit->setPlainText(criteria.join(QLatin1Char('\n')));
             m_criteriaEdit->setFocus();
             updateGenerateButton();

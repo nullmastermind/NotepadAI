@@ -186,6 +186,11 @@ void SendWithGoalDialog::onStart()
     accept();
 }
 
+void SendWithGoalDialog::setProjectRoot(const QString &root)
+{
+    m_goalConfig->setProjectRoot(root);
+}
+
 SendWithGoalResult SendWithGoalDialog::goalResult() const
 {
     const GoalConfigResult gcr = m_goalConfig->result();

@@ -17,6 +17,7 @@ qt_add_executable(NotepadAI
 	GoalActionParser.h
 	GoalAgent.h
 	GoalAgentSettings.h
+	ProjectGoalPresets.h
 	GoalHttpJudge.h
 	GoalHttpJudgeRunner.h
 	GoalHttpJudgeSession.h
@@ -127,6 +128,7 @@ qt_add_executable(NotepadAI
 	GoalActionParser.cpp
 	GoalAgent.cpp
 	GoalAgentSettings.cpp
+	ProjectGoalPresets.cpp
 	GoalHttpJudge.cpp
 	GoalHttpJudgeRunner.cpp
 	GoalHttpJudgeSession.cpp

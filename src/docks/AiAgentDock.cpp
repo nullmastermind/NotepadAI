@@ -25,10 +25,12 @@
 #include "ApplicationSettings.h"
 #include "GoalActionParser.h"
 #include "GoalAgent.h"
+#include "ProjectGoalPresets.h"
 #include "dialogs/GoalDraftDialog.h"
 #include "dialogs/SendWithGoalDialog.h"
 #include "widgets/AcpSessionView.h"
 #include "widgets/AiDockSessionStrip.h"
+#include "remote/ExecutionContext.h"
 
 #include <QCloseEvent>
 #include <QCoreApplication>
@@ -1151,6 +1153,10 @@ void AiAgentDock::sendWithGoal()
     }
 
     SendWithGoalDialog dlg(m_registry, m_appSettings, this);
+    const bool remote = slot->connection && slot->connection->executionContext()
+        && slot->connection->executionContext()->isRemote();
+    if (ProjectGoalPresets::projectScopeAvailable(m_workingDirectory, remote))
+        dlg.setProjectRoot(m_workingDirectory);
     if (dlg.exec() != QDialog::Accepted)
         return;
 

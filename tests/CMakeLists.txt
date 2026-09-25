@@ -429,6 +429,8 @@ target_sources(test_goal_draft_generator PRIVATE
     ${CMAKE_SOURCE_DIR}/src/GoalConversationSummary.h
     ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalDraftGenerator.h
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.cpp
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.h
     ${CMAKE_SOURCE_DIR}/src/dialogs/GoalDraftDialog.cpp
     ${CMAKE_SOURCE_DIR}/src/dialogs/GoalDraftDialog.h
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.cpp
@@ -493,6 +495,8 @@ target_sources(test_send_with_goal_dialog PRIVATE
     ${CMAKE_SOURCE_DIR}/src/dialogs/GoalAgentConfigDialog.h
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.cpp
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.h
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.h
     ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore.h
@@ -571,6 +575,8 @@ target_sources(test_acp_agent_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.cpp
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.h
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
@@ -661,6 +667,8 @@ target_sources(test_acp_agent_exit_restart PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.cpp
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.h
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
@@ -747,6 +755,8 @@ target_sources(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Common.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalConfigWidget.h
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.cpp
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.h
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GoalCustomApiFields.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp
@@ -2005,6 +2015,16 @@ target_sources(test_watched_path_delete PRIVATE
     ${CMAKE_SOURCE_DIR}/src/WatchedPathDelete.h
 )
 add_test(NAME WatchedPathDelete COMMAND test_watched_path_delete)
+
+# --- ProjectGoalPresets: one file per criterion under .agents/.goals ---
+qt_add_executable(test_project_goal_presets test_project_goal_presets.cpp)
+target_include_directories(test_project_goal_presets PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_project_goal_presets PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_project_goal_presets PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.cpp
+    ${CMAKE_SOURCE_DIR}/src/ProjectGoalPresets.h
+)
+add_test(NAME ProjectGoalPresets COMMAND test_project_goal_presets)
 
 # GoalAgentSettings.cpp calls Q_INIT_RESOURCE(prompts). Every target that
 # compiles that file must also compile the qrc, or the link fails.

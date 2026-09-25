@@ -4,6 +4,7 @@
 #include <QDialogButtonBox>
 #include <QDialog>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QInputDialog>
 #include <QJsonDocument>
 #include <QLabel>
@@ -15,16 +16,20 @@
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStandardItemModel>
 #include <QToolButton>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <QWidgetAction>
+
+#include <functional>
 
 #include "AcpAgentRegistry.h"
 #include "ApplicationSettings.h"
 #include "GoalAgentSettings.h"
 #include "GoalCustomApiFields.h"
 #include "GoalHttpJudge.h"
+#include "ProjectGoalPresets.h"
 
 static constexpr int kMaxRows = GoalAgentSettings::kMaxCriteriaRows;
 
@@ -71,6 +76,15 @@ GoalConfigWidget::GoalConfigWidget(AcpAgentRegistry *registry,
     updateTemplateButtons();
 }
 
+void GoalConfigWidget::setProjectRoot(const QString &root)
+{
+    if (m_projectRoot == root)
+        return;
+    m_projectRoot = root;
+    if (m_presetMenu)
+        populatePresets();
+}
+
 // PLACEHOLDER_BUILDUI
 
 void GoalConfigWidget::buildUi()
@@ -92,10 +106,13 @@ void GoalConfigWidget::buildUi()
 
     auto *presetLayout = new QHBoxLayout;
     m_loadPresetBtn = new QPushButton(tr("Load preset"), this);
+    m_loadPresetBtn->setObjectName(QStringLiteral("loadPresetButton"));
     m_presetMenu = new QMenu(this);
     m_loadPresetBtn->setMenu(m_presetMenu);
+    connect(m_presetMenu, &QMenu::aboutToShow, this, &GoalConfigWidget::populatePresets);
     presetLayout->addWidget(m_loadPresetBtn);
     m_savePresetBtn = new QPushButton(tr("Save as preset"), this);
+    m_savePresetBtn->setObjectName(QStringLiteral("savePresetButton"));
     connect(m_savePresetBtn, &QPushButton::clicked, this, &GoalConfigWidget::onSavePreset);
     presetLayout->addWidget(m_savePresetBtn);
     presetLayout->addStretch();
@@ -318,25 +335,45 @@ void GoalConfigWidget::populateTemplates()
 
 void GoalConfigWidget::populatePresets()
 {
+    if (!m_presetMenu)
+        return;
     m_presetMenu->clear();
-    const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
+    const QString settingsJson = m_settings ? m_settings->get("Ai/GoalAgentSettings", QString()) : QString();
     GoalAgentSettings goalSettings;
     if (!settingsJson.isEmpty()) {
         goalSettings = GoalAgentSettings::fromJson(
             QJsonDocument::fromJson(settingsJson.toUtf8()).object());
     }
-    if (goalSettings.criteriaPresets.isEmpty()) {
+
+    QList<ProjectGoalPresets::Listed> project;
+    if (ProjectGoalPresets::projectScopeAvailable(m_projectRoot, false))
+        project = ProjectGoalPresets::list(m_projectRoot);
+
+    if (goalSettings.criteriaPresets.isEmpty() && project.isEmpty()) {
         m_presetMenu->addAction(tr("No saved presets"))->setEnabled(false);
         return;
     }
-    for (const auto &preset : goalSettings.criteriaPresets) {
+
+    auto applyCriteria = [this](const QStringList &criteria) {
+        for (auto *edit : m_criteriaEdits)
+            edit->deleteLater();
+        m_criteriaEdits.clear();
+        for (const QString &text : criteria)
+            m_criteriaEdits.append(createCriterionEdit(text));
+        if (m_criteriaEdits.isEmpty())
+            m_criteriaEdits.append(createCriterionEdit());
+        updateRowCount();
+    };
+
+    auto addRow = [this](const QString &label,
+                         const std::function<void()> &onLoad,
+                         const std::function<void()> &onDelete) {
         auto *wa = new QWidgetAction(m_presetMenu);
         auto *row = new QWidget;
         auto *hl = new QHBoxLayout(row);
         hl->setContentsMargins(6, 2, 4, 2);
         hl->setSpacing(4);
-        auto *loadBtn = new QPushButton(
-            QStringLiteral("%1 (%2)").arg(preset.name).arg(preset.criteria.size()), row);
+        auto *loadBtn = new QPushButton(label, row);
         loadBtn->setFlat(true);
         loadBtn->setCursor(Qt::PointingHandCursor);
         loadBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -351,33 +388,62 @@ void GoalConfigWidget::populatePresets()
         hl->addWidget(delBtn);
         wa->setDefaultWidget(row);
         m_presetMenu->addAction(wa);
-
-        connect(loadBtn, &QPushButton::clicked, this, [this, preset]() {
+        connect(loadBtn, &QPushButton::clicked, this, [this, onLoad]() {
             m_presetMenu->close();
-            for (auto *edit : m_criteriaEdits)
-                edit->deleteLater();
-            m_criteriaEdits.clear();
-            for (const auto &c : preset.criteria)
-                m_criteriaEdits.append(createCriterionEdit(c));
-            if (m_criteriaEdits.isEmpty())
-                m_criteriaEdits.append(createCriterionEdit());
-            updateRowCount();
+            onLoad();
         });
-
-        connect(delBtn, &QToolButton::clicked, this, [this, id = preset.id, name = preset.name]() {
+        connect(delBtn, &QToolButton::clicked, this, [this, onDelete]() {
             m_presetMenu->close();
-            if (QMessageBox::question(this, tr("Delete preset"),
-                    tr("Delete preset \"%1\"?").arg(name)) != QMessageBox::Yes)
-                return;
-            const QString json = m_settings->get("Ai/GoalAgentSettings", QString());
-            if (json.isEmpty()) return;
-            GoalAgentSettings gs = GoalAgentSettings::fromJson(
-                QJsonDocument::fromJson(json.toUtf8()).object());
-            gs.criteriaPresets.removeIf([&id](const GoalCriteriaPreset &p) { return p.id == id; });
-            m_settings->setValue(QStringLiteral("Ai/GoalAgentSettings"),
-                QString::fromUtf8(QJsonDocument(gs.toJson()).toJson(QJsonDocument::Compact)));
-            populatePresets();
+            onDelete();
         });
+    };
+
+    for (const auto &preset : goalSettings.criteriaPresets) {
+        addRow(QStringLiteral("%1 (%2)").arg(preset.name).arg(preset.criteria.size()),
+               [this, applyCriteria, criteria = preset.criteria]() { applyCriteria(criteria); },
+               [this, id = preset.id, name = preset.name]() {
+                   if (QMessageBox::question(this, tr("Delete preset"),
+                           tr("Delete preset \"%1\"?").arg(name)) != QMessageBox::Yes)
+                       return;
+                   const QString json = m_settings->get("Ai/GoalAgentSettings", QString());
+                   if (json.isEmpty())
+                       return;
+                   GoalAgentSettings gs = GoalAgentSettings::fromJson(
+                       QJsonDocument::fromJson(json.toUtf8()).object());
+                   gs.criteriaPresets.removeIf([&id](const GoalCriteriaPreset &p) { return p.id == id; });
+                   m_settings->setValue(QStringLiteral("Ai/GoalAgentSettings"),
+                       QString::fromUtf8(QJsonDocument(gs.toJson()).toJson(QJsonDocument::Compact)));
+                   populatePresets();
+               });
+    }
+
+    if (!goalSettings.criteriaPresets.isEmpty() && !project.isEmpty())
+        m_presetMenu->addSeparator();
+
+    for (const ProjectGoalPresets::Listed &preset : project) {
+        const QString label = QStringLiteral("project/%1 (%2)").arg(preset.name).arg(preset.count);
+        addRow(label,
+               [this, applyCriteria, name = preset.name]() {
+                   QStringList criteria;
+                   QString error;
+                   if (!ProjectGoalPresets::read(m_projectRoot, name, &criteria, &error)) {
+                       QMessageBox::warning(this, tr("Load preset"), error);
+                       populatePresets();
+                       return;
+                   }
+                   applyCriteria(criteria);
+               },
+               [this, name = preset.name]() {
+                   if (QMessageBox::question(this, tr("Delete preset"),
+                           tr("Delete preset \"%1\"?").arg(name)) != QMessageBox::Yes)
+                       return;
+                   QString error;
+                   if (!ProjectGoalPresets::remove(m_projectRoot, name, &error)) {
+                       QMessageBox::warning(this, tr("Delete preset"), error);
+                       return;
+                   }
+                   populatePresets();
+               });
     }
 }
 
@@ -456,16 +522,47 @@ void GoalConfigWidget::onSavePreset()
     auto *nameEdit = new QLineEdit(dlg);
     nameEdit->setMaxLength(100);
     layout->addWidget(nameEdit);
+    layout->addWidget(new QLabel(tr("Scope:"), dlg));
+    auto *scope = new QComboBox(dlg);
+    scope->setObjectName(QStringLiteral("presetScopeCombo"));
+    scope->addItem(tr("Global"), QStringLiteral("global"));
+    scope->addItem(tr("Project"), QStringLiteral("project"));
+    const bool projectOk = ProjectGoalPresets::projectScopeAvailable(m_projectRoot, false);
+    if (!projectOk) {
+        if (auto *model = qobject_cast<QStandardItemModel *>(scope->model())) {
+            if (QStandardItem *item = model->item(1)) {
+                item->setEnabled(false);
+                item->setToolTip(tr("No local project folder for this session."));
+            }
+        }
+    }
+    layout->addWidget(scope);
     auto *btnBox = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dlg);
     layout->addWidget(btnBox);
     connect(btnBox, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
-    connect(btnBox, &QDialogButtonBox::accepted, dlg, [dlg, nameEdit]() {
-        if (!nameEdit->text().trimmed().isEmpty()) dlg->accept();
+    bool savedProject = false;
+    connect(btnBox, &QDialogButtonBox::accepted, dlg, [this, dlg, nameEdit, scope, criteria, &savedProject]() {
+        const QString name = nameEdit->text().trimmed();
+        if (name.isEmpty())
+            return;
+        if (scope->currentData().toString() == QLatin1String("project")) {
+            QString error;
+            if (!ProjectGoalPresets::save(m_projectRoot, name, criteria, &error)) {
+                QMessageBox::warning(dlg, tr("Save criteria preset"), error);
+                return;
+            }
+            savedProject = true;
+        }
+        dlg->accept();
     });
     if (dlg->exec() != QDialog::Accepted) { delete dlg; return; }
     const QString name = nameEdit->text().trimmed();
     delete dlg;
+    if (savedProject) {
+        populatePresets();
+        return;
+    }
 
     const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
     GoalAgentSettings goalSettings;

@@ -46,6 +46,7 @@ public:
     void setMaxIterations(int value);
     void setPromptTemplateId(const QString &id);
     void setRememberPromptTemplate(bool remember);
+    void setProjectRoot(const QString &root);
 
 private slots:
     void onAddCriterion();
@@ -82,6 +83,7 @@ private:
     GoalCustomApiFields *m_customApi = nullptr;
     bool m_judgeLoading = false;
     bool m_rememberPromptTemplate = false;
+    QString m_projectRoot;
     QComboBox *m_templateCombo = nullptr;
     QPushButton *m_tplRenameBtn = nullptr;
     QPushButton *m_tplEditBtn = nullptr;

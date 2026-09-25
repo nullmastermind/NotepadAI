@@ -3,14 +3,22 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QAction>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
+#include <QStandardItemModel>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QWidget>
+#include <QWidgetAction>
 
 #include "AcpAgentRegistry.h"
 #include "ApplicationSettings.h"
@@ -58,6 +66,8 @@ private slots:
     void failedStart_keepsSelectedTemplate();
     void untouchedDefault_startWritesOnce();
     void scheduledTaskDialog_doesNotClobberSendTemplate();
+    void projectScope_disabledWhenNoRoot();
+    void projectScope_listsProjectPreset();
 
 private:
     static QComboBox *agentCombo(SendWithGoalDialog &dialog);
@@ -709,6 +719,73 @@ void TestSendWithGoalDialog::scheduledTaskDialog_doesNotClobberSendTemplate()
     QCOMPARE(missingDialog.goalConfig().promptTemplateId,
              QString::fromLatin1(GoalAgentSettings::kDefaultTemplateId));
     QCOMPARE(storedPromptTemplateId(settings), QStringLiteral("tpl-classify"));
+}
+
+void TestSendWithGoalDialog::projectScope_disabledWhenNoRoot()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+
+    auto *criteria = dialog.findChild<QPlainTextEdit *>();
+    QVERIFY(criteria);
+    criteria->setPlainText(QStringLiteral("a criterion"));
+
+    auto *save = dialog.findChild<QPushButton *>(QStringLiteral("savePresetButton"));
+    QVERIFY(save);
+
+    bool sawDisabledProject = false;
+    QTimer::singleShot(0, &dialog, [&]() {
+        QDialog *presetDlg = nullptr;
+        for (QDialog *child : dialog.findChildren<QDialog *>()) {
+            if (child != &dialog && child->isVisible())
+                presetDlg = child;
+        }
+        if (!presetDlg)
+            return;
+        auto *scope = presetDlg->findChild<QComboBox *>(QStringLiteral("presetScopeCombo"));
+        if (!scope)
+            return;
+        auto *model = qobject_cast<QStandardItemModel *>(scope->model());
+        sawDisabledProject = scope->currentData().toString() == QStringLiteral("global")
+            && model && model->item(1) && !model->item(1)->isEnabled();
+        presetDlg->reject();
+    });
+    save->click();
+    QVERIFY(sawDisabledProject);
+}
+
+void TestSendWithGoalDialog::projectScope_listsProjectPreset()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString file = QDir(dir.path()).filePath(QStringLiteral(".agents/.goals/ship.md"));
+    QVERIFY(QDir().mkpath(QFileInfo(file).absolutePath()));
+    QFile out(file);
+    QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    out.write("from disk");
+    out.close();
+
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    SendWithGoalDialog dialog(&registry, &settings);
+    dialog.setProjectRoot(dir.path());
+
+    auto *load = dialog.findChild<QPushButton *>(QStringLiteral("loadPresetButton"));
+    QVERIFY(load);
+    QMenu *menu = load->menu();
+    QVERIFY(menu);
+    bool found = false;
+    for (QAction *action : menu->actions()) {
+        auto *wa = qobject_cast<QWidgetAction *>(action);
+        if (!wa)
+            continue;
+        if (auto *btn = wa->defaultWidget()->findChild<QPushButton *>()) {
+            if (btn->text() == QStringLiteral("project/ship (1)"))
+                found = true;
+        }
+    }
+    QVERIFY(found);
 }
 
 QTEST_MAIN(TestSendWithGoalDialog)
