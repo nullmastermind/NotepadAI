@@ -117,10 +117,22 @@ void MiniAppInstance::retry()
 
 void MiniAppInstance::destroy()
 {
+    // Leave Polling/Spawning before any event-loop yield so in-flight health
+    // replies cannot touch a torn-down timer (waitForFinished pumps events).
+    if (m_state == Polling || m_state == Spawning)
+        m_state = Idle;
+
     if (m_pollTimer) {
         m_pollTimer->stop();
         m_pollTimer->deleteLater();
         m_pollTimer = nullptr;
+    }
+    if (m_nam) {
+        const auto replies = m_nam->findChildren<QNetworkReply *>();
+        for (QNetworkReply *reply : replies)
+            reply->abort();
+        m_nam->deleteLater();
+        m_nam = nullptr;
     }
     if (m_process) {
         m_process->kill();
@@ -132,10 +144,6 @@ void MiniAppInstance::destroy()
         m_webView->destroy();
         m_webView->deleteLater();
         m_webView = nullptr;
-    }
-    if (m_nam) {
-        m_nam->deleteLater();
-        m_nam = nullptr;
     }
     m_cdpHttpUrl.clear();
     m_cdpWsUrl.clear();
@@ -227,6 +235,8 @@ void MiniAppInstance::spawnProcess()
 
 void MiniAppInstance::onProcessStarted()
 {
+    if (m_state != Spawning)
+        return;
     startHealthPolling();
 }
 
@@ -292,7 +302,8 @@ void MiniAppInstance::onHealthPoll()
     QNetworkReply *reply = m_nam->get(req);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
-        if (m_state != Polling) return;
+        if (m_state != Polling || !m_pollTimer)
+            return;
 
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const int netErr = static_cast<int>(reply->error());
