@@ -45,12 +45,15 @@
 #include "remote/SshProfile.h"
 
 #include <QAction>
+#include <QAbstractItemView>
 #include <QClipboard>
 #include <QComboBox>
+#include <QContextMenuEvent>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QCursor>
 #include <QDir>
+#include <QEvent>
 #include <QFileInfo>
 #include <QFrame>
 #include <QGuiApplication>
@@ -178,6 +181,7 @@ void GitTabWidget::buildUi()
     m_repoCombo->setToolTip(tr("Select repository"));
     m_repoCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     m_repoCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_repoCombo->setContextMenuPolicy(Qt::CustomContextMenu);
 
     m_branchBtn = new QToolButton(this);
     m_branchBtn->setText(tr("(no repo)"));
@@ -341,6 +345,20 @@ void GitTabWidget::buildUi()
     // --- Connections ---
     connect(m_repoCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &GitTabWidget::onRepoSelected);
+    connect(m_repoCombo, &QWidget::customContextMenuRequested,
+            this, &GitTabWidget::onRepoComboContextMenu);
+    if (auto *view = m_repoCombo->view()) {
+        view->setContextMenuPolicy(Qt::CustomContextMenu);
+        if (view->viewport())
+            view->viewport()->installEventFilter(this);
+        connect(view, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+            auto *view = m_repoCombo ? m_repoCombo->view() : nullptr;
+            if (!view) return;
+            const QModelIndex idx = view->indexAt(pos);
+            if (!idx.isValid()) return;
+            showWorktreeActionsMenu(idx.row(), view->mapToGlobal(pos));
+        });
+    }
     connect(m_refreshBtn, &QToolButton::clicked, this, &GitTabWidget::onRefreshClicked);
     connect(m_branchBtn, &QToolButton::clicked, this, &GitTabWidget::onBranchButtonClicked);
     connect(m_menuBtn, &QToolButton::clicked, this, &GitTabWidget::onMenuButtonClicked);
@@ -724,7 +742,7 @@ void GitTabWidget::onRepoSelected(int index)
 
 void GitTabWidget::onRefreshClicked()
 {
-    if (m_controller) m_controller->refresh();
+    if (m_controller) m_controller->refresh(true);
 }
 
 void GitTabWidget::onBranchesUpdated()
@@ -965,7 +983,121 @@ void GitTabWidget::onMenuButtonClicked()
     connect(aRebase, &QAction::triggered, this, &GitTabWidget::rebaseRequested);
     connect(aIRebase, &QAction::triggered, this, &GitTabWidget::interactiveRebaseRequested);
 
+    if (m_controller && m_controller->repoModel()) {
+        QMenu *wtMenu = nullptr;
+        const GitRepoInfos repos = m_controller->repoModel()->repos();
+        for (int i = 0; i < repos.size(); ++i) {
+            if (!repos.at(i).isWorktree) continue;
+            if (!wtMenu) {
+                menu.addSeparator();
+                wtMenu = menu.addMenu(tr("Worktrees"));
+            }
+            const QString into = m_controller->mainBranch().isEmpty()
+                ? QFileInfo(m_controller->mainWorktree()).fileName()
+                : m_controller->mainBranch();
+            QAction *aRemove = wtMenu->addAction(tr("Remove %1...").arg(repos.at(i).displayName));
+            QAction *aMergeRemove = wtMenu->addAction(
+                tr("Merge %1 into %2 and remove...").arg(repos.at(i).displayName, into));
+            aMergeRemove->setEnabled(!repos.at(i).branch.isEmpty() && opIdle);
+            if (repos.at(i).branch.isEmpty())
+                aMergeRemove->setToolTip(tr("Detached worktree has no branch to merge."));
+            connect(aRemove, &QAction::triggered, this, [this, i]() {
+                confirmRemoveWorktree(i, /*mergeFirst=*/false);
+            });
+            connect(aMergeRemove, &QAction::triggered, this, [this, i]() {
+                confirmRemoveWorktree(i, /*mergeFirst=*/true);
+            });
+        }
+    }
+
     menu.exec(m_menuBtn->mapToGlobal(m_menuBtn->rect().bottomLeft()));
+}
+
+void GitTabWidget::onRepoComboContextMenu(const QPoint &pos)
+{
+    if (!m_repoCombo) return;
+    showWorktreeActionsMenu(m_repoCombo->currentIndex(), m_repoCombo->mapToGlobal(pos));
+}
+
+bool GitTabWidget::eventFilter(QObject *watched, QEvent *event)
+{
+    if (m_repoCombo && m_repoCombo->view() && watched == m_repoCombo->view()->viewport()
+        && event->type() == QEvent::ContextMenu) {
+        auto *ce = static_cast<QContextMenuEvent *>(event);
+        const QModelIndex idx = m_repoCombo->view()->indexAt(ce->pos());
+        if (idx.isValid()) {
+            showWorktreeActionsMenu(idx.row(), ce->globalPos());
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void GitTabWidget::showWorktreeActionsMenu(int row, const QPoint &globalPos)
+{
+    if (!m_controller || !m_controller->repoModel()) return;
+    const auto *info = m_controller->repoModel()->infoAt(row);
+    if (!info || !info->isWorktree) return;
+
+    QMenu menu(this);
+    QAction *aRemove = menu.addAction(tr("Remove..."));
+    const QString into = m_controller->mainBranch().isEmpty()
+        ? QFileInfo(m_controller->mainWorktree()).fileName()
+        : m_controller->mainBranch();
+    QAction *aMergeRemove = menu.addAction(tr("Merge into %1 and remove...").arg(into));
+    aMergeRemove->setEnabled(!info->branch.isEmpty());
+    if (info->branch.isEmpty())
+        aMergeRemove->setToolTip(tr("Detached worktree has no branch to merge."));
+
+    connect(aRemove, &QAction::triggered, this, [this, row]() {
+        confirmRemoveWorktree(row, /*mergeFirst=*/false);
+    });
+    connect(aMergeRemove, &QAction::triggered, this, [this, row]() {
+        confirmRemoveWorktree(row, /*mergeFirst=*/true);
+    });
+    menu.exec(globalPos);
+}
+
+void GitTabWidget::confirmRemoveWorktree(int row, bool mergeFirst)
+{
+    if (!m_controller || !m_controller->repoModel()) return;
+    const auto *info = m_controller->repoModel()->infoAt(row);
+    if (!info || !info->isWorktree) return;
+
+    const QString name = info->displayName;
+    const QString path = info->toplevel;
+    const QString branch = info->branch;
+    const QString mainBranch = m_controller->mainBranch();
+    const QString mainName = mainBranch.isEmpty()
+        ? QFileInfo(m_controller->mainWorktree()).fileName()
+        : mainBranch;
+
+    QString title;
+    QString html;
+    QString ok;
+    if (mergeFirst) {
+        title = tr("Merge and remove worktree");
+        html = tr("Are you sure you want to merge branch '<b>%1</b>' into '<b>%2</b>' and remove worktree '<b>%3</b>'?")
+                   .arg(branch.toHtmlEscaped(), mainName.toHtmlEscaped(), name.toHtmlEscaped());
+        ok = tr("Merge and remove");
+    } else {
+        title = tr("Remove worktree");
+        html = tr("Are you sure you want to remove worktree '<b>%1</b>'?<br/>The working copy at %2 will be deleted.")
+                   .arg(name.toHtmlEscaped(), path.toHtmlEscaped());
+        ok = tr("Remove");
+    }
+
+    bool force = false;
+    if (!BranchPickerPopup::confirmForceAction(
+            this, title, html, ok,
+            tr("Force remove (even if dirty)"), &force))
+        return;
+    if (!m_controller) return;
+
+    if (mergeFirst)
+        m_controller->mergeAndRemoveWorktree(path, branch, force);
+    else
+        m_controller->removeWorktree(path, force);
 }
 
 void GitTabWidget::onCommitRequested(const QString &message, bool amend,

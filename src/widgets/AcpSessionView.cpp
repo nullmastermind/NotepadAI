@@ -320,20 +320,12 @@ void AcpSessionView::buildUi()
         "QFrame#AcpStatusBanner { background: transparent; border: none; border-radius: 4px; padding: 0px; }"
         "QFrame#AcpStatusBanner[bannerKind=\"warning\"] { background: #fff3cd; border: 1px solid #ffeeba; padding: 4px; }"
         "QFrame#AcpStatusBanner[bannerKind=\"warning\"] QLabel,"
-        "QFrame#AcpStatusBanner[bannerKind=\"warning\"] QPushButton,"
         "QFrame#AcpStatusBanner[bannerKind=\"warning\"] QToolButton { color: #856404; }"
-        "QFrame#AcpStatusBanner[bannerKind=\"warning\"] QPushButton {"
-        " background: rgba(255, 255, 255, 160); border: 1px solid #ffeeba; border-radius: 3px; padding: 2px 8px; }"
-        "QFrame#AcpStatusBanner[bannerKind=\"warning\"] QPushButton:hover { background: rgba(255, 255, 255, 220); }"
         "QFrame#AcpStatusBanner[bannerKind=\"warning\"] QToolButton:hover {"
         " color: #533f03; border: 1px solid #856404; }"
         "QFrame#AcpStatusBanner[bannerKind=\"error\"] { background: #f8d7da; border: 1px solid #f5c6cb; padding: 4px; }"
         "QFrame#AcpStatusBanner[bannerKind=\"error\"] QLabel,"
-        "QFrame#AcpStatusBanner[bannerKind=\"error\"] QPushButton,"
         "QFrame#AcpStatusBanner[bannerKind=\"error\"] QToolButton { color: #721c24; }"
-        "QFrame#AcpStatusBanner[bannerKind=\"error\"] QPushButton {"
-        " background: rgba(255, 255, 255, 160); border: 1px solid #f5c6cb; border-radius: 3px; padding: 2px 8px; }"
-        "QFrame#AcpStatusBanner[bannerKind=\"error\"] QPushButton:hover { background: rgba(255, 255, 255, 220); }"
         "QFrame#AcpStatusBanner[bannerKind=\"error\"] QToolButton:hover {"
         " color: #491217; border: 1px solid #721c24; }"));
     auto *banL = new QHBoxLayout(m_banner);
@@ -341,42 +333,17 @@ void AcpSessionView::buildUi()
     banL->setSpacing(4);
     m_bannerLabel = new QLabel(m_banner);
     m_bannerLabel->setWordWrap(true);
-    m_bannerRetry = new QPushButton(tr("Retry"), m_banner);
-    m_bannerRetry->hide();
-    connect(m_bannerRetry, &QPushButton::clicked, this, [this]() {
-        clearBanner();
-        emit retryRequested();
-    });
-    m_bannerRestart = new QToolButton(m_banner);
-    m_bannerRestart->setText(tr("Restart"));
-    m_bannerRestart->setAutoRaise(true);
-    m_bannerRestart->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    m_bannerRestart->setToolTip(tr("Restart this ACP session"));
-    m_bannerRestart->setStyleSheet(QStringLiteral(
-        "QToolButton { color: palette(placeholder-text); padding: 1px 6px; border: 1px solid transparent; border-radius: 3px; }"
-        "QToolButton:hover { color: palette(text); border: 1px solid palette(mid); }"));
-    connect(m_bannerRestart, &QToolButton::clicked, this, &AcpSessionView::restartSessionRequested);
-    m_bannerDebug = new QToolButton(m_banner);
-    m_bannerDebug->setText(tr("Debug"));
-    m_bannerDebug->setAutoRaise(true);
-    m_bannerDebug->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    m_bannerDebug->setToolTip(tr("Show ACP protocol log for this session"));
-    m_bannerDebug->setStyleSheet(QStringLiteral(
-        "QToolButton { color: palette(placeholder-text); padding: 1px 6px; border: 1px solid transparent; border-radius: 3px; }"
-        "QToolButton:hover { color: palette(text); border: 1px solid palette(mid); }"));
-    connect(m_bannerDebug, &QToolButton::clicked, this, &AcpSessionView::onShowDebugLogClicked);
+    m_bannerClose = new QToolButton(m_banner);
+    m_bannerClose->setText(QStringLiteral("×"));
+    m_bannerClose->setAutoRaise(true);
+    m_bannerClose->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_bannerClose->setToolTip(tr("Close"));
+    m_bannerClose->setAccessibleName(tr("Close"));
+    connect(m_bannerClose, &QToolButton::clicked, this, &AcpSessionView::clearBanner);
     banL->addWidget(m_bannerLabel, 1);
-    banL->addStretch();
-    banL->addWidget(m_bannerRetry);
-    banL->addWidget(m_bannerRestart);
-    banL->addWidget(m_bannerDebug);
-    // The banner stays visible at all times so the Debug button is always
-    // reachable — even when there's no error to surface. clearBanner() hides
-    // the label + Retry so the row looks neutral. In neutral state the banner
-    // has no chrome (transparent background, no border, no padding) so the
-    // small Debug toolbutton floats top-right without dominating the panel.
-    m_bannerLabel->hide();
+    banL->addWidget(m_bannerClose, 0, Qt::AlignTop);
     m_banner->setProperty("bannerKind", QStringLiteral("info"));
+    m_banner->hide();
     outer->addWidget(m_banner);
 
     // 2. Transcript area.
@@ -890,8 +857,11 @@ void AcpSessionView::hydrateFromModel()
 void AcpSessionView::setBanner(const QString &text, BannerKind kind)
 {
     if (!m_banner) return;
+    if (text.isEmpty()) {
+        clearBanner();
+        return;
+    }
     m_bannerLabel->setText(text);
-    m_bannerLabel->setVisible(!text.isEmpty());
     QString kindStr;
     switch (kind) {
     case BannerKind::Info:    kindStr = QStringLiteral("info"); break;
@@ -908,19 +878,13 @@ void AcpSessionView::setBanner(const QString &text, BannerKind kind)
         child->style()->unpolish(child);
         child->style()->polish(child);
     }
-    m_bannerRetry->setVisible(kind == BannerKind::Error || kind == BannerKind::Warning);
     m_banner->show();
 }
 
 void AcpSessionView::clearBanner()
 {
     if (!m_banner) return;
-    // Keep the banner widget itself visible so the Debug button stays
-    // reachable, but drop the colored error/warning styling and hide the
-    // label + Retry button.
     m_bannerLabel->clear();
-    m_bannerLabel->hide();
-    m_bannerRetry->hide();
     m_banner->setProperty("bannerKind", QStringLiteral("info"));
     m_banner->style()->unpolish(m_banner);
     m_banner->style()->polish(m_banner);
@@ -928,6 +892,7 @@ void AcpSessionView::clearBanner()
         child->style()->unpolish(child);
         child->style()->polish(child);
     }
+    m_banner->hide();
 }
 
 void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)

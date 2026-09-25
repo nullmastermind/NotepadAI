@@ -29,7 +29,13 @@ class GitRepoModel : public QAbstractListModel
 {
     Q_OBJECT
 public:
-    enum Roles : std::uint16_t { ToplevelRole = Qt::UserRole + 1, DepthRole, IsSubmoduleRole };
+    enum Roles : std::uint16_t {
+        ToplevelRole = Qt::UserRole + 1,
+        DepthRole,
+        IsSubmoduleRole,
+        IsWorktreeRole,
+        BranchRole
+    };
 
     explicit GitRepoModel(QObject *parent = nullptr);
 

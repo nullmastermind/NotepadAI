@@ -47,6 +47,12 @@ public:
     void setSelectOnly(bool on, const QString &title = {});
 
     static QString sanitizeBranchName(const QString &raw);
+    static bool confirmForceAction(QWidget *parent,
+                                   const QString &title,
+                                   const QString &htmlMessage,
+                                   const QString &okText,
+                                   const QString &forceLabel,
+                                   bool *force);
 
 signals:
     void checkoutRequested(const QString &name);

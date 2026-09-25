@@ -56,6 +56,7 @@ signals:
     void refsChanged();
     void workingTreeChanged();
     void operationStateFileChanged();
+    void worktreesChanged();
 
 private slots:
     void onFileChanged(const QString &path);
@@ -73,7 +74,7 @@ private:
     RecursiveTreeWatcher *m_treeWatcher = nullptr;
 #endif
 
-    enum Pending : std::uint8_t { PHead = 1, PIndex = 2, PRefs = 4, PTree = 8, POpState = 16 };
+    enum Pending : std::uint8_t { PHead = 1, PIndex = 2, PRefs = 4, PTree = 8, POpState = 16, PWorktrees = 32 };
 
     void rewatch();
     QStringList currentWatchedFiles() const;

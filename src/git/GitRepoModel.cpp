@@ -32,14 +32,25 @@ QVariant GitRepoModel::data(const QModelIndex &index, int role) const
     const GitRepoInfo &r = m_repos.at(index.row());
     switch (role) {
         case Qt::DisplayRole: {
+            if (r.isWorktree) {
+                const QString name = r.displayName.isEmpty() ? r.toplevel : r.displayName;
+                const QString label = QStringLiteral("%1 (worktree)").arg(name);
+                if (r.depth <= 0) return label;
+                return QStringLiteral("%1%2").arg(QString(r.depth * 2, QChar(0x2007)), label);
+            }
             if (r.depth <= 0) return r.displayName;
-            // Indent submodules visually in the combo with figure spaces.
             return QStringLiteral("%1%2").arg(QString(r.depth * 2, QChar(0x2007)), r.displayName);
         }
-        case Qt::ToolTipRole: return r.toplevel;
+        case Qt::ToolTipRole: {
+            if (r.isWorktree && !r.branch.isEmpty())
+                return QStringLiteral("%1\n%2").arg(r.toplevel, r.branch);
+            return r.toplevel;
+        }
         case ToplevelRole:    return r.toplevel;
         case DepthRole:       return r.depth;
         case IsSubmoduleRole: return r.isSubmodule;
+        case IsWorktreeRole:  return r.isWorktree;
+        case BranchRole:      return r.branch;
         default: return {};
     }
 }

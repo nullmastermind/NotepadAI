@@ -18,6 +18,8 @@
 
 #include "GitWatcher.h"
 
+#include "GitRepoDiscovery.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -130,6 +132,9 @@ QStringList GitWatcher::currentWatchedDirs() const
     dirs.append(m_gitDir + QStringLiteral("/refs/remotes"));
     dirs.append(m_gitDir + QStringLiteral("/rebase-merge"));
     dirs.append(m_gitDir + QStringLiteral("/rebase-apply"));
+    const QString registry = GitRepoDiscovery::worktreeRegistryDir(m_gitDir);
+    dirs.append(registry);
+    dirs.append(QFileInfo(registry).path());
 #ifndef Q_OS_WIN
     // On non-Windows, fall back to watching the repo root (non-recursive).
     dirs.append(m_repoRoot);
@@ -168,8 +173,25 @@ void GitWatcher::onFileChanged(const QString &path)
 
 void GitWatcher::onDirChanged(const QString &path)
 {
-    if (path.endsWith(QStringLiteral("/refs/heads")) ||
-        path.endsWith(QStringLiteral("/refs/remotes"))) {
+    const QString clean = QDir::cleanPath(path);
+    const QString registry = GitRepoDiscovery::worktreeRegistryDir(m_gitDir);
+    const QString commonGit = QFileInfo(registry).path();
+    if (clean == registry) {
+        m_pending |= PWorktrees;
+    } else if (clean == commonGit) {
+        bool watched = false;
+        for (const QString &d : m_fs->directories()) {
+            if (QDir::cleanPath(d) == registry) { watched = true; break; }
+        }
+        const bool exists = QFileInfo(registry).isDir();
+        if (exists && !watched) {
+            m_fs->addPath(registry);
+            m_pending |= PWorktrees;
+        } else if (!exists && watched) {
+            m_pending |= PWorktrees;
+        }
+    } else if (path.endsWith(QStringLiteral("/refs/heads")) ||
+               path.endsWith(QStringLiteral("/refs/remotes"))) {
         m_pending |= PRefs;
     } else if (path.endsWith(QStringLiteral("/rebase-merge")) ||
                path.endsWith(QStringLiteral("/rebase-apply"))) {
@@ -177,7 +199,7 @@ void GitWatcher::onDirChanged(const QString &path)
     } else {
         m_pending |= PTree;
     }
-    m_debounce->start();
+    if (m_pending) m_debounce->start();
 }
 
 void GitWatcher::onDebounce()
@@ -189,4 +211,5 @@ void GitWatcher::onDebounce()
     if (p & PRefs)    emit refsChanged();
     if (p & PTree)    emit workingTreeChanged();
     if (p & POpState) emit operationStateFileChanged();
+    if (p & PWorktrees) emit worktreesChanged();
 }

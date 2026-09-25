@@ -48,6 +48,16 @@ constexpr int kTimeoutStatus = 60000;
 constexpr int kTimeoutRemote = 5 * 60 * 1000;
 
 QString tr_(const char *s) { return QCoreApplication::translate("GitController", s); }
+
+void appendUniqueRepos(GitRepoInfos &all, const GitRepoInfos &extra)
+{
+    for (const auto &item : extra) {
+        bool dup = false;
+        for (const auto &existing : all)
+            if (existing.toplevel == item.toplevel) { dup = true; break; }
+        if (!dup) all.append(item);
+    }
+}
 } // namespace
 
 GitController::GitController(const QString &workspaceRoot, QObject *parent)
@@ -107,6 +117,8 @@ GitController::GitController(const QString &workspaceRoot, QObject *parent)
             this, &GitController::scheduleDebouncedRefresh);
     connect(m_watcher, &GitWatcher::workingTreeChanged,
             this, &GitController::scheduleDebouncedRefresh);
+    connect(m_watcher, &GitWatcher::worktreesChanged,
+            this, &GitController::enqueueWorktreeList);
 
     if (auto *app = qobject_cast<NotepadNextApplication *>(QCoreApplication::instance()))
         connect(app, &NotepadNextApplication::gitWorkingTreeDirtied,
@@ -243,11 +255,7 @@ void GitController::enqueueFullRefresh()
 
     Op st;
     st.kind = OpKind::Status;
-    st.argv = { QStringLiteral("-c"), QStringLiteral("core.quotepath=false"),
-                QStringLiteral("-C"), m_currentRepo,
-                QStringLiteral("status"), QStringLiteral("--porcelain=v2"),
-                QStringLiteral("--branch"),
-                QStringLiteral("-z"), QStringLiteral("--untracked-files=all"), QStringLiteral("--renames") };
+    st.argv = GitRepoDiscovery::statusArgv(m_currentRepo);
     st.timeoutMs = kTimeoutStatus;
     enqueue(st);
 }
@@ -288,9 +296,11 @@ void GitController::applySelectRepo(const QString &cleanToplevel)
     enqueueFullRefresh();
 }
 
-void GitController::refresh()
+void GitController::refresh(bool relistWorktrees)
 {
     if (m_currentRepo.isEmpty()) return;
+    if (relistWorktrees)
+        enqueueWorktreeList();
     if (m_busy) {
         m_coalescer.requestImmediateFollowUp();
         return;
@@ -310,7 +320,7 @@ void GitController::stagePaths(const QStringList &relPaths)
         const QStringList chunk = relPaths.mid(i, kChunk);
         Op op;
         op.kind = OpKind::Stage;
-        op.argv = { QStringLiteral("-C"), m_currentRepo, QStringLiteral("add"), QStringLiteral("--") };
+        op.argv = GitRepoDiscovery::stageArgv(m_currentRepo);
         op.argv.append(chunk);
         op.timeoutMs = kTimeoutNormal;
         op.humanName = tr_("Staging");
@@ -378,9 +388,7 @@ void GitController::commit(const QString &message, bool amend, bool signoff, boo
     if (m_currentRepo.isEmpty()) return;
     Op op;
     op.kind = OpKind::Commit;
-    op.argv = { QStringLiteral("-c"), QStringLiteral("i18n.commitEncoding=UTF-8"),
-                QStringLiteral("-C"), m_currentRepo,
-                QStringLiteral("commit"), QStringLiteral("-F"), QStringLiteral("-") };
+    op.argv = GitRepoDiscovery::commitArgv(m_currentRepo);
     if (amend)       op.argv.append(QStringLiteral("--amend"));
     if (signoff)     op.argv.append(QStringLiteral("--signoff"));
     if (trackedOnly) op.argv.append(QStringLiteral("-a"));
@@ -658,7 +666,8 @@ void GitController::runNext()
         && m_current.kind != OpKind::Status
         && m_current.kind != OpKind::IgnoredDirs
         && m_current.kind != OpKind::Toplevel
-        && m_current.kind != OpKind::SubmodulesList)
+        && m_current.kind != OpKind::SubmodulesList
+        && m_current.kind != OpKind::WorktreesList)
     {
         setState(State::Running);
     }
@@ -691,7 +700,7 @@ void GitController::handleToplevelDone(int exit, const QByteArray &out, const QB
     const QString toplevel = QDir::cleanPath(QString::fromUtf8(out).trimmed());
     if (toplevel.isEmpty()) return;
 
-    // Build repos: root + submodules. Enqueue submodule discovery.
+    // Build repos: root + submodules + linked worktrees.
     GitRepoInfos infos;
     GitRepoInfo root;
     root.toplevel = toplevel;
@@ -703,6 +712,8 @@ void GitController::handleToplevelDone(int exit, const QByteArray &out, const QB
     m_repos->setRepos(infos);
     emit reposUpdated();
 
+    m_discoveredRoot = toplevel;
+    m_mainWorktree = toplevel;
     if (m_currentRepo.isEmpty()) m_currentRepo = toplevel;
     m_watcher->setRepo(m_currentRepo);
 
@@ -714,6 +725,7 @@ void GitController::handleToplevelDone(int exit, const QByteArray &out, const QB
     sub.meta.insert(QStringLiteral("rootToplevel"), toplevel);
     enqueue(sub);
 
+    enqueueWorktreeList();
     enqueueFullRefresh();
 }
 
@@ -723,14 +735,93 @@ void GitController::handleSubmodulesDone(int exit, const QByteArray &out)
     const QString rootToplevel = m_current.meta.value(QStringLiteral("rootToplevel")).toString();
     auto subs = GitRepoDiscovery::parseSubmoduleStatus(out, rootToplevel);
     auto all = m_repos->repos();
-    for (const auto &s : subs) {
-        bool dup = false;
-        for (const auto &existing : all)
-            if (existing.toplevel == s.toplevel) { dup = true; break; }
-        if (!dup) all.append(s);
-    }
+    appendUniqueRepos(all, subs);
     m_repos->setRepos(all);
     emit reposUpdated();
+}
+
+void GitController::handleWorktreesDone(int exit, const QByteArray &out)
+{
+    Q_UNUSED(exit);
+    const QString rootToplevel = m_current.meta.value(QStringLiteral("rootToplevel")).toString();
+    const auto parsed = GitRepoDiscovery::parseWorktrees(out, rootToplevel);
+    if (!parsed.mainToplevel.isEmpty()) {
+        m_mainWorktree = parsed.mainToplevel;
+        m_mainBranch = parsed.mainBranch;
+    }
+
+    auto all = m_repos->repos();
+    if (GitRepoDiscovery::worktreesUnchanged(all, parsed.linked)) {
+        const QString next = GitRepoDiscovery::fallbackRepo(all, m_currentRepo, m_mainWorktree);
+        if (!next.isEmpty() && QDir::cleanPath(next) != QDir::cleanPath(m_currentRepo))
+            m_pendingRepoSwitch = next;
+        return;
+    }
+
+    GitRepoInfos kept;
+    kept.reserve(all.size());
+    for (const auto &r : all) {
+        if (!r.isWorktree) kept.append(r);
+    }
+    appendUniqueRepos(kept, parsed.linked);
+    m_repos->setRepos(kept);
+
+    const QString next = GitRepoDiscovery::fallbackRepo(kept, m_currentRepo, m_mainWorktree);
+    if (!next.isEmpty() && QDir::cleanPath(next) != QDir::cleanPath(m_currentRepo))
+        m_pendingRepoSwitch = next;
+
+    emit reposUpdated();
+}
+
+void GitController::enqueueWorktreeList()
+{
+    const QString root = m_discoveredRoot.isEmpty() ? m_mainWorktree : m_discoveredRoot;
+    if (root.isEmpty()) return;
+    for (const Op &queued : m_queue) {
+        if (queued.kind == OpKind::WorktreesList) return;
+    }
+    Op wt;
+    wt.kind = OpKind::WorktreesList;
+    wt.argv = { QStringLiteral("-C"), root, QStringLiteral("worktree"),
+                QStringLiteral("list"), QStringLiteral("--porcelain") };
+    wt.timeoutMs = kTimeoutShort;
+    wt.meta.insert(QStringLiteral("rootToplevel"), root);
+    enqueue(wt);
+}
+
+void GitController::removeWorktree(const QString &path, bool force)
+{
+    const QString clean = QDir::cleanPath(path);
+    const QString main = m_mainWorktree.isEmpty() ? m_discoveredRoot : m_mainWorktree;
+    if (clean.isEmpty() || main.isEmpty()) return;
+    if (clean == QDir::cleanPath(main)) return;
+
+    Op op;
+    op.kind = OpKind::RemoveWorktree;
+    op.argv = GitRepoDiscovery::worktreeRemoveArgv(main, clean, force);
+    op.timeoutMs = kTimeoutNormal;
+    op.humanName = tr_("Removing worktree");
+    op.meta.insert(QStringLiteral("path"), clean);
+    op.meta.insert(QStringLiteral("force"), force);
+    enqueue(op);
+}
+
+void GitController::mergeAndRemoveWorktree(const QString &path, const QString &branch, bool force)
+{
+    const QString clean = QDir::cleanPath(path);
+    const QString main = m_mainWorktree.isEmpty() ? m_discoveredRoot : m_mainWorktree;
+    if (clean.isEmpty() || main.isEmpty() || branch.isEmpty()) return;
+    if (clean == QDir::cleanPath(main)) return;
+
+    Op op;
+    op.kind = OpKind::MergeWorktree;
+    op.argv = GitRepoDiscovery::worktreeMergeArgv(main, branch);
+    op.timeoutMs = kTimeoutNormal;
+    op.humanName = tr_("Merging worktree branch");
+    op.meta.insert(QStringLiteral("path"), clean);
+    op.meta.insert(QStringLiteral("branch"), branch);
+    op.meta.insert(QStringLiteral("force"), force);
+    enqueue(op);
 }
 
 void GitController::handleHeadSymDone(const QByteArray &out)
@@ -890,13 +981,8 @@ void GitController::requestDiff(const QString &relPath, bool stagedSide)
 
     Op op;
     op.kind = OpKind::DiffPath;
-    op.argv = { QStringLiteral("-c"), QStringLiteral("core.quotepath=false"),
-                QStringLiteral("-C"), m_currentRepo,
-                QStringLiteral("diff") };
-    if (stagedSide) op.argv.append(QStringLiteral("--cached"));
-    op.argv.append({ QStringLiteral("--no-color"), QStringLiteral("--no-ext-diff"),
-                     QStringLiteral("--src-prefix=a/"), QStringLiteral("--dst-prefix=b/"),
-                     QStringLiteral("--"), relPath });
+    op.argv = GitRepoDiscovery::diffArgv(m_currentRepo, stagedSide);
+    op.argv.append(relPath);
     op.timeoutMs = kTimeoutNormal;
     QVariantMap meta;
     meta[QStringLiteral("relPath")] = relPath;
@@ -1006,7 +1092,7 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
         // missing object) shouldn't tip the controller into Error or block UI.
         if (kind == OpKind::NumstatStaged || kind == OpKind::NumstatUnstaged
             || kind == OpKind::SubmoduleNumstat || kind == OpKind::ConfigTracking
-            || kind == OpKind::IgnoredDirs) {
+            || kind == OpKind::IgnoredDirs || kind == OpKind::WorktreesList) {
             popAndAdvance();
             return;
         }
@@ -1046,6 +1132,17 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
             popAndAdvance();
             return;
         }
+        if (kind == OpKind::MergeWorktree
+            && GitRepoDiscovery::worktreeFailureSwitchesToMain(e.kind)) {
+            setState(State::Idle);
+            const QString next = GitRepoDiscovery::nextRepoAfterMergeConflict(m_mainWorktree);
+            if (!next.isEmpty())
+                applySelectRepo(next);
+            emit pullConflicted();
+            emit errorOccurred(e);
+            popAndAdvance();
+            return;
+        }
         if (kind == OpKind::Push
             && (e.kind == GitError::NonFastForward || e.kind == GitError::PullDiverged)) {
             setState(State::Idle);
@@ -1063,6 +1160,7 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
     switch (kind) {
         case OpKind::Toplevel:        handleToplevelDone(exit, out, err); break;
         case OpKind::SubmodulesList:  handleSubmodulesDone(exit, out); break;
+        case OpKind::WorktreesList:   handleWorktreesDone(exit, out); break;
         case OpKind::Refs:            handleRefsDone(out); break;
         case OpKind::Remotes:         handleRemotesDone(out); break;
         case OpKind::Status:          handleStatusDone(out); break;
@@ -1103,6 +1201,26 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
             emit catFileBlobReady(m_current.meta.value(QStringLiteral("relPath")).toString(),
                                   out);
             break;
+        case OpKind::MergeWorktree: {
+            const QString path = m_current.meta.value(QStringLiteral("path")).toString();
+            const bool force = m_current.meta.value(QStringLiteral("force")).toBool();
+            if (!humanName.isEmpty()) emit opSucceeded(humanName);
+            removeWorktree(path, force);
+            break;
+        }
+        case OpKind::RemoveWorktree: {
+            const QString path = m_current.meta.value(QStringLiteral("path")).toString();
+            enqueueWorktreeList();
+            const QString next = GitRepoDiscovery::nextRepoAfterRemove(
+                m_currentRepo, path, m_mainWorktree);
+            const bool switching = !next.isEmpty() && next != QDir::cleanPath(m_currentRepo);
+            if (switching)
+                m_pendingRepoSwitch = next;
+            if (!humanName.isEmpty()) emit opSucceeded(humanName);
+            if (!switching)
+                refresh();
+            break;
+        }
         case OpKind::Stage:
         case OpKind::Unstage:
         case OpKind::StageAll:

@@ -105,9 +105,8 @@ public:
 
 signals:
     void retryRequested();
-    // Emitted when the user clicks the Restart button in the banner row.
-    // Always actionable (independent of any error/exit banner state); the
-    // dock decides whether to confirm before forwarding to the manager.
+    // Ctrl+N in the composer. The dock decides whether to confirm before
+    // forwarding to the manager.
     void restartSessionRequested();
     void sendWithGoalRequested();
     void generatePromptWithGoalRequested();
@@ -243,9 +242,7 @@ private:
     // Status banner
     QFrame *m_banner = nullptr;
     QLabel *m_bannerLabel = nullptr;
-    QPushButton *m_bannerRetry = nullptr;
-    QToolButton *m_bannerRestart = nullptr;
-    QToolButton *m_bannerDebug = nullptr;
+    QToolButton *m_bannerClose = nullptr;
 
     // ACP debug log popup (non-modal, lazily created on first click).
     QPointer<QDialog> m_debugDialog;

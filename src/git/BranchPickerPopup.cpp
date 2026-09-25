@@ -42,6 +42,45 @@ constexpr int RoleKind = Qt::UserRole + 1;    // 0 = local, 1 = remote
 constexpr int RolePayload = Qt::UserRole + 2; // branch name
 }
 
+bool BranchPickerPopup::confirmForceAction(QWidget *parent,
+                                           const QString &title,
+                                           const QString &htmlMessage,
+                                           const QString &okText,
+                                           const QString &forceLabel,
+                                           bool *force)
+{
+    QDialog dlg(parent);
+    dlg.setWindowTitle(title);
+    dlg.setMinimumWidth(320);
+
+    auto *layout = new QVBoxLayout(&dlg);
+
+    auto *topRow = new QHBoxLayout;
+    auto *icon = new QLabel(&dlg);
+    icon->setPixmap(dlg.style()->standardPixmap(QStyle::SP_MessageBoxWarning));
+    auto *msg = new QLabel(htmlMessage, &dlg);
+    msg->setWordWrap(true);
+    msg->setTextFormat(Qt::RichText);
+    topRow->addWidget(icon, 0, Qt::AlignTop);
+    topRow->addWidget(msg, 1);
+    layout->addLayout(topRow);
+
+    auto *forceCheck = new QCheckBox(forceLabel, &dlg);
+    forceCheck->setChecked(false);
+    layout->addWidget(forceCheck);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    buttons->button(QDialogButtonBox::Ok)->setText(okText);
+    layout->addWidget(buttons);
+
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+    if (dlg.exec() != QDialog::Accepted) return false;
+    if (force) *force = forceCheck->isChecked();
+    return true;
+}
+
 QString BranchPickerPopup::sanitizeBranchName(const QString &raw)
 {
     QString s = raw.trimmed();
@@ -419,35 +458,12 @@ void BranchPickerPopup::showRenameBranchDialog(const QString &branchName)
 
 void BranchPickerPopup::showDeleteBranchDialog(const QString &branchName)
 {
-    QDialog dlg(this);
-    dlg.setWindowTitle(tr("Delete Branch"));
-    dlg.setMinimumWidth(320);
-
-    auto *layout = new QVBoxLayout(&dlg);
-
-    auto *topRow = new QHBoxLayout;
-    auto *icon = new QLabel(&dlg);
-    icon->setPixmap(style()->standardPixmap(QStyle::SP_MessageBoxWarning));
-    auto *msg = new QLabel(tr("Are you sure you want to delete branch '<b>%1</b>'?")
-                               .arg(branchName.toHtmlEscaped()), &dlg);
-    msg->setWordWrap(true);
-    topRow->addWidget(icon, 0, Qt::AlignTop);
-    topRow->addWidget(msg, 1);
-    layout->addLayout(topRow);
-
-    auto *forceCheck = new QCheckBox(tr("Force delete (even if not fully merged)"), &dlg);
-    forceCheck->setChecked(false);
-    layout->addWidget(forceCheck);
-
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-    buttons->button(QDialogButtonBox::Ok)->setText(tr("Delete"));
-    layout->addWidget(buttons);
-
-    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-
-    if (dlg.exec() == QDialog::Accepted) {
-        emit deleteBranchRequested(branchName, forceCheck->isChecked());
-        close();
-    }
+    bool force = false;
+    const QString html = tr("Are you sure you want to delete branch '<b>%1</b>'?")
+                             .arg(branchName.toHtmlEscaped());
+    if (!confirmForceAction(this, tr("Delete Branch"), html, tr("Delete"),
+                            tr("Force delete (even if not fully merged)"), &force))
+        return;
+    emit deleteBranchRequested(branchName, force);
+    close();
 }

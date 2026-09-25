@@ -974,6 +974,22 @@ target_sources(test_git_numstat_parser PRIVATE
 )
 add_test(NAME GitNumstatParser COMMAND test_git_numstat_parser)
 
+# --- GitRepoDiscovery: `git worktree list --porcelain` plus combo fallback. ---
+qt_add_executable(test_git_repo_discovery test_git_repo_discovery.cpp)
+target_include_directories(test_git_repo_discovery PRIVATE ${CMAKE_SOURCE_DIR}/src/git)
+target_link_libraries(test_git_repo_discovery PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_git_repo_discovery PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/git/GitRepoDiscovery.cpp
+    ${CMAKE_SOURCE_DIR}/src/git/GitRepoDiscovery.h
+    ${CMAKE_SOURCE_DIR}/src/git/GitRepoInfo.h
+    ${CMAKE_SOURCE_DIR}/src/git/GitRepoModel.cpp
+    ${CMAKE_SOURCE_DIR}/src/git/GitRepoModel.h
+    ${CMAKE_SOURCE_DIR}/src/git/GitErrorClassifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/git/GitErrorClassifier.h
+    ${CMAKE_SOURCE_DIR}/src/git/GitError.h
+)
+add_test(NAME GitRepoDiscovery COMMAND test_git_repo_discovery)
+
 # --- GitDiffCache: byte-budget LRU keyed by xxHash3 of (repo, relPath, staged). ---
 qt_add_executable(test_git_diff_cache test_git_diff_cache.cpp)
 target_include_directories(test_git_diff_cache PRIVATE ${CMAKE_SOURCE_DIR}/src/git)

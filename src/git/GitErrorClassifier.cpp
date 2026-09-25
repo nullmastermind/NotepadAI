@@ -111,6 +111,18 @@ GitError GitErrorClassifier::classify(int exitCode, const QByteArray &stderr_, c
                     tr("Wait or remove `.git/index.lock` manually if no other process is running."),
                     details, {QStringLiteral("retry")});
 
+    if (rx(lowered, R"(contains modified or untracked files|use --force to delete)"))
+        return make(GitError::DirtyTree,
+                    tr("Worktree has uncommitted changes — retry with Force, or commit or stash first."),
+                    QString(),
+                    details, {QStringLiteral("retry")});
+
+    if (rx(lowered, R"(is locked|locked, cannot be removed)"))
+        return make(GitError::LockHeld,
+                    tr("Worktree is locked — unlock it, or retry with Force."),
+                    QString(),
+                    details, {QStringLiteral("retry")});
+
     return make(GitError::Unknown,
                 tr("Git operation failed."),
                 QString(),

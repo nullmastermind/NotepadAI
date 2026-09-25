@@ -26,8 +26,10 @@ struct GitRepoInfo
 {
     QString toplevel;       // absolute, forward slashes
     QString displayName;    // basename or "sub/sub"
-    int depth = 0;          // 0 = root, 1+ = submodule depth
+    int depth = 0;          // 0 = root, 1+ = submodule / linked worktree
     bool isSubmodule = false;
+    bool isWorktree = false;
+    QString branch;         // empty if detached or unknown
 };
 
 using GitRepoInfos = QVector<GitRepoInfo>;

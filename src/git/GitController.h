@@ -64,6 +64,8 @@ public:
     GitStatusModel *statusModel() const { return m_status; }
 
     QString currentRepo() const { return m_currentRepo; }
+    QString mainWorktree() const { return m_mainWorktree; }
+    QString mainBranch() const { return m_mainBranch; }
 
     // Ahead/behind counts vs the current branch's upstream, populated from
     // `git status --porcelain=v2 --branch`. Both stay at 0 when no upstream
@@ -84,7 +86,7 @@ public:
 public slots:
     void initialize();
     void selectRepo(const QString &repoToplevel);
-    void refresh();
+    void refresh(bool relistWorktrees = false);
     void stagePaths(const QStringList &relPaths);
     void unstagePaths(const QStringList &relPaths);
     void stageAll();
@@ -101,6 +103,8 @@ public slots:
     void forcePush(const QString &remote = {});
     void renameBranch(const QString &oldName, const QString &newName, bool updateRemote);
     void deleteBranch(const QString &branchName, bool force);
+    void removeWorktree(const QString &path, bool force);
+    void mergeAndRemoveWorktree(const QString &path, const QString &branch, bool force);
     void revertPaths(const QStringList &relPaths);
     void deleteUntrackedPaths(const QStringList &relPaths);
     void cancelCurrent();
@@ -155,7 +159,7 @@ signals:
 
 private:
     enum class OpKind : std::uint8_t {
-        Discover, Toplevel, SubmodulesList,
+        Discover, Toplevel, SubmodulesList, WorktreesList,
         HeadSym, HeadSha, Refs, Remotes, Status,
         IgnoredDirs,
         NumstatStaged, NumstatUnstaged,
@@ -167,7 +171,8 @@ private:
         Commit,
         SwitchBranch, CreateBranch, RenameBranch, DeleteBranch, SetUpstream, ConfigTracking, Stash,
         Fetch, Pull, Push, ForcePush,
-        Revert, CleanUntracked
+        Revert, CleanUntracked,
+        MergeWorktree, RemoveWorktree
     };
     struct Op {
         OpKind kind;
@@ -192,6 +197,9 @@ private:
     GitRefreshCoalescer m_coalescer;
 
     QString m_currentRepo;
+    QString m_discoveredRoot;
+    QString m_mainWorktree;
+    QString m_mainBranch;
     QString m_currentBranch;
     // Deferred selectRepo target — set when selectRepo() is called while a
     // queue is in flight; applied by runNext() after the queue drains. Avoids
@@ -221,6 +229,7 @@ private:
 
     void enqueueDiscovery();
     void enqueueFullRefresh();
+    void enqueueWorktreeList();
     // Internal — apply a repo switch (mutate state + enqueue refresh).
     // selectRepo() defers to this when the controller is idle; runNext()
     // applies the deferred target once the queue drains.
@@ -228,6 +237,7 @@ private:
 
     void handleToplevelDone(int exit, const QByteArray &out, const QByteArray &err);
     void handleSubmodulesDone(int exit, const QByteArray &out);
+    void handleWorktreesDone(int exit, const QByteArray &out);
     void handleHeadSymDone(const QByteArray &out);
     void handleHeadShaDone(int exit, const QByteArray &out);
     void handleRefsDone(const QByteArray &out);

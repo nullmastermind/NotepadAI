@@ -68,6 +68,9 @@ signals:
     void rebaseRequested();
     void interactiveRebaseRequested();
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private slots:
     void onRepoSelected(int index);
     void onRefreshClicked();
@@ -94,6 +97,7 @@ private slots:
     void onRemoteOpProgress(const QString &line);
 
     void onTabChanged(int index);
+    void onRepoComboContextMenu(const QPoint &pos);
 
     // AI commit-message generation.
     void onAiTriggerRequested();
@@ -118,6 +122,8 @@ private:
     void appendStatus(const QString &msg);
     QString settingsKey(const QString &subkey) const;
     void handleCheckoutRequested(const QString &name);
+    void showWorktreeActionsMenu(int row, const QPoint &globalPos);
+    void confirmRemoveWorktree(int row, bool mergeFirst);
     void handleCreateBranch(const QString &name, const QString &base, bool setUpstream);
     void handleSetUpstream(const QString &remoteBranch);
     void handleRenameBranch(const QString &oldName, const QString &newName, bool updateRemote);

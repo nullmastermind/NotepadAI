@@ -19,10 +19,19 @@
 #ifndef GIT_REPO_DISCOVERY_H
 #define GIT_REPO_DISCOVERY_H
 
+#include "GitError.h"
 #include "GitRepoInfo.h"
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
+
+struct GitWorktreeParse
+{
+    QString mainToplevel;
+    QString mainBranch;
+    GitRepoInfos linked;
+};
 
 class GitRepoDiscovery
 {
@@ -34,6 +43,31 @@ public:
     //   "U1234abcd path/to/sub"                  # merge conflict
     // "path/to/sub" is RELATIVE to the root repo.
     static GitRepoInfos parseSubmoduleStatus(const QByteArray &out, const QString &rootToplevel);
+
+    // Parses `git worktree list --porcelain`. Returns every linked worktree
+    // except <rootToplevel> (already shown as the combo root). The first
+    // porcelain record is the primary checkout.
+    static GitRepoInfos parseWorktreeList(const QByteArray &out, const QString &rootToplevel);
+    static GitWorktreeParse parseWorktrees(const QByteArray &out, const QString &rootToplevel);
+    static QString parseMainWorktreePath(const QByteArray &out);
+    // Git's linked-worktree registry (`<common-git-dir>/worktrees`), whether
+    // `gitDir` is the main `.git` or a linked checkout's gitdir.
+    static QString worktreeRegistryDir(const QString &gitDir);
+    static bool worktreesUnchanged(const GitRepoInfos &existing, const GitRepoInfos &linked);
+
+    static QStringList worktreeRemoveArgv(const QString &mainCwd, const QString &path, bool force);
+    static QStringList worktreeMergeArgv(const QString &mainCwd, const QString &branch);
+    static QStringList statusArgv(const QString &cwd);
+    static QStringList stageArgv(const QString &cwd);
+    static QStringList commitArgv(const QString &cwd);
+    static QStringList diffArgv(const QString &cwd, bool stagedSide);
+    static QString nextRepoAfterRemove(const QString &current, const QString &removed, const QString &main);
+    static QString nextRepoAfterMergeConflict(const QString &main);
+    static QString nextRepoAfterFailedRemove(const QString &current);
+    static bool worktreeFailureSwitchesToMain(GitError::Kind kind);
+
+    // If `current` is still in `repos`, return it; otherwise return `main`.
+    static QString fallbackRepo(const GitRepoInfos &repos, const QString &current, const QString &main);
 };
 
 #endif // GIT_REPO_DISCOVERY_H
