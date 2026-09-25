@@ -1279,5 +1279,7 @@ void AiAgentDock::sendWithGoal()
                                  ? attached->view->applyNewWorktreeInstruction(composerText)
                                  : composerText;
     attached->connection->sendPrompt(wireText, imageList);
+    if (res.prefixGoal && attached->goal)
+        attached->goal->sendFirstCriterionGoal();
     emit inputFocused();
 }

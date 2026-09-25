@@ -96,7 +96,8 @@ SendWithGoalDialog::SendWithGoalDialog(AcpAgentRegistry *registry,
     m_prefixGoalCheck = new QCheckBox(tr("Prefix /goal"), this);
     m_prefixGoalCheck->setObjectName(QStringLiteral("prefixGoalCheck"));
     m_prefixGoalCheck->setToolTip(
-        tr("Prepend /goal to messages the goal-agent sends to the target."));
+        tr("Prepend /goal to messages the goal-agent sends. "
+           "The first criterion is sent immediately; later ones wait until the previous is achieved."));
     if (m_settings) {
         const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
         if (!settingsJson.isEmpty()) {

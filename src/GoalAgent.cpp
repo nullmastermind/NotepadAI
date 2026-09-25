@@ -129,7 +129,9 @@ bool GoalAgent::start(const StartRequest &req)
         m_lastSeenTargetMessageCount = 0;
         logDebug(QStringLiteral("start: OK, %1 criteria, agent=%2, maxIter=%3, attach")
                      .arg(m_criteria.size()).arg(m_agentId).arg(m_maxIterations));
-        if (!m_targetModel->isProcessing())
+        if (m_prefixGoal)
+            sendFirstCriterionGoal();
+        else if (!m_targetModel->isProcessing())
             evaluateCurrentCriterion();
     } else {
         m_lastSeenTargetMessageCount = m_targetModel->messages().size();
@@ -189,6 +191,18 @@ void GoalAgent::setTargetSession(AcpConnection *conn, AcpSessionModel *model)
 {
     m_targetConnection = conn;
     m_targetModel = model;
+}
+
+void GoalAgent::sendFirstCriterionGoal()
+{
+    if (m_status != Active || !m_prefixGoal)
+        return;
+    if (m_criteria.isEmpty() || !m_targetConnection)
+        return;
+    const QString sent = prefixGoalMessage(m_criteria[0].text);
+    if (m_targetModel)
+        m_targetModel->appendUserMessage(sent, {}, /*fromGoalAgent=*/true);
+    m_targetConnection->sendSidePrompt(wireTextForTarget(sent));
 }
 
 void GoalAgent::stop()

@@ -67,6 +67,9 @@ public:
     bool start(const StartRequest &req);
     void stop();
     void setTargetSession(AcpConnection *conn, AcpSessionModel *model);
+    // When prefixGoal is on, send `/goal <first criterion>` now (side prompt
+    // if a turn is already in flight). Later criteria still wait for Achieved.
+    void sendFirstCriterionGoal();
 
     // Composer + session state → whether Goal sends a new prompt, attaches to
     // the existing turn, or refuses. Processing never sends (no stacked prompt).
