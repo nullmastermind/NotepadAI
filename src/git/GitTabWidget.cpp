@@ -71,8 +71,6 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QStackedWidget>
-#include <QStyledItemDelegate>
-#include <QStyleOptionViewItem>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -91,15 +89,17 @@ QString worktreeMergeTargetName(const GitRepoInfo &info, GitController *controll
     return GitRepoDiscovery::worktreeMergeTargetName(info, fallback);
 }
 
-class RepoComboIndentDelegate : public QStyledItemDelegate
+class RepoComboBox : public QComboBox
 {
 public:
-    using QStyledItemDelegate::QStyledItemDelegate;
-    void initStyleOption(QStyleOptionViewItem *option, const QModelIndex &index) const override
+    using QComboBox::QComboBox;
+    void showPopup() override
     {
-        QStyledItemDelegate::initStyleOption(option, index);
-        option->text = GitRepoModel::indentedLabel(
-            option->text, index.data(GitRepoModel::DepthRole).toInt());
+        if (QAbstractItemView *v = view()) {
+            const int content = v->sizeHintForColumn(0);
+            v->setMinimumWidth(qMax(width(), qMax(0, content)));
+        }
+        QComboBox::showPopup();
     }
 };
 
@@ -206,13 +206,12 @@ void GitTabWidget::buildUi()
     topRow->setContentsMargins(0, 0, 0, 0);
     topRow->setSpacing(4);
 
-    m_repoCombo = new QComboBox(this);
+    m_repoCombo = new RepoComboBox(this);
     m_repoCombo->setToolTip(tr("Select repository"));
     m_repoCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_repoCombo->setMinimumContentsLength(kRepoComboMinChars);
     m_repoCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_repoCombo->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_repoCombo->setItemDelegate(new RepoComboIndentDelegate(m_repoCombo));
 
     m_branchBtn = new QToolButton(this);
     m_branchBtn->setText(tr("(no repo)"));

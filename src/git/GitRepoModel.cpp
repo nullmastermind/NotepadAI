@@ -34,9 +34,9 @@ QVariant GitRepoModel::data(const QModelIndex &index, int role) const
         case Qt::DisplayRole: {
             if (r.isWorktree) {
                 const QString name = r.displayName.isEmpty() ? r.toplevel : r.displayName;
-                return QStringLiteral("%1 (worktree)").arg(name);
+                return indentedLabel(QStringLiteral("%1 (worktree)").arg(name), r.depth);
             }
-            return r.displayName;
+            return indentedLabel(r.displayName, r.depth);
         }
         case Qt::ToolTipRole: {
             if (r.isWorktree && !r.branch.isEmpty())
