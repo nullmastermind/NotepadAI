@@ -263,6 +263,10 @@ void GitController::enqueueFullRefresh()
 void GitController::selectRepo(const QString &repoToplevel)
 {
     const QString clean = QDir::cleanPath(repoToplevel);
+    if (localCheckoutMissing(clean)) {
+        recoverMissingCheckout();
+        return;
+    }
     if (clean == m_currentRepo) {
         // Already on this repo. Cancel any deferred switch to a stale target.
         m_pendingRepoSwitch.clear();
@@ -277,8 +281,41 @@ void GitController::selectRepo(const QString &repoToplevel)
     applySelectRepo(clean);
 }
 
+bool GitController::localCheckoutMissing(const QString &clean) const
+{
+    if (clean.isEmpty())
+        return false;
+    if (GitRunnerFactory::isRemotePath(m_workspaceRoot)
+        || GitRunnerFactory::isRemotePath(clean))
+        return false;
+    return !QDir(clean).exists();
+}
+
+void GitController::recoverMissingCheckout()
+{
+    enqueueWorktreeList();
+    const QString fallback = QDir::cleanPath(
+        !m_mainWorktree.isEmpty() ? m_mainWorktree : m_discoveredRoot);
+    if (fallback.isEmpty() || localCheckoutMissing(fallback)
+        || fallback == QDir::cleanPath(m_currentRepo)) {
+        emit reposUpdated();
+        return;
+    }
+    if (m_busy) {
+        m_pendingRepoSwitch = fallback;
+        emit reposUpdated();
+        return;
+    }
+    applySelectRepo(fallback);
+    emit reposUpdated();
+}
+
 void GitController::applySelectRepo(const QString &cleanToplevel)
 {
+    if (localCheckoutMissing(cleanToplevel)) {
+        recoverMissingCheckout();
+        return;
+    }
     m_currentRepo = cleanToplevel;
     m_watcher->setRepo(m_currentRepo);
     // The switch enqueues its own refresh. Drop a burst aimed at the previous
@@ -648,7 +685,10 @@ void GitController::runNext()
         if (!m_pendingRepoSwitch.isEmpty() && m_pendingRepoSwitch != m_currentRepo) {
             const QString target = m_pendingRepoSwitch;
             m_pendingRepoSwitch.clear();
-            applySelectRepo(target);
+            if (localCheckoutMissing(target))
+                recoverMissingCheckout();
+            else
+                applySelectRepo(target);
             return;
         }
         m_pendingRepoSwitch.clear();
@@ -757,6 +797,9 @@ void GitController::handleWorktreesDone(int exit, const QByteArray &out)
     Q_UNUSED(exit);
     const QString owner = m_current.meta.value(QStringLiteral("rootToplevel")).toString();
     const auto parsed = GitRepoDiscovery::parseWorktrees(out, owner);
+    GitRepoInfos linked = parsed.linked;
+    if (!GitRunnerFactory::isRemotePath(m_workspaceRoot))
+        linked = GitRepoDiscovery::dropMissingLocalCheckouts(linked);
     const QString ownerClean = QDir::cleanPath(owner);
     const bool isRoot = !m_discoveredRoot.isEmpty()
         && ownerClean == QDir::cleanPath(m_discoveredRoot);
@@ -767,7 +810,7 @@ void GitController::handleWorktreesDone(int exit, const QByteArray &out)
     }
 
     auto all = m_repos->repos();
-    if (GitRepoDiscovery::worktreesUnchanged(all, parsed.linked, ownerClean)) {
+    if (GitRepoDiscovery::worktreesUnchanged(all, linked, ownerClean)) {
         const QString fallback = ownerClean.isEmpty() ? m_mainWorktree : ownerClean;
         const QString next = GitRepoDiscovery::fallbackRepo(all, m_currentRepo, fallback);
         if (!next.isEmpty() && QDir::cleanPath(next) != QDir::cleanPath(m_currentRepo))
@@ -775,7 +818,7 @@ void GitController::handleWorktreesDone(int exit, const QByteArray &out)
         return;
     }
 
-    const GitRepoInfos kept = GitRepoDiscovery::replaceOwnedWorktrees(all, ownerClean, parsed.linked);
+    const GitRepoInfos kept = GitRepoDiscovery::replaceOwnedWorktrees(all, ownerClean, linked);
     m_repos->setRepos(kept);
 
     const QString fallback = ownerClean.isEmpty() ? m_mainWorktree : ownerClean;

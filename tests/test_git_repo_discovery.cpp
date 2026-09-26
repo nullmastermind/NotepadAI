@@ -40,6 +40,7 @@ private slots:
     void detached_hasEmptyBranch();
     void fallbackRepo_switchesWhenCurrentMissing();
     void fallbackRepo_externalDelete_switchesToMain();
+    void dropMissingLocalCheckouts_keepsExisting();
     void parseMainWorktreePath_isFirstRecord();
     void parseWorktrees_exposesMainBranch();
     void linkedWorktree_comboLabelDistinguishes();
@@ -267,6 +268,25 @@ void TestGitRepoDiscovery::fallbackRepo_externalDelete_switchesToMain()
 
     QCOMPARE(GitRepoDiscovery::fallbackRepo(repos, QStringLiteral("C:/wt/deleted"), QStringLiteral("C:/repo")),
              QStringLiteral("C:/repo"));
+}
+
+void TestGitRepoDiscovery::dropMissingLocalCheckouts_keepsExisting()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    GitRepoInfos repos;
+    GitRepoInfo ok;
+    ok.toplevel = dir.path();
+    repos.append(ok);
+    GitRepoInfo gone;
+    gone.toplevel = dir.filePath(QStringLiteral("nope"));
+    repos.append(gone);
+    GitRepoInfo empty;
+    repos.append(empty);
+
+    const GitRepoInfos kept = GitRepoDiscovery::dropMissingLocalCheckouts(repos);
+    QCOMPARE(kept.size(), 1);
+    QCOMPARE(QDir::cleanPath(kept.at(0).toplevel), QDir::cleanPath(dir.path()));
 }
 
 void TestGitRepoDiscovery::parseWorktrees_exposesMainBranch()

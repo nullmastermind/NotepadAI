@@ -727,9 +727,13 @@ void GitTabWidget::onReposUpdated()
     m_suppressRepoCombo = true;
 
     ApplicationSettings settings;
-    const QString saved = settings.value(settingsKey(QStringLiteral("lastRepo"))).toString();
+    const QString current = m_controller->currentRepo();
     int pick = -1;
-    if (!saved.isEmpty()) pick = m_controller->repoModel()->indexOf(saved);
+    if (!current.isEmpty()) pick = m_controller->repoModel()->indexOf(current);
+    if (pick < 0) {
+        const QString saved = settings.value(settingsKey(QStringLiteral("lastRepo"))).toString();
+        if (!saved.isEmpty()) pick = m_controller->repoModel()->indexOf(saved);
+    }
     if (pick < 0 && m_controller->repoModel()->rowCount() > 0) pick = 0;
 
     m_repoCombo->setCurrentIndex(pick);
@@ -766,16 +770,28 @@ void GitTabWidget::onRepoSelected(int index)
         }
     }
 
-    ApplicationSettings settings;
-    settings.setValue(settingsKey(QStringLiteral("lastRepo")), info->toplevel);
     m_controller->selectRepo(info->toplevel);
+    const QString actual = m_controller->currentRepo();
+    if (actual.isEmpty()) return;
+
+    if (QDir::cleanPath(actual) != QDir::cleanPath(info->toplevel)) {
+        m_suppressRepoCombo = true;
+        const int row = m_controller->repoModel()->indexOf(actual);
+        if (row >= 0)
+            m_repoCombo->setCurrentIndex(row);
+        m_suppressRepoCombo = false;
+    }
+
+    ApplicationSettings settings;
+    settings.setValue(settingsKey(QStringLiteral("lastRepo")), actual);
+    const int actualRow = m_controller->repoModel()->indexOf(actual);
     const QVariant tip = m_controller->repoModel()->data(
-        m_controller->repoModel()->index(index), Qt::ToolTipRole);
+        m_controller->repoModel()->index(actualRow >= 0 ? actualRow : index), Qt::ToolTipRole);
     m_repoCombo->setToolTip(tip.toString().isEmpty() ? tr("Select repository")
                                                      : tip.toString());
     if (m_historyView) {
         m_historyView->setRunnerScope(m_controller->runnerScope());
-        m_historyView->setRepoRoot(info->toplevel);
+        m_historyView->setRepoRoot(actual);
     }
 }
 

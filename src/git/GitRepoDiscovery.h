@@ -83,6 +83,10 @@ public:
 
     // If `current` is still in `repos`, return it; otherwise return `main`.
     static QString fallbackRepo(const GitRepoInfos &repos, const QString &current, const QString &main);
+
+    // Drop checkouts whose directory is gone. `git worktree list` keeps listing
+    // them until prune; the combo must not.
+    static GitRepoInfos dropMissingLocalCheckouts(const GitRepoInfos &repos);
 };
 
 #endif // GIT_REPO_DISCOVERY_H

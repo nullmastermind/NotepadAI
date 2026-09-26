@@ -195,7 +195,12 @@ void GitProcessRunner::run(const QString &cwd,
             this, &GitProcessRunner::onProcessError);
 
     m_proc->start(QIODevice::ReadWrite);
+    // start() can emit FailedToStart synchronously; onProcessError already reset() + cb.
+    if (!m_proc)
+        return;
     if (!m_proc->waitForStarted(5000)) {
+        if (!m_proc)
+            return;
         const QByteArray err = QString::fromLatin1("failed to start git: %1")
             .arg(m_proc->errorString()).toUtf8();
         Callback cb2 = std::move(m_cb);

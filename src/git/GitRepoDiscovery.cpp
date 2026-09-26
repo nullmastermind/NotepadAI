@@ -382,3 +382,14 @@ QString GitRepoDiscovery::fallbackRepo(const GitRepoInfos &repos, const QString 
     }
     return QDir::cleanPath(main);
 }
+
+GitRepoInfos GitRepoDiscovery::dropMissingLocalCheckouts(const GitRepoInfos &repos)
+{
+    GitRepoInfos out;
+    out.reserve(repos.size());
+    for (const auto &r : repos) {
+        if (!r.toplevel.isEmpty() && QDir(r.toplevel).exists())
+            out.append(r);
+    }
+    return out;
+}

@@ -235,6 +235,8 @@ private:
     // selectRepo() defers to this when the controller is idle; runNext()
     // applies the deferred target once the queue drains.
     void applySelectRepo(const QString &cleanToplevel);
+    bool localCheckoutMissing(const QString &clean) const;
+    void recoverMissingCheckout();
 
     void handleToplevelDone(int exit, const QByteArray &out, const QByteArray &err);
     void handleSubmodulesDone(int exit, const QByteArray &out);
