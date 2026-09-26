@@ -20,6 +20,7 @@
 
 #include <QByteArrayView>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 
 namespace {
@@ -100,6 +101,7 @@ GitWorktreeParse GitRepoDiscovery::parseWorktrees(const QByteArray &out, const Q
             parsed.mainBranch = savedBranch;
         }
         if (clean == rootClean) return;
+        if (isGitDirPath(clean)) return;
 
         GitRepoInfo info;
         info.toplevel = clean;
@@ -108,6 +110,8 @@ GitWorktreeParse GitRepoDiscovery::parseWorktrees(const QByteArray &out, const Q
         info.isWorktree = !isPrimary;
         info.depth = info.isWorktree ? 1 : 0;
         info.branch = savedBranch;
+        if (info.isWorktree)
+            info.parentToplevel = rootClean;
         parsed.linked.append(info);
     };
 
@@ -156,14 +160,57 @@ QString GitRepoDiscovery::worktreeRegistryDir(const QString &gitDir)
     return clean + suffix;
 }
 
-bool GitRepoDiscovery::worktreesUnchanged(const GitRepoInfos &existing, const GitRepoInfos &linked)
+bool GitRepoDiscovery::isGitDirPath(const QString &path)
 {
+    return QDir::cleanPath(path).contains(QLatin1String("/.git/"));
+}
+
+bool GitRepoDiscovery::isWorktreeRegistryPath(const QString &path)
+{
+    return QDir::cleanPath(path).endsWith(QStringLiteral("/worktrees"));
+}
+
+QStringList GitRepoDiscovery::worktreeWatchDirs(const QString &gitDir)
+{
+    const QString registry = worktreeRegistryDir(gitDir);
+    return { registry, QFileInfo(registry).path() };
+}
+
+QString GitRepoDiscovery::resolveGitDir(const QString &toplevel)
+{
+    const QString root = QDir::cleanPath(toplevel);
+    if (root.isEmpty()) return {};
+    QString dotGitEntry = root + QStringLiteral("/.git");
+    QFileInfo fi(dotGitEntry);
+    if (fi.isDir())
+        return dotGitEntry;
+    if (fi.isFile()) {
+        QFile f(dotGitEntry);
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            const QString contents = QString::fromUtf8(f.readAll()).trimmed();
+            const QString prefix = QStringLiteral("gitdir: ");
+            if (contents.startsWith(prefix)) {
+                QString gitDir = contents.mid(prefix.size()).trimmed();
+                if (!QFileInfo(gitDir).isAbsolute())
+                    gitDir = QDir::cleanPath(root + QLatin1Char('/') + gitDir);
+                return QDir::cleanPath(gitDir);
+            }
+        }
+    }
+    return dotGitEntry;
+}
+
+bool GitRepoDiscovery::worktreesUnchanged(const GitRepoInfos &existing, const GitRepoInfos &linked,
+                                          const QString &ownerToplevel)
+{
+    const QString owner = QDir::cleanPath(ownerToplevel);
     QStringList a;
     QStringList b;
     a.reserve(existing.size());
     b.reserve(linked.size());
     for (const auto &r : existing) {
         if (!r.isWorktree) continue;
+        if (!owner.isEmpty() && QDir::cleanPath(r.parentToplevel) != owner) continue;
         a.append(r.toplevel + QLatin1Char('\0') + r.branch);
     }
     for (const auto &r : linked) {
@@ -173,6 +220,87 @@ bool GitRepoDiscovery::worktreesUnchanged(const GitRepoInfos &existing, const Gi
     a.sort();
     b.sort();
     return a == b;
+}
+
+GitRepoInfos GitRepoDiscovery::replaceOwnedWorktrees(const GitRepoInfos &existing,
+                                                     const QString &ownerToplevel,
+                                                     const GitRepoInfos &linked)
+{
+    const QString owner = QDir::cleanPath(ownerToplevel);
+    int ownerDepth = 0;
+    for (const auto &r : existing) {
+        if (QDir::cleanPath(r.toplevel) == owner)
+            ownerDepth = r.depth;
+    }
+
+    const auto annotate = [&](GitRepoInfo row) {
+        row.depth = ownerDepth + 1;
+        if (row.parentToplevel.isEmpty())
+            row.parentToplevel = owner;
+        return row;
+    };
+
+    GitRepoInfos kept;
+    kept.reserve(existing.size() + linked.size());
+    bool inserted = false;
+    for (const auto &r : existing) {
+        if (r.isWorktree && QDir::cleanPath(r.parentToplevel) == owner)
+            continue;
+        kept.append(r);
+        if (!inserted && QDir::cleanPath(r.toplevel) == owner) {
+            for (const auto &item : linked)
+                kept.append(annotate(item));
+            inserted = true;
+        }
+    }
+    if (!inserted) {
+        for (const auto &item : linked)
+            kept.append(annotate(item));
+    }
+    return kept;
+}
+
+QString GitRepoDiscovery::ownerCwdForWorktree(const GitRepoInfos &repos, const QString &path,
+                                              const QString &fallback)
+{
+    const QString clean = QDir::cleanPath(path);
+    for (const auto &r : repos) {
+        if (QDir::cleanPath(r.toplevel) == clean && !r.parentToplevel.isEmpty())
+            return QDir::cleanPath(r.parentToplevel);
+    }
+    return QDir::cleanPath(fallback);
+}
+
+bool GitRepoDiscovery::worktreeMatchesFilter(const GitRepoInfo &info, const QString &needle)
+{
+    if (!info.isWorktree) return false;
+    if (needle.isEmpty()) return true;
+    if (info.displayName.contains(needle, Qt::CaseInsensitive)
+        || info.branch.contains(needle, Qt::CaseInsensitive)
+        || info.toplevel.contains(needle, Qt::CaseInsensitive))
+        return true;
+    if (info.parentToplevel.isEmpty()) return false;
+    if (info.parentToplevel.contains(needle, Qt::CaseInsensitive)) return true;
+    return QFileInfo(info.parentToplevel).fileName().contains(needle, Qt::CaseInsensitive);
+}
+
+GitRepoInfos GitRepoDiscovery::filteredWorktrees(const GitRepoInfos &repos, const QString &needle)
+{
+    const QString q = needle.trimmed();
+    GitRepoInfos out;
+    out.reserve(repos.size());
+    for (const auto &r : repos) {
+        if (worktreeMatchesFilter(r, q))
+            out.append(r);
+    }
+    return out;
+}
+
+QString GitRepoDiscovery::worktreeMergeTargetName(const GitRepoInfo &info, const QString &fallback)
+{
+    if (!info.parentToplevel.isEmpty())
+        return QFileInfo(info.parentToplevel).fileName();
+    return fallback;
 }
 
 QStringList GitRepoDiscovery::worktreeRemoveArgv(const QString &mainCwd, const QString &path, bool force)

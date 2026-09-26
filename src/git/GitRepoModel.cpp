@@ -34,12 +34,9 @@ QVariant GitRepoModel::data(const QModelIndex &index, int role) const
         case Qt::DisplayRole: {
             if (r.isWorktree) {
                 const QString name = r.displayName.isEmpty() ? r.toplevel : r.displayName;
-                const QString label = QStringLiteral("%1 (worktree)").arg(name);
-                if (r.depth <= 0) return label;
-                return QStringLiteral("%1%2").arg(QString(r.depth * 2, QChar(0x2007)), label);
+                return QStringLiteral("%1 (worktree)").arg(name);
             }
-            if (r.depth <= 0) return r.displayName;
-            return QStringLiteral("%1%2").arg(QString(r.depth * 2, QChar(0x2007)), r.displayName);
+            return r.displayName;
         }
         case Qt::ToolTipRole: {
             if (r.isWorktree && !r.branch.isEmpty())
@@ -73,4 +70,10 @@ const GitRepoInfo *GitRepoModel::infoAt(int row) const
 {
     if (row < 0 || row >= m_repos.size()) return nullptr;
     return &m_repos.at(row);
+}
+
+QString GitRepoModel::indentedLabel(const QString &label, int depth)
+{
+    if (depth <= 0) return label;
+    return QStringLiteral("%1%2").arg(QString(depth * 2, QChar(0x2007)), label);
 }

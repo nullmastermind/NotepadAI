@@ -43,6 +43,9 @@ public:
 
     void setRepo(const QString &toplevel);
     void clear();
+    // Extra gitdirs (submodule checkouts) whose worktree registries should
+    // fire worktreesChanged even while another repo is selected.
+    void setAuxiliaryGitDirs(const QStringList &gitDirs);
 
     // Forward the set of gitignored top-level paths to the recursive tree
     // watcher so working-tree churn confined to ignored dirs (build output,
@@ -68,6 +71,7 @@ private:
     QTimer *m_debounce = nullptr;
     QString m_repoRoot;
     QString m_gitDir;
+    QStringList m_auxGitDirs;
     int m_pending = 0;
 
 #ifdef Q_OS_WIN

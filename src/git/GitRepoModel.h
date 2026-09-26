@@ -48,6 +48,8 @@ public:
     GitRepoInfos repos() const { return m_repos; }
     bool isEmpty() const { return m_repos.isEmpty(); }
 
+    static QString indentedLabel(const QString &label, int depth);
+
 private:
     GitRepoInfos m_repos;
 };

@@ -30,6 +30,7 @@ struct GitRepoInfo
     bool isSubmodule = false;
     bool isWorktree = false;
     QString branch;         // empty if detached or unknown
+    QString parentToplevel; // checkout that owns this linked worktree; empty if none
 };
 
 using GitRepoInfos = QVector<GitRepoInfo>;

@@ -66,37 +66,37 @@ void GitWatcher::clear()
 #endif
     m_repoRoot.clear();
     m_gitDir.clear();
+    m_auxGitDirs.clear();
     m_pending = 0;
 }
 
 void GitWatcher::setRepo(const QString &toplevel)
 {
+    const QStringList aux = m_auxGitDirs;
     clear();
+    m_auxGitDirs = aux;
     if (toplevel.isEmpty()) return;
     m_repoRoot = QDir::cleanPath(toplevel);
-
-    // .git may be a directory (normal repo) or a file containing "gitdir: <path>"
-    // (worktree or submodule). Resolve it.
-    const QString dotGitEntry = m_repoRoot + QStringLiteral("/.git");
-    QFileInfo fi(dotGitEntry);
-    if (fi.isDir()) {
-        m_gitDir = dotGitEntry;
-    } else if (fi.isFile()) {
-        QFile f(dotGitEntry);
-        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            const QString contents = QString::fromUtf8(f.readAll()).trimmed();
-            const QString prefix = QStringLiteral("gitdir: ");
-            if (contents.startsWith(prefix)) {
-                QString gitDir = contents.mid(prefix.size()).trimmed();
-                if (!QFileInfo(gitDir).isAbsolute())
-                    gitDir = QDir::cleanPath(m_repoRoot + QLatin1Char('/') + gitDir);
-                m_gitDir = gitDir;
-            }
-        }
-    }
-    if (m_gitDir.isEmpty()) m_gitDir = dotGitEntry; // best-effort
-
+    m_gitDir = GitRepoDiscovery::resolveGitDir(m_repoRoot);
+    if (m_gitDir.isEmpty())
+        m_gitDir = m_repoRoot + QStringLiteral("/.git");
     rewatch();
+}
+
+void GitWatcher::setAuxiliaryGitDirs(const QStringList &gitDirs)
+{
+    m_auxGitDirs.clear();
+    m_auxGitDirs.reserve(gitDirs.size());
+    for (const QString &d : gitDirs) {
+        const QString clean = QDir::cleanPath(d);
+        if (!clean.isEmpty() && clean != m_gitDir)
+            m_auxGitDirs.append(clean);
+    }
+    if (m_gitDir.isEmpty()) return;
+    if (!m_fs->directories().isEmpty())
+        m_fs->removePaths(m_fs->directories());
+    const QStringList dirs = currentWatchedDirs();
+    if (!dirs.isEmpty()) m_fs->addPaths(dirs);
 }
 
 void GitWatcher::setIgnoredPrefixes(const QStringList &prefixes)
@@ -132,9 +132,13 @@ QStringList GitWatcher::currentWatchedDirs() const
     dirs.append(m_gitDir + QStringLiteral("/refs/remotes"));
     dirs.append(m_gitDir + QStringLiteral("/rebase-merge"));
     dirs.append(m_gitDir + QStringLiteral("/rebase-apply"));
-    const QString registry = GitRepoDiscovery::worktreeRegistryDir(m_gitDir);
-    dirs.append(registry);
-    dirs.append(QFileInfo(registry).path());
+    const auto appendWatchDirs = [&](const QString &gitDir) {
+        for (const QString &d : GitRepoDiscovery::worktreeWatchDirs(gitDir))
+            dirs.append(d);
+    };
+    appendWatchDirs(m_gitDir);
+    for (const QString &aux : m_auxGitDirs)
+        appendWatchDirs(aux);
 #ifndef Q_OS_WIN
     // On non-Windows, fall back to watching the repo root (non-recursive).
     dirs.append(m_repoRoot);
@@ -174,22 +178,8 @@ void GitWatcher::onFileChanged(const QString &path)
 void GitWatcher::onDirChanged(const QString &path)
 {
     const QString clean = QDir::cleanPath(path);
-    const QString registry = GitRepoDiscovery::worktreeRegistryDir(m_gitDir);
-    const QString commonGit = QFileInfo(registry).path();
-    if (clean == registry) {
+    if (GitRepoDiscovery::isWorktreeRegistryPath(clean)) {
         m_pending |= PWorktrees;
-    } else if (clean == commonGit) {
-        bool watched = false;
-        for (const QString &d : m_fs->directories()) {
-            if (QDir::cleanPath(d) == registry) { watched = true; break; }
-        }
-        const bool exists = QFileInfo(registry).isDir();
-        if (exists && !watched) {
-            m_fs->addPath(registry);
-            m_pending |= PWorktrees;
-        } else if (!exists && watched) {
-            m_pending |= PWorktrees;
-        }
     } else if (path.endsWith(QStringLiteral("/refs/heads")) ||
                path.endsWith(QStringLiteral("/refs/remotes"))) {
         m_pending |= PRefs;
@@ -197,7 +187,31 @@ void GitWatcher::onDirChanged(const QString &path)
                path.endsWith(QStringLiteral("/rebase-apply"))) {
         m_pending |= POpState;
     } else {
-        m_pending |= PTree;
+        QString matchedRegistry;
+        const auto consider = [&](const QString &gitDir) {
+            if (gitDir.isEmpty() || !matchedRegistry.isEmpty()) return;
+            const QString registry = GitRepoDiscovery::worktreeRegistryDir(gitDir);
+            if (clean == QFileInfo(registry).path())
+                matchedRegistry = registry;
+        };
+        consider(m_gitDir);
+        for (const QString &aux : m_auxGitDirs)
+            consider(aux);
+        if (!matchedRegistry.isEmpty()) {
+            bool watched = false;
+            for (const QString &d : m_fs->directories()) {
+                if (QDir::cleanPath(d) == matchedRegistry) { watched = true; break; }
+            }
+            const bool exists = QFileInfo(matchedRegistry).isDir();
+            if (exists && !watched) {
+                m_fs->addPath(matchedRegistry);
+                m_pending |= PWorktrees;
+            } else if (!exists && watched) {
+                m_pending |= PWorktrees;
+            }
+        } else {
+            m_pending |= PTree;
+        }
     }
     if (m_pending) m_debounce->start();
 }

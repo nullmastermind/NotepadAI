@@ -53,7 +53,22 @@ public:
     // Git's linked-worktree registry (`<common-git-dir>/worktrees`), whether
     // `gitDir` is the main `.git` or a linked checkout's gitdir.
     static QString worktreeRegistryDir(const QString &gitDir);
-    static bool worktreesUnchanged(const GitRepoInfos &existing, const GitRepoInfos &linked);
+    static bool isGitDirPath(const QString &path);
+    static bool isWorktreeRegistryPath(const QString &path);
+    static QStringList worktreeWatchDirs(const QString &gitDir);
+    static QString resolveGitDir(const QString &toplevel);
+    static bool worktreesUnchanged(const GitRepoInfos &existing, const GitRepoInfos &linked,
+                                  const QString &ownerToplevel = {});
+    // Drop worktrees owned by `ownerToplevel`, then append `linked`. Other
+    // checkouts and other parents' worktrees stay.
+    static GitRepoInfos replaceOwnedWorktrees(const GitRepoInfos &existing,
+                                             const QString &ownerToplevel,
+                                             const GitRepoInfos &linked);
+    static QString ownerCwdForWorktree(const GitRepoInfos &repos, const QString &path,
+                                      const QString &fallback);
+    static bool worktreeMatchesFilter(const GitRepoInfo &info, const QString &needle);
+    static GitRepoInfos filteredWorktrees(const GitRepoInfos &repos, const QString &needle);
+    static QString worktreeMergeTargetName(const GitRepoInfo &info, const QString &fallback);
 
     static QStringList worktreeRemoveArgv(const QString &mainCwd, const QString &path, bool force);
     static QStringList worktreeMergeArgv(const QString &mainCwd, const QString &branch);

@@ -321,6 +321,8 @@ qt_add_executable(NotepadAI
 
 	git/BranchPickerPopup.cpp
 	git/BranchPickerPopup.h
+	git/WorktreePickerPopup.cpp
+	git/WorktreePickerPopup.h
 	git/BranchRefParser.cpp
 	git/BranchRefParser.h
 	git/BufferDiffEngine.cpp

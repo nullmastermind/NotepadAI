@@ -692,6 +692,7 @@ void GitController::handleToplevelDone(int exit, const QByteArray &out, const QB
         }
         m_currentRepo.clear();
         m_repos->setRepos({});
+        m_watcher->clear();
         setState(State::Error);
         emit reposUpdated();
         emit errorOccurred(e);
@@ -738,35 +739,47 @@ void GitController::handleSubmodulesDone(int exit, const QByteArray &out)
     appendUniqueRepos(all, subs);
     m_repos->setRepos(all);
     emit reposUpdated();
+
+    QStringList auxGitDirs;
+    auxGitDirs.reserve(subs.size());
+    for (const auto &s : subs) {
+        if (s.toplevel.isEmpty()) continue;
+        enqueueWorktreeListFor(s.toplevel);
+        const QString gitDir = GitRepoDiscovery::resolveGitDir(s.toplevel);
+        if (!gitDir.isEmpty())
+            auxGitDirs.append(gitDir);
+    }
+    m_watcher->setAuxiliaryGitDirs(auxGitDirs);
 }
 
 void GitController::handleWorktreesDone(int exit, const QByteArray &out)
 {
     Q_UNUSED(exit);
-    const QString rootToplevel = m_current.meta.value(QStringLiteral("rootToplevel")).toString();
-    const auto parsed = GitRepoDiscovery::parseWorktrees(out, rootToplevel);
-    if (!parsed.mainToplevel.isEmpty()) {
+    const QString owner = m_current.meta.value(QStringLiteral("rootToplevel")).toString();
+    const auto parsed = GitRepoDiscovery::parseWorktrees(out, owner);
+    const QString ownerClean = QDir::cleanPath(owner);
+    const bool isRoot = !m_discoveredRoot.isEmpty()
+        && ownerClean == QDir::cleanPath(m_discoveredRoot);
+    if (isRoot && !parsed.mainToplevel.isEmpty()
+        && !GitRepoDiscovery::isGitDirPath(parsed.mainToplevel)) {
         m_mainWorktree = parsed.mainToplevel;
         m_mainBranch = parsed.mainBranch;
     }
 
     auto all = m_repos->repos();
-    if (GitRepoDiscovery::worktreesUnchanged(all, parsed.linked)) {
-        const QString next = GitRepoDiscovery::fallbackRepo(all, m_currentRepo, m_mainWorktree);
+    if (GitRepoDiscovery::worktreesUnchanged(all, parsed.linked, ownerClean)) {
+        const QString fallback = ownerClean.isEmpty() ? m_mainWorktree : ownerClean;
+        const QString next = GitRepoDiscovery::fallbackRepo(all, m_currentRepo, fallback);
         if (!next.isEmpty() && QDir::cleanPath(next) != QDir::cleanPath(m_currentRepo))
             m_pendingRepoSwitch = next;
         return;
     }
 
-    GitRepoInfos kept;
-    kept.reserve(all.size());
-    for (const auto &r : all) {
-        if (!r.isWorktree) kept.append(r);
-    }
-    appendUniqueRepos(kept, parsed.linked);
+    const GitRepoInfos kept = GitRepoDiscovery::replaceOwnedWorktrees(all, ownerClean, parsed.linked);
     m_repos->setRepos(kept);
 
-    const QString next = GitRepoDiscovery::fallbackRepo(kept, m_currentRepo, m_mainWorktree);
+    const QString fallback = ownerClean.isEmpty() ? m_mainWorktree : ownerClean;
+    const QString next = GitRepoDiscovery::fallbackRepo(kept, m_currentRepo, fallback);
     if (!next.isEmpty() && QDir::cleanPath(next) != QDir::cleanPath(m_currentRepo))
         m_pendingRepoSwitch = next;
 
@@ -776,23 +789,39 @@ void GitController::handleWorktreesDone(int exit, const QByteArray &out)
 void GitController::enqueueWorktreeList()
 {
     const QString root = m_discoveredRoot.isEmpty() ? m_mainWorktree : m_discoveredRoot;
-    if (root.isEmpty()) return;
+    if (!root.isEmpty())
+        enqueueWorktreeListFor(root);
+    if (!m_repos) return;
+    for (const auto &r : m_repos->repos()) {
+        if (r.isSubmodule && !r.toplevel.isEmpty())
+            enqueueWorktreeListFor(r.toplevel);
+    }
+}
+
+void GitController::enqueueWorktreeListFor(const QString &ownerToplevel)
+{
+    const QString cwd = QDir::cleanPath(ownerToplevel);
+    if (cwd.isEmpty()) return;
     for (const Op &queued : m_queue) {
-        if (queued.kind == OpKind::WorktreesList) return;
+        if (queued.kind == OpKind::WorktreesList
+            && QDir::cleanPath(queued.meta.value(QStringLiteral("rootToplevel")).toString()) == cwd)
+            return;
     }
     Op wt;
     wt.kind = OpKind::WorktreesList;
-    wt.argv = { QStringLiteral("-C"), root, QStringLiteral("worktree"),
+    wt.argv = { QStringLiteral("-C"), cwd, QStringLiteral("worktree"),
                 QStringLiteral("list"), QStringLiteral("--porcelain") };
     wt.timeoutMs = kTimeoutShort;
-    wt.meta.insert(QStringLiteral("rootToplevel"), root);
+    wt.meta.insert(QStringLiteral("rootToplevel"), cwd);
     enqueue(wt);
 }
 
 void GitController::removeWorktree(const QString &path, bool force)
 {
     const QString clean = QDir::cleanPath(path);
-    const QString main = m_mainWorktree.isEmpty() ? m_discoveredRoot : m_mainWorktree;
+    const QString fallback = m_mainWorktree.isEmpty() ? m_discoveredRoot : m_mainWorktree;
+    const QString main = GitRepoDiscovery::ownerCwdForWorktree(
+        m_repos->repos(), clean, fallback);
     if (clean.isEmpty() || main.isEmpty()) return;
     if (clean == QDir::cleanPath(main)) return;
 
@@ -809,7 +838,9 @@ void GitController::removeWorktree(const QString &path, bool force)
 void GitController::mergeAndRemoveWorktree(const QString &path, const QString &branch, bool force)
 {
     const QString clean = QDir::cleanPath(path);
-    const QString main = m_mainWorktree.isEmpty() ? m_discoveredRoot : m_mainWorktree;
+    const QString fallback = m_mainWorktree.isEmpty() ? m_discoveredRoot : m_mainWorktree;
+    const QString main = GitRepoDiscovery::ownerCwdForWorktree(
+        m_repos->repos(), clean, fallback);
     if (clean.isEmpty() || main.isEmpty() || branch.isEmpty()) return;
     if (clean == QDir::cleanPath(main)) return;
 
@@ -1211,8 +1242,10 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
         case OpKind::RemoveWorktree: {
             const QString path = m_current.meta.value(QStringLiteral("path")).toString();
             enqueueWorktreeList();
+            const QString owner = GitRepoDiscovery::ownerCwdForWorktree(
+                m_repos->repos(), path, m_mainWorktree);
             const QString next = GitRepoDiscovery::nextRepoAfterRemove(
-                m_currentRepo, path, m_mainWorktree);
+                m_currentRepo, path, owner);
             const bool switching = !next.isEmpty() && next != QDir::cleanPath(m_currentRepo);
             if (switching)
                 m_pendingRepoSwitch = next;

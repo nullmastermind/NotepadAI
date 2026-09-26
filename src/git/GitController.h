@@ -230,6 +230,7 @@ private:
     void enqueueDiscovery();
     void enqueueFullRefresh();
     void enqueueWorktreeList();
+    void enqueueWorktreeListFor(const QString &ownerToplevel);
     // Internal — apply a repo switch (mutate state + enqueue refresh).
     // selectRepo() defers to this when the controller is idle; runNext()
     // applies the deferred target once the queue drains.

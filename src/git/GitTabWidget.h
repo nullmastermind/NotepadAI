@@ -40,6 +40,7 @@ class QStackedWidget;
 class QToolButton;
 
 class BranchPickerPopup;
+class WorktreePickerPopup;
 class ChangesPanel;
 class GitError;
 class GitHistoryView;
@@ -123,7 +124,10 @@ private:
     QString settingsKey(const QString &subkey) const;
     void handleCheckoutRequested(const QString &name);
     void showWorktreeActionsMenu(int row, const QPoint &globalPos);
+    void showWorktreePicker();
     void confirmRemoveWorktree(int row, bool mergeFirst);
+    void confirmRemoveWorktreePath(const QString &toplevel, bool mergeFirst);
+    void switchToRepo(const QString &toplevel);
     void handleCreateBranch(const QString &name, const QString &base, bool setUpstream);
     void handleSetUpstream(const QString &remoteBranch);
     void handleRenameBranch(const QString &oldName, const QString &newName, bool updateRemote);
@@ -141,6 +145,7 @@ private:
     GitController *m_controller = nullptr;
     GitOperationManager *m_opMgr = nullptr;
     QPointer<BranchPickerPopup> m_branchPicker;
+    QPointer<WorktreePickerPopup> m_worktreePicker;
 
     // Header row.
     QComboBox *m_repoCombo = nullptr;
