@@ -6,6 +6,8 @@
 #include <QStringList>
 #include <QWidget>
 
+#include "GoalAgentSettings.h"
+
 class AcpAgentRegistry;
 class ApplicationSettings;
 class GoalCustomApiFields;
@@ -23,7 +25,7 @@ struct GoalConfigResult
 {
     QStringList criteriaList;
     QString agentId;
-    int maxIterations = 100;
+    int maxIterations = GoalAgentSettings::kDefaultMaxIterations;
     QString promptTemplateId;
 };
 

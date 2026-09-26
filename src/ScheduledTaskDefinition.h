@@ -25,12 +25,14 @@
 #include <QString>
 #include <QStringList>
 
+#include "GoalAgentSettings.h"
+
 // Optional goal-agent configuration for a scheduled task.
 struct ScheduledTaskGoalConfig
 {
     QStringList criteriaList;
     QString agentId;
-    int maxIterations = 100;
+    int maxIterations = GoalAgentSettings::kDefaultMaxIterations;
     QString promptTemplateId;
 };
 
@@ -76,7 +78,8 @@ inline ScheduledTaskGoalConfig scheduledTaskGoalConfigFromJson(const QJsonObject
         cfg.criteriaList.append(v.toString());
     }
     cfg.agentId = obj.value(QStringLiteral("agentId")).toString();
-    cfg.maxIterations = obj.value(QStringLiteral("maxIterations")).toInt(100);
+    cfg.maxIterations = obj.value(QStringLiteral("maxIterations")).toInt(
+        GoalAgentSettings::kDefaultMaxIterations);
     cfg.promptTemplateId = obj.value(QStringLiteral("promptTemplateId")).toString();
     return cfg;
 }

@@ -368,20 +368,22 @@ void TestGoalHttpJudge::settings_oldJsonWithoutCustomApiFields_doesNotCrash()
     };
     const GoalAgentSettings s = GoalAgentSettings::fromJson(old);
     QCOMPARE(s.agentId, QStringLiteral("claude-code"));
-    QCOMPARE(s.defaultMaxIterations, 10);
+    QCOMPARE(s.defaultMaxIterations, GoalAgentSettings::kDefaultMaxIterations);
     QVERIFY(s.customApiBaseUrl.isEmpty());
     QVERIFY(s.customApiModel.isEmpty());
     QVERIFY(!s.promptTemplates.isEmpty());
     const QJsonObject out = s.toJson();
     QVERIFY(out.contains(QStringLiteral("customApiBaseUrl")));
     QVERIFY(out.contains(QStringLiteral("customApiModel")));
+    QVERIFY(out.contains(QLatin1String(GoalAgentSettings::kDefaultMaxIterationsKey)));
+    QVERIFY(!out.contains(QStringLiteral("defaultMaxIterations")));
 }
 
 void TestGoalHttpJudge::settings_fromJson_unknownExtraFields_doesNotCrash()
 {
     const QJsonObject future{
         {QStringLiteral("agentId"), QStringLiteral("claude-code")},
-        {QStringLiteral("defaultMaxIterations"), 7},
+        {QLatin1String(GoalAgentSettings::kDefaultMaxIterationsKey), 7},
         {QStringLiteral("unknownFutureFlag"), true},
         {QStringLiteral("legacyDbUrl"), QStringLiteral("postgres://old")},
         {QStringLiteral("promptTemplates"), QJsonArray{}},

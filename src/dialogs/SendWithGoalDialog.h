@@ -4,6 +4,8 @@
 #include <QDialog>
 #include <QStringList>
 
+#include "GoalAgentSettings.h"
+
 class AcpAgentRegistry;
 class ApplicationSettings;
 class GoalConfigWidget;
@@ -16,7 +18,7 @@ struct SendWithGoalResult
 {
     QStringList successCriteriaList;
     QString agentId;
-    int maxIterations = 100;
+    int maxIterations = GoalAgentSettings::kDefaultMaxIterations;
     QString promptTemplateId;
     bool autoCompact = false;
     bool useNativeGoal = true;

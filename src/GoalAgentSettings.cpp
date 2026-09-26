@@ -221,7 +221,7 @@ QJsonObject GoalAgentSettings::toJson() const
     return {
         {QStringLiteral("agentId"), agentId},
         {QStringLiteral("promptTemplateId"), promptTemplateId},
-        {QStringLiteral("defaultMaxIterations"), defaultMaxIterations},
+        {QLatin1String(kDefaultMaxIterationsKey), defaultMaxIterations},
         {QStringLiteral("autoCompact"), autoCompact},
         {QStringLiteral("useNativeGoal"), useNativeGoal},
         {QStringLiteral("prefixGoal"), prefixGoal},
@@ -237,7 +237,7 @@ GoalAgentSettings GoalAgentSettings::fromJson(const QJsonObject &obj)
     GoalAgentSettings s;
     s.agentId = obj.value(QStringLiteral("agentId")).toString();
     s.promptTemplateId = obj.value(QStringLiteral("promptTemplateId")).toString();
-    s.defaultMaxIterations = obj.value(QStringLiteral("defaultMaxIterations")).toInt(kDefaultMaxIterations);
+    s.defaultMaxIterations = obj.value(QLatin1String(kDefaultMaxIterationsKey)).toInt(kDefaultMaxIterations);
     s.autoCompact = obj.value(QStringLiteral("autoCompact")).toBool(false);
     s.useNativeGoal = obj.value(QStringLiteral("useNativeGoal")).toBool(true);
     s.prefixGoal = obj.value(QStringLiteral("prefixGoal")).toBool(false);
