@@ -328,6 +328,7 @@ QJsonObject AcpSessionModel::toHistoryJson() const
                     slim.insert(key, tc.rawInput.value(key));
             };
             copyField(QLatin1String("file_path"));
+            copyField(QLatin1String("path"));
             copyField(QLatin1String("pattern"));
             copyField(QLatin1String("query"));
             copyField(QLatin1String("url"));
@@ -478,6 +479,8 @@ void AcpSessionModel::onInitialized(const AcpAgentInfo &info,
 {
     m_agentInfo = info;
     m_availableCommands = availableCommands;
+    m_agentAdvertisesGoalCommand = commandsIncludeGoal(availableCommands);
+    ensureHostGoalCommand(m_availableCommands);
     m_availableModes = modes;
     m_currentModeId = currentMode;
     m_availableModels = models;
@@ -502,6 +505,10 @@ void AcpSessionModel::onMessageChunk(const QString &text)
     m_streamingThoughtMessageIndex = -1;
 
     if (m_streamingAssistantMessageIndex < 0) {
+        // An empty chunk must not open a blank bubble. Agents (omp) emit
+        // whitespace-only agent_message_chunk around tool calls.
+        if (text.trimmed().isEmpty())
+            return;
         AcpMessage msg;
         msg.role = QStringLiteral("assistant");
         msg.timestamp = QDateTime::currentMSecsSinceEpoch();
@@ -563,6 +570,8 @@ void AcpSessionModel::onMessageChunk(const QString &text)
 void AcpSessionModel::onThoughtChunk(const QString &text)
 {
     if (m_streamingThoughtMessageIndex < 0) {
+        if (text.trimmed().isEmpty())
+            return;
         // Symmetric to onMessageChunk closing any active thought: when a new
         // thought stream begins, close any active assistant text stream so the
         // next text chunk opens a fresh bubble below this thought.
@@ -613,7 +622,9 @@ void AcpSessionModel::onToolCallReceived(const AcpToolCall &tc)
 
     AcpToolCall copy = tc;
     copy.groupId = m_currentGroupId;
+    AcpProtocol::injectToolCallPath(copy.rawInput, QJsonArray{});
     AcpProtocol::stripTerminalContentBlocks(copy.content);
+    copy.content = AcpProtocol::ensureDiffContent(copy.content, copy.rawInput, copy.rawOutput);
     m_toolCalls.insert(copy.id, copy);
 
     AcpTimelineEntry entry;
@@ -658,9 +669,11 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         if (update.rawInput.has_value()) {
             tc.rawInput = *update.rawInput;
         }
+        AcpProtocol::injectToolCallPath(tc.rawInput, QJsonArray{});
         if (update.rawOutput.has_value()) {
             tc.rawOutput = *update.rawOutput;
         }
+        tc.content = AcpProtocol::ensureDiffContent(tc.content, tc.rawInput, tc.rawOutput);
         if (update.terminalOutputDelta.has_value()) {
             AcpProtocol::appendToolCallTextDelta(tc.content, *update.terminalOutputDelta);
         }
@@ -673,6 +686,7 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         entry.groupId = m_currentGroupId;
         m_timeline.append(entry);
     } else {
+        const QJsonArray previousContent = it.value().content;
         if (update.title.has_value()) {
             it.value().title = *update.title;
         }
@@ -692,8 +706,15 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         if (update.rawInput.has_value()) {
             it.value().rawInput = *update.rawInput;
         }
+        AcpProtocol::injectToolCallPath(it.value().rawInput, QJsonArray{});
         if (update.rawOutput.has_value()) {
             it.value().rawOutput = *update.rawOutput;
+        }
+        it.value().content = AcpProtocol::ensureDiffContent(
+            it.value().content, it.value().rawInput, it.value().rawOutput);
+        if (update.content.has_value()) {
+            it.value().content = AcpProtocol::preserveDiffBlocks(
+                it.value().content, previousContent);
         }
         if (update.terminalOutputDelta.has_value()) {
             AcpProtocol::appendToolCallTextDelta(it.value().content, *update.terminalOutputDelta);
@@ -713,6 +734,8 @@ void AcpSessionModel::onPlanReceived(const QList<AcpPlanEntry> &plan)
 void AcpSessionModel::onAvailableCommandsUpdated(const QList<AcpCommandInfo> &commands)
 {
     m_availableCommands = commands;
+    m_agentAdvertisesGoalCommand = commandsIncludeGoal(commands);
+    ensureHostGoalCommand(m_availableCommands);
     emit availableCommandsChanged();
     // Metadata-only — skip persistence.
 }

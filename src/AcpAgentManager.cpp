@@ -554,7 +554,7 @@ void AcpAgentManager::wireConnectionToModel(AcpConnection *conn, AcpSessionModel
             return;
         if (!AcpProtocol::toolCallLooksFileMutating(tc))
             return;
-        QString path = tc.rawInput[QLatin1String("file_path")].toString();
+        QString path = AcpProtocol::toolCallMutatedPath(tc.rawInput, tc.content, tc.rawOutput);
         if (path.isEmpty())
             path = conn->workingDirectory();
         if (path.isEmpty())

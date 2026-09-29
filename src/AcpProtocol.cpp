@@ -22,6 +22,7 @@
 #include <QFileInfo>
 #include <QStringView>
 #include <QtGlobal>
+#include <QStringList>
 
 namespace AcpProtocol {
 
@@ -316,6 +317,328 @@ void appendToolCallTextDelta(QJsonArray &content, const QString &delta)
     content.append(block);
 }
 
+namespace {
+
+constexpr int kMaxPreservedDiffBlocks = 32;
+// One ingest-time copy for write tools that never send type:diff. Not on the
+// per-frame card path. 1 MiB stops a pathological paste from inflating session
+// JSON; typical writes are KB.
+constexpr int kMaxSynthesizedNewTextChars = 1024 * 1024;
+constexpr int kMaxCompactDiffChars = 128 * 1024;
+
+bool isHexTag(QStringView tag)
+{
+    if (tag.isEmpty()) {
+        return false;
+    }
+    for (const QChar c : tag) {
+        const ushort u = c.unicode();
+        const bool digit = u >= '0' && u <= '9';
+        const bool hexLo = u >= 'a' && u <= 'f';
+        const bool hexHi = u >= 'A' && u <= 'F';
+        if (!digit && !hexLo && !hexHi) {
+            return false;
+        }
+    }
+    return true;
+}
+
+QString pathFromHashlineInput(const QString &input)
+{
+    if (!input.startsWith(QLatin1Char('['))) {
+        return {};
+    }
+    const int close = input.indexOf(QLatin1Char(']'));
+    if (close <= 1) {
+        return {};
+    }
+    QString inner = input.mid(1, close - 1).trimmed();
+    if (inner.isEmpty()) {
+        return {};
+    }
+    const int hash = inner.lastIndexOf(QLatin1Char('#'));
+    if (hash > 0 && isHexTag(QStringView{inner}.mid(hash + 1))) {
+        inner.truncate(hash);
+    }
+    return inner.trimmed();
+}
+
+QString firstLocationPath(const QJsonArray &locations)
+{
+    const int n = qMin(locations.size(), 64);
+    for (int i = 0; i < n; ++i) {
+        const QString path = locations.at(i).toObject().value(QStringLiteral("path")).toString();
+        if (!path.isEmpty()) {
+            return path;
+        }
+    }
+    return {};
+}
+
+QString firstDiffPath(const QJsonArray &content)
+{
+    const int n = qMin(content.size(), 256);
+    for (int i = 0; i < n; ++i) {
+        const QJsonObject obj = content.at(i).toObject();
+        if (obj.value(QStringLiteral("type")).toString() != QLatin1String("diff")) {
+            continue;
+        }
+        const QString path = obj.value(QStringLiteral("path")).toString();
+        if (!path.isEmpty()) {
+            return path;
+        }
+    }
+    return {};
+}
+
+bool contentHasDiff(const QJsonArray &content)
+{
+    const int n = qMin(content.size(), 256);
+    for (int i = 0; i < n; ++i) {
+        if (content.at(i).toObject().value(QStringLiteral("type")).toString()
+            == QLatin1String("diff")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QJsonObject detailsObject(const QJsonObject &rawOutput)
+{
+    if (rawOutput.isEmpty()) {
+        return {};
+    }
+    const QJsonValue details = rawOutput.value(QStringLiteral("details"));
+    if (details.isObject()) {
+        return details.toObject();
+    }
+    // Some adapters flatten EditToolDetails onto rawOutput (no nested `details`).
+    if (rawOutput.contains(QStringLiteral("diff"))
+        || rawOutput.contains(QStringLiteral("oldText"))
+        || rawOutput.contains(QStringLiteral("newText"))
+        || rawOutput.contains(QStringLiteral("perFileResults"))
+        || rawOutput.contains(QStringLiteral("resolvedPath"))) {
+        return rawOutput;
+    }
+    return {};
+}
+
+QString compactDiffString(const QJsonValue &value)
+{
+    if (value.isNull() || value.isUndefined()) {
+        return {};
+    }
+    if (value.isString()) {
+        QString s = value.toString();
+        if (s.size() > kMaxCompactDiffChars) {
+            s.truncate(kMaxCompactDiffChars);
+        }
+        return s;
+    }
+    if (!value.isArray()) {
+        return {};
+    }
+    const QJsonArray arr = value.toArray();
+    const int n = qMin(arr.size(), 4000);
+    QString out;
+    out.reserve(qMin(kMaxCompactDiffChars, n * 32));
+    for (int i = 0; i < n; ++i) {
+        const QJsonValue line = arr.at(i);
+        if (!line.isString()) {
+            continue;
+        }
+        if (!out.isEmpty()) {
+            out.append(QLatin1Char('\n'));
+        }
+        out.append(line.toString());
+        if (out.size() >= kMaxCompactDiffChars) {
+            out.truncate(kMaxCompactDiffChars);
+            break;
+        }
+    }
+    return out;
+}
+
+QJsonObject diffBlockFromEntry(const QJsonObject &entry)
+{
+    if (entry.value(QStringLiteral("isError")).toBool()) {
+        return {};
+    }
+    const QString path = entry.value(QStringLiteral("path")).toString();
+    if (path.isEmpty()) {
+        return {};
+    }
+    const QJsonValue oldText = entry.value(QStringLiteral("oldText"));
+    const QJsonValue newText = entry.value(QStringLiteral("newText"));
+    const QString compact = compactDiffString(entry.value(QStringLiteral("diff")));
+    if (oldText.isUndefined() && newText.isUndefined() && compact.isEmpty()) {
+        return {};
+    }
+    QJsonObject block;
+    block.insert(QStringLiteral("type"), QStringLiteral("diff"));
+    block.insert(QStringLiteral("path"), path);
+    if (oldText.isString() || oldText.isNull()) {
+        block.insert(QStringLiteral("oldText"), oldText);
+    }
+    if (newText.isString()) {
+        block.insert(QStringLiteral("newText"), newText);
+    }
+    if (!compact.isEmpty()) {
+        block.insert(QStringLiteral("diff"), compact);
+    }
+    return block;
+}
+
+} // namespace
+
+QString toolCallStatusForUi(const QString &status)
+{
+    if (status == QLatin1String("pending") || status == QLatin1String("in_progress")) {
+        return QStringLiteral("running");
+    }
+    return status;
+}
+
+QString toolCallMutatedPath(const QJsonObject &rawInput,
+                            const QJsonArray &content,
+                            const QJsonObject &rawOutput,
+                            const QJsonArray &locations)
+{
+    QString path = rawInput.value(QStringLiteral("file_path")).toString();
+    if (path.isEmpty()) {
+        path = rawInput.value(QStringLiteral("path")).toString();
+    }
+    if (path.isEmpty()) {
+        path = pathFromHashlineInput(rawInput.value(QStringLiteral("input")).toString());
+    }
+    if (path.isEmpty()) {
+        path = firstLocationPath(locations);
+    }
+    if (path.isEmpty()) {
+        path = firstDiffPath(content);
+    }
+    if (path.isEmpty()) {
+        const QJsonObject details = detailsObject(rawOutput);
+        path = details.value(QStringLiteral("path")).toString();
+        if (path.isEmpty()) {
+            path = details.value(QStringLiteral("resolvedPath")).toString();
+        }
+    }
+    return path;
+}
+
+void injectToolCallPath(QJsonObject &rawInput, const QJsonArray &locations)
+{
+    if (!rawInput.value(QStringLiteral("path")).toString().isEmpty()
+        || !rawInput.value(QStringLiteral("file_path")).toString().isEmpty()) {
+        return;
+    }
+    QString path = firstLocationPath(locations);
+    if (path.isEmpty()) {
+        path = pathFromHashlineInput(rawInput.value(QStringLiteral("input")).toString());
+    }
+    if (!path.isEmpty()) {
+        rawInput.insert(QStringLiteral("path"), path);
+    }
+}
+
+QJsonArray ensureDiffContent(const QJsonArray &content,
+                             const QJsonObject &rawInput,
+                             const QJsonObject &rawOutput)
+{
+    const QJsonObject details = detailsObject(rawOutput);
+    const QString compact = compactDiffString(details.value(QStringLiteral("diff")));
+
+    if (contentHasDiff(content)) {
+        if (compact.isEmpty()) {
+            return content;
+        }
+        QJsonArray out = content;
+        const int n = qMin(out.size(), 256);
+        for (int i = 0; i < n; ++i) {
+            const QJsonValue item = out.at(i);
+            if (!item.isObject()) {
+                continue;
+            }
+            QJsonObject block = item.toObject();
+            if (block.value(QStringLiteral("type")).toString() != QLatin1String("diff")) {
+                continue;
+            }
+            if (block.value(QStringLiteral("diff")).toString().isEmpty()) {
+                block.insert(QStringLiteral("diff"), compact);
+                out.replace(i, block);
+            }
+        }
+        return out;
+    }
+
+    QJsonArray out = content;
+    const QJsonValue perFile = details.value(QStringLiteral("perFileResults"));
+    if (perFile.isArray()) {
+        const QJsonArray entries = perFile.toArray();
+        const int n = qMin(entries.size(), kMaxPreservedDiffBlocks);
+        for (int i = 0; i < n; ++i) {
+            const QJsonValue entry = entries.at(i);
+            if (!entry.isObject()) {
+                continue;
+            }
+            const QJsonObject block = diffBlockFromEntry(entry.toObject());
+            if (!block.isEmpty()) {
+                out.append(block);
+            }
+        }
+    } else {
+        const QJsonObject block = diffBlockFromEntry(details);
+        if (!block.isEmpty()) {
+            out.append(block);
+        }
+    }
+
+    if (contentHasDiff(out)) {
+        return out;
+    }
+
+    QString path = rawInput.value(QStringLiteral("path")).toString();
+    if (path.isEmpty()) {
+        path = rawInput.value(QStringLiteral("file_path")).toString();
+    }
+    const QJsonValue writeBody = rawInput.value(QStringLiteral("content"));
+    if (!path.isEmpty()
+        && writeBody.isString()
+        && !rawInput.contains(QStringLiteral("input"))
+        && !rawInput.contains(QStringLiteral("edits"))) {
+        const QString newText = writeBody.toString();
+        if (newText.size() <= kMaxSynthesizedNewTextChars) {
+            QJsonObject block;
+            block.insert(QStringLiteral("type"), QStringLiteral("diff"));
+            block.insert(QStringLiteral("path"), path);
+            block.insert(QStringLiteral("oldText"), QJsonValue::Null);
+            block.insert(QStringLiteral("newText"), newText);
+            out.append(block);
+        }
+    }
+    return out;
+}
+
+QJsonArray preserveDiffBlocks(const QJsonArray &incoming, const QJsonArray &previous)
+{
+    if (contentHasDiff(incoming)) {
+        return incoming;
+    }
+    QJsonArray out = incoming;
+    int added = 0;
+    const int n = qMin(previous.size(), 256);
+    for (int i = 0; i < n && added < kMaxPreservedDiffBlocks; ++i) {
+        const QJsonObject block = previous.at(i).toObject();
+        if (block.value(QStringLiteral("type")).toString() == QLatin1String("diff")) {
+            out.append(block);
+            ++added;
+        }
+    }
+    return out;
+}
+
+
 QJsonObject permissionOptionToJson(const AcpPermissionOption &opt)
 {
     QJsonObject obj;
@@ -386,6 +709,38 @@ AcpPermissionRequest permissionRequestFromJson(const QJsonObject &obj)
         }
     }
     return r;
+}
+
+bool isGoalCommandName(const QString &name)
+{
+    QStringView v{name};
+    while (!v.isEmpty() && v.front().isSpace())
+        v = v.mid(1);
+    while (!v.isEmpty() && v.back().isSpace())
+        v.chop(1);
+    while (!v.isEmpty() && v.front() == QLatin1Char('/'))
+        v = v.mid(1);
+    return v.compare(QLatin1String("goal"), Qt::CaseInsensitive) == 0;
+}
+
+bool commandsIncludeGoal(const QList<AcpCommandInfo> &commands)
+{
+    for (const AcpCommandInfo &cmd : commands) {
+        if (isGoalCommandName(cmd.name))
+            return true;
+    }
+    return false;
+}
+
+void ensureHostGoalCommand(QList<AcpCommandInfo> &commands)
+{
+    if (commandsIncludeGoal(commands))
+        return;
+    AcpCommandInfo goal;
+    goal.name = QStringLiteral("goal");
+    goal.description = QStringLiteral("Set a goal for this session");
+    goal.inputHint = QStringLiteral("criterion");
+    commands.prepend(goal);
 }
 
 } // namespace AcpProtocol

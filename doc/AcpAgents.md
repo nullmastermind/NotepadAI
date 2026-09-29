@@ -100,6 +100,24 @@ Stderr from the child agent is captured and logged with a `[<sessionId>]` prefix
 
 **Inbound notifications**: `session/update` carries `agent_message_chunk`, `agent_thought_chunk`, `tool_call`, `tool_call_update`, `plan`, `available_commands_update`, `current_mode_update`, `session_info_update`, `prompt_start`, `prompt_end`. Unknown variants are silently dropped.
 
+Host `/goal`: `ensureHostGoalCommand` prepends `goal` when `initialize` / `available_commands_update` omit it (omp ACP drops TUI-only `/goal`). Agent-provided `goal`/`/goal` is kept. Composer `/goal` while a turn is in flight is a native side-prompt only if the agent advertised the command; otherwise it enqueues like any other message (text already has the `/goal` prefix).
+
+
+## Tool-call UI normalization (`omp acp` vs Claude/Codex)
+
+Claude/Codex emit `status: running`, `rawInput.file_path`, and `content[]` entries of `type:diff` with `oldText`/`newText`. `omp acp` instead emits `pending` / `in_progress`, `rawInput.path` (or a hashline `input` / `locations[]`), and write completions that replace the payload with a text status.
+
+`AcpProtocol` folds those onto the existing edit card:
+
+- `toolCallStatusForUi` — `pending`/`in_progress` → running spinner
+- `toolCallMutatedPath` / `injectToolCallPath` — path from `file_path`, `path`, `[file#hex]` hashline, `locations[]`, `type:diff.path`, or `rawOutput.details`
+- `ensureDiffContent` — synthesize `type:diff` from write `rawInput.content` or `rawOutput.details.{oldText,newText,diff,perFileResults}`
+- `preserveDiffBlocks` — keep previously synthesized diffs when a later update is text-only
+
+The card prefers a compact numbered (`10|…` / `+10│…`) or unified (`@@`) `diff` string over LCS of `oldText`/`newText`. After any row source, context longer than 3 lines around a change is collapsed to `...` so an omp edit of a full-file snapshot shows hunks, not the whole file. LCS is capped at 256 lines (flat `O(mn)` cells, ~260 KiB); larger snapshots use an `O(m+n)` prefix/suffix pass. `ensureDiffContent` is identity (no `QJsonArray` copy) when content already has `type:diff` and there is no compact hunk to attach. Sibling `type:text` that is an omp hashline payload (`[file#tag]` plus numbered lines) is not rendered next to the hunk.
+
+
+
 ## History persistence
 
 Per-session JSON file at `<QStandardPaths::AppDataLocation>/acp-history/<sessionId>.json`. Schema fields:

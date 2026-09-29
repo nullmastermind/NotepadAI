@@ -271,6 +271,38 @@ void stripTerminalContentBlocks(QJsonArray &content);
 // Append stdout/stderr onto the last text content block (creates one if needed).
 void appendToolCallTextDelta(QJsonArray &content, const QString &delta);
 
+// omp acp emits `pending` / `in_progress` instead of Claude/Codex `running`.
+QString toolCallStatusForUi(const QString &status);
+
+// Path for git refresh and titles. Claude uses `file_path`; omp uses `path`,
+// `locations[]`, type:diff.path, or a hashline `input` (`[file#tag]`).
+QString toolCallMutatedPath(const QJsonObject &rawInput,
+                            const QJsonArray &content,
+                            const QJsonObject &rawOutput,
+                            const QJsonArray &locations = QJsonArray());
+
+// Fold locations / hashline into `rawInput.path` when the agent omitted it.
+void injectToolCallPath(QJsonObject &rawInput, const QJsonArray &locations);
+
+// Normalize tool-call content to the Claude/Codex edit card: `type:diff`
+// with oldText/newText, plus omp's compact numbered `diff` hunk when present.
+QJsonArray ensureDiffContent(const QJsonArray &content,
+                             const QJsonObject &rawInput,
+                             const QJsonObject &rawOutput);
+
+// Keep previously synthesized type:diff blocks when a later update omits them
+// (omp write completes with a text status and no diff).
+QJsonArray preserveDiffBlocks(const QJsonArray &incoming, const QJsonArray &previous);
+
+// Host `/goal` — palette only. Agents (omp ACP) often omit it because their
+// TUI handler has no text-mode `handle`. Composer send uses agent-advertised
+// goal for side-prompt; host inject never counts as native.
+bool isGoalCommandName(const QString &name);
+bool commandsIncludeGoal(const QList<AcpCommandInfo> &commands);
+// Prepend `goal` when missing. O(n) over a few dozen commands; no heap if present.
+void ensureHostGoalCommand(QList<AcpCommandInfo> &commands);
+
+
 QJsonObject permissionOptionToJson(const AcpPermissionOption &opt);
 AcpPermissionOption permissionOptionFromJson(const QJsonObject &obj);
 QJsonObject permissionResponseToJson(const QString &outcome,

@@ -275,6 +275,17 @@ private:
     AcpImageAttachmentList *m_attachments;
 };
 
+bool messageHasVisibleContent(const AcpMessage &msg)
+{
+    for (const auto &block : msg.content) {
+        if (block.kind == AcpProtocol::AcpContentBlock::Kind::Image && !block.imageData.isEmpty())
+            return true;
+        if (!block.text.trimmed().isEmpty())
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 AcpSessionView::AcpSessionView(AcpSessionModel *model,
@@ -382,6 +393,12 @@ void AcpSessionView::buildUi()
     m_scroll->setWidget(m_transcriptHost);
     syncTranscriptHostWidth();
     outer->addWidget(m_scroll, 1);
+
+    m_planWidget = new AcpPlanWidget(this);
+    m_planWidget->hide();
+    connect(m_planWidget, &AcpPlanWidget::resumeRequested,
+            this, &AcpSessionView::onPlanResumeRequested);
+    outer->addWidget(m_planWidget);
 
     // Jump-to-bottom overlay. Parented to the scroll area's viewport (not the
     // transcript host) so the button stays pinned to the bottom-right of the
@@ -786,15 +803,11 @@ void AcpSessionView::wireSignals()
         connect(m_connection, &AcpConnection::planReceived,
                 this, [this](const QList<AcpProtocol::AcpPlanEntry> &entries) {
             resetElapsed();
-            if (!m_planWidget) {
-                m_planWidget = new AcpPlanWidget(m_transcriptHost);
-                connect(m_planWidget, &AcpPlanWidget::resumeRequested,
-                        this, &AcpSessionView::onPlanResumeRequested);
-                insertTimelineWidget(m_planWidget);
-            }
+            if (!m_planWidget)
+                return;
             m_planWidget->setEntries(entries);
             m_planWidget->setAgentIdle(!m_model || !m_model->isProcessing());
-            scrollToBottomDeferred();
+            m_planWidget->setVisible(!entries.isEmpty());
         });
     }
 
@@ -833,6 +846,8 @@ void AcpSessionView::hydrateFromModel()
             && entry.messageIndex >= 0
             && entry.messageIndex < messages.size()) {
             const AcpMessage &msg = messages.at(entry.messageIndex);
+            if (!messageHasVisibleContent(msg))
+                continue;
             auto *w = new AcpMessageWidget(msg.role, m_transcriptHost);
             w->setChatFont(chatFont()); // styled widget: must set font explicitly
             if (msg.fromGoalAgent) {
@@ -949,7 +964,10 @@ void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)
     m_truncationPlaceholders.clear();
     m_truncatedMessageIndices.clear();
     m_truncatedToolCallIds.clear();
-    m_planWidget = nullptr;
+    if (m_planWidget) {
+        m_planWidget->setEntries({});
+        m_planWidget->hide();
+    }
     m_activeThought.clear();
     if (m_activePermissionPrompt) {
         m_activePermissionPrompt->deleteLater();
@@ -1011,20 +1029,25 @@ void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)
 void AcpSessionView::insertTimelineWidget(QWidget *w, bool syncWidth)
 {
     if (!w || !m_transcriptLayout) return;
-    // Default: just before the trailing stretch.
-    int idx = m_transcriptLayout->count() - 1;
-    // If the heartbeat indicator is in the layout, land above it so the
-    // heartbeat keeps trailing the freshest content. Hidden labels still
-    // occupy a layout slot, so this works during off-turn idle too.
-    if (m_elapsedLabel) {
-        const int hbIdx = m_transcriptLayout->indexOf(m_elapsedLabel);
-        if (hbIdx >= 0) {
-            idx = hbIdx;
-        }
-    }
-    m_transcriptLayout->insertWidget(idx, w);
+    m_transcriptLayout->insertWidget(timelineTailIndex(w), w);
     if (syncWidth)
         syncTranscriptHostWidth();
+}
+
+int AcpSessionView::timelineTailIndex(QWidget *exclude) const
+{
+    if (!m_transcriptLayout)
+        return 0;
+    QWidget *const anchors[] = { m_elapsedLabel, m_goalElapsedLabel };
+    for (QWidget *a : anchors) {
+        if (!a || a == exclude)
+            continue;
+        const int idx = m_transcriptLayout->indexOf(a);
+        if (idx >= 0)
+            return idx;
+    }
+    const int n = m_transcriptLayout->count();
+    return n > 0 ? n - 1 : 0;
 }
 
 void AcpSessionView::syncTranscriptHostWidth()
@@ -1171,6 +1194,8 @@ void AcpSessionView::appendMessageWidget(int idx)
     if (idx < 0 || idx >= m_model->messages().size()) return;
     if (m_truncatedMessageIndices.contains(idx)) return;
     const AcpMessage &msg = m_model->messages().at(idx);
+    if (!messageHasVisibleContent(msg))
+        return;
 
     auto *w = new AcpMessageWidget(msg.role, m_transcriptHost);
     w->setChatFont(chatFont()); // styled widget: must set font explicitly
@@ -1224,6 +1249,11 @@ void AcpSessionView::onMessageReplaced(int idx, const QString &fullText)
         w = m_messageWidgets.value(idx, nullptr);
     }
     if (w) {
+        if (fullText.trimmed().isEmpty()) {
+            m_messageWidgets.remove(idx);
+            removeTranscriptWidget(w);
+            return;
+        }
         w->setText(fullText);
         if (w->role() == QLatin1String("assistant") && !m_activeThought.isNull()) {
             m_activeThought->markStreamingDone();
@@ -1785,7 +1815,8 @@ void AcpSessionView::onSendClicked()
         || (m_attachmentList && m_attachmentList->isNonEmpty());
     const bool processing = m_model->isProcessing();
     const auto kind = AcpPromptQueue::classifySend(
-        processing, hasContent, GoalAgent::isNativeGoalSlash(text));
+        processing, hasContent,
+        GoalAgent::nativeGoalUsesSidePrompt(text, m_model->agentAdvertisesGoalCommand()));
 
     switch (kind) {
     case AcpPromptQueue::SendKind::Ignore:

@@ -110,6 +110,9 @@ public:
     const QVector<AcpTimelineEntry> &timeline() const { return m_timeline; }
     const std::optional<AcpProtocol::AcpUsage> &usage() const { return m_usage; }
     const QList<AcpProtocol::AcpCommandInfo> &availableCommands() const { return m_availableCommands; }
+    // True only when the agent advertised `goal`/`/goal`. Host inject does not set this.
+    bool agentAdvertisesGoalCommand() const { return m_agentAdvertisesGoalCommand; }
+
     const QList<AcpProtocol::AcpModeInfo> &availableModes() const { return m_availableModes; }
     QString currentModeId() const { return m_currentModeId; }
     const QList<AcpProtocol::AcpModelInfo> &availableModels() const { return m_availableModels; }
@@ -200,6 +203,8 @@ private:
     int m_currentGroupId = 0;
     std::optional<AcpProtocol::AcpUsage> m_usage;
     QList<AcpProtocol::AcpCommandInfo> m_availableCommands;
+    bool m_agentAdvertisesGoalCommand = false;
+
     QList<AcpProtocol::AcpModeInfo> m_availableModes;
     QString m_currentModeId;
     QList<AcpProtocol::AcpModelInfo> m_availableModels;

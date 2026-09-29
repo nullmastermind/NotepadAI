@@ -180,6 +180,12 @@ bool GoalAgent::isNativeGoalSlash(const QString &text)
     return trimmed.size() == 5 || trimmed.at(5).isSpace();
 }
 
+bool GoalAgent::nativeGoalUsesSidePrompt(const QString &text, bool agentAdvertisesGoal)
+{
+    return agentAdvertisesGoal && isNativeGoalSlash(text);
+}
+
+
 QString GoalAgent::prefixGoalMessage(const QString &text)
 {
     if (text.isEmpty() || isNativeGoalSlash(text))

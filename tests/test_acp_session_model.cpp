@@ -33,10 +33,20 @@ private slots:
     void streamingConcatenation();
     void messageIdChange_startsNewBubble();
     void promptEndedClosesStreaming();
+    void blankOpeningChunkDoesNotCreateBubble();
     void thoughtStreamAutoClosesOnAssistantChunk();
     void toolCallMerge();
     void terminalPlaceholderStrippedOnReceive();
     void terminalOutputDeltasAccumulate();
+    void ompWriteSynthesizesDiffAndPreservesOnComplete();
+    void ompHashlineInputInjectsPath();
+
+    void initializedAlwaysExposesHostGoalCommand();
+    void availableCommandsUpdateKeepsHostGoalCommand();
+    void hostInjectedGoalIsNotAgentAdvertised();
+    void agentAdvertisedGoalSurvivesHostInject();
+
+
     void groupIdIncrementsPerTurn();
     void loadRoundTrip();
     void imageBlocksSurviveRoundTrip();
@@ -113,6 +123,22 @@ void TestAcpSessionModel::promptEndedClosesStreaming()
     QCOMPARE(model.messages().size(), 2);
     QCOMPARE(model.messages().at(0).content.first().text, QStringLiteral("first"));
     QCOMPARE(model.messages().at(1).content.first().text, QStringLiteral("second"));
+}
+
+void TestAcpSessionModel::blankOpeningChunkDoesNotCreateBubble()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("proj"), tmp.path());
+
+    model.onMessageChunk(QStringLiteral(" \n"));
+    model.onThoughtChunk(QString());
+    QCOMPARE(model.messages().size(), 0);
+    QCOMPARE(model.timeline().size(), 0);
+
+    model.onMessageChunk(QStringLiteral("\n"));
+    model.onMessageChunk(QStringLiteral("kept"));
+    QCOMPARE(model.messages().size(), 1);
+    QCOMPARE(model.messages().first().content.first().text, QStringLiteral("kept"));
 }
 
 void TestAcpSessionModel::thoughtStreamAutoClosesOnAssistantChunk()
@@ -203,6 +229,74 @@ void TestAcpSessionModel::terminalOutputDeltasAccumulate()
     QCOMPARE(content.at(0).toObject().value(QStringLiteral("text")).toString(),
              QStringLiteral("foobar"));
 }
+
+void TestAcpSessionModel::ompWriteSynthesizesDiffAndPreservesOnComplete()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("proj"), tmp.path());
+
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("w1");
+    tc.title = QStringLiteral("edit: probe.txt");
+    tc.kind = QStringLiteral("edit");
+    tc.status = QStringLiteral("pending");
+    tc.rawInput.insert(QStringLiteral("path"), QStringLiteral("D:/tmp/test-git/probe.txt"));
+    tc.rawInput.insert(QStringLiteral("content"), QStringLiteral("hello\n"));
+    model.onToolCallReceived(tc);
+
+    const AcpProtocol::AcpToolCall stored = model.toolCalls().value(QStringLiteral("w1"));
+    QCOMPARE(stored.rawInput.value(QStringLiteral("path")).toString(),
+             QStringLiteral("D:/tmp/test-git/probe.txt"));
+    QCOMPARE(stored.content.size(), 1);
+    const QJsonObject diff = stored.content.at(0).toObject();
+    QCOMPARE(diff.value(QStringLiteral("type")).toString(), QStringLiteral("diff"));
+    QCOMPARE(diff.value(QStringLiteral("path")).toString(),
+             QStringLiteral("D:/tmp/test-git/probe.txt"));
+    QVERIFY(diff.value(QStringLiteral("oldText")).isNull());
+    QCOMPARE(diff.value(QStringLiteral("newText")).toString(), QStringLiteral("hello\n"));
+
+    AcpProtocol::AcpToolCallUpdate up;
+    up.id = QStringLiteral("w1");
+    up.status = QStringLiteral("completed");
+    QJsonObject text;
+    text.insert(QStringLiteral("type"), QStringLiteral("text"));
+    text.insert(QStringLiteral("text"), QStringLiteral("Wrote probe.txt"));
+    QJsonArray incoming;
+    incoming.append(text);
+    up.content = incoming;
+    model.onToolCallUpdated(up);
+
+    const AcpProtocol::AcpToolCall done = model.toolCalls().value(QStringLiteral("w1"));
+    QCOMPARE(done.status, QStringLiteral("completed"));
+    bool hasDiff = false;
+    for (const auto &v : done.content) {
+        if (v.toObject().value(QStringLiteral("type")).toString() == QLatin1String("diff")) {
+            hasDiff = true;
+            QCOMPARE(v.toObject().value(QStringLiteral("newText")).toString(),
+                     QStringLiteral("hello\n"));
+        }
+    }
+    QVERIFY(hasDiff);
+}
+
+void TestAcpSessionModel::ompHashlineInputInjectsPath()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("proj"), tmp.path());
+
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("e1");
+    tc.title = QStringLiteral("edit");
+    tc.kind = QStringLiteral("edit");
+    tc.rawInput.insert(QStringLiteral("input"),
+                       QStringLiteral("[conflict.txt#A1B2]\nPUT 1:=hello"));
+    model.onToolCallReceived(tc);
+
+    QCOMPARE(model.toolCalls().value(QStringLiteral("e1")).rawInput
+                 .value(QStringLiteral("path")).toString(),
+             QStringLiteral("conflict.txt"));
+}
+
 
 void TestAcpSessionModel::groupIdIncrementsPerTurn()
 {
@@ -435,6 +529,63 @@ void TestAcpSessionModel::detachingHistoryStoreFlushesPendingSnapshot()
              QStringLiteral("pending snapshot"));
     QCOMPARE(reloaded.projectId(), QStringLiteral("proj"));
 }
+
+void TestAcpSessionModel::initializedAlwaysExposesHostGoalCommand()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("goal-init"), QStringLiteral("proj"), tmp.path());
+    model.onInitialized({}, {}, {}, QString(), {}, QString(), {});
+    QCOMPARE(model.availableCommands().size(), 1);
+    QCOMPARE(model.availableCommands().first().name, QStringLiteral("goal"));
+}
+
+void TestAcpSessionModel::availableCommandsUpdateKeepsHostGoalCommand()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("goal-upd"), QStringLiteral("proj"), tmp.path());
+    AcpProtocol::AcpCommandInfo compact;
+    compact.name = QStringLiteral("compact");
+    model.onAvailableCommandsUpdated({compact});
+    QCOMPARE(model.availableCommands().size(), 2);
+    QCOMPARE(model.availableCommands().first().name, QStringLiteral("goal"));
+    QCOMPARE(model.availableCommands().at(1).name, QStringLiteral("compact"));
+
+    AcpProtocol::AcpCommandInfo agentGoal;
+    agentGoal.name = QStringLiteral("/goal");
+    agentGoal.description = QStringLiteral("agent copy");
+    model.onAvailableCommandsUpdated({agentGoal});
+    QCOMPARE(model.availableCommands().size(), 1);
+    QCOMPARE(model.availableCommands().first().description, QStringLiteral("agent copy"));
+}
+
+void TestAcpSessionModel::hostInjectedGoalIsNotAgentAdvertised()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("goal-host"), QStringLiteral("proj"), tmp.path());
+    model.onInitialized({}, {}, {}, QString(), {}, QString(), {});
+    QCOMPARE(model.availableCommands().first().name, QStringLiteral("goal"));
+    QVERIFY(!model.agentAdvertisesGoalCommand());
+}
+
+void TestAcpSessionModel::agentAdvertisedGoalSurvivesHostInject()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("goal-agent"), QStringLiteral("proj"), tmp.path());
+    AcpProtocol::AcpCommandInfo agentGoal;
+    agentGoal.name = QStringLiteral("goal");
+    agentGoal.description = QStringLiteral("agent copy");
+    model.onInitialized({}, {agentGoal}, {}, QString(), {}, QString(), {});
+    QVERIFY(model.agentAdvertisesGoalCommand());
+    QCOMPARE(model.availableCommands().size(), 1);
+
+    AcpProtocol::AcpCommandInfo compact;
+    compact.name = QStringLiteral("compact");
+    model.onAvailableCommandsUpdated({compact});
+    QVERIFY(!model.agentAdvertisesGoalCommand());
+    model.onAvailableCommandsUpdated({agentGoal});
+    QVERIFY(model.agentAdvertisesGoalCommand());
+}
+
 
 QTEST_GUILESS_MAIN(TestAcpSessionModel)
 #include "test_acp_session_model.moc"

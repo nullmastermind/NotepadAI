@@ -119,6 +119,9 @@ public:
     }
     static QString nativeGoalWireText(const QString &goalCommand, bool injectWorktree);
     static bool isNativeGoalSlash(const QString &text);
+    // Side-prompt `/goal` only when the ACP agent advertised the command.
+    static bool nativeGoalUsesSidePrompt(const QString &text, bool agentAdvertisesGoal);
+
     // Prepend "/goal " unless text is empty or already a /goal command.
     static QString prefixGoalMessage(const QString &text);
     static void sendAutoCompactTo(AcpConnection *conn, AcpSessionModel *model);

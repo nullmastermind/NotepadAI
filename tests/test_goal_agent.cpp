@@ -20,6 +20,8 @@
 #include "GoalAgentSettings.h"
 #include "GoalHttpJudge.h"
 #include "IAcpProcessChannel.h"
+#include "AcpPromptQueue.h"
+
 
 // Records JSON-RPC bytes AcpConnection would send on a live transport.
 // start() marks the channel running but does not emit started(), so the
@@ -97,6 +99,8 @@ private slots:
     void nativeGoalCommand_skipsBlankRows();
     void isNativeGoalSlash_matchesGoalCommandOnly();
     void prefixGoalMessage_prefixesUnlessAlreadyGoal();
+    void nativeGoalUsesSidePrompt_onlyWhenAgentAdvertisesGoal();
+
     void sidePrompt_whileTurnInFlight_doesNotEndTurn();
     void sidePrompts_twoGoalsWhileTurnInFlight_bothGoOutImmediately();
     void userPromptResult_whileGoalOutstanding_doesNotEndTurn();
@@ -1311,6 +1315,20 @@ void TestGoalAgent::isNativeGoalSlash_matchesGoalCommandOnly()
     QVERIFY(!GoalAgent::isNativeGoalSlash(QStringLiteral("hello /goal")));
     QVERIFY(!GoalAgent::isNativeGoalSlash(QStringLiteral("/compact")));
 }
+
+void TestGoalAgent::nativeGoalUsesSidePrompt_onlyWhenAgentAdvertisesGoal()
+{
+    QVERIFY(GoalAgent::nativeGoalUsesSidePrompt(QStringLiteral("/goal x"), true));
+    QVERIFY(!GoalAgent::nativeGoalUsesSidePrompt(QStringLiteral("/goal x"), false));
+    QVERIFY(!GoalAgent::nativeGoalUsesSidePrompt(QStringLiteral("hello"), true));
+    QCOMPARE(AcpPromptQueue::classifySend(
+                 true, true, GoalAgent::nativeGoalUsesSidePrompt(QStringLiteral("/goal x"), false)),
+             AcpPromptQueue::SendKind::Enqueue);
+    QCOMPARE(AcpPromptQueue::classifySend(
+                 true, true, GoalAgent::nativeGoalUsesSidePrompt(QStringLiteral("/goal x"), true)),
+             AcpPromptQueue::SendKind::SidePrompt);
+}
+
 
 void TestGoalAgent::prefixGoalMessage_prefixesUnlessAlreadyGoal()
 {

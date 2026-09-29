@@ -31,7 +31,10 @@
 #include <QResizeEvent>
 #include <QShowEvent>
 #include <QStringList>
+#include <QStringView>
 #include <QTextBlock>
+#include <QVector>
+
 #include <QTextBrowser>
 #include <QTextDocument>
 #include <QTimer>
@@ -51,9 +54,14 @@ constexpr const char *kDiffDelBg   = "rgba(217, 83, 79, 0.18)";
 constexpr const char *kDiffAddMark = "#4caf50";
 constexpr const char *kDiffDelMark = "#d9534f";
 
-// Cap LCS to bound the O(m*n) memory/time. Real edit payloads are small; this
-// is just a guard so a pathological full-file paste doesn't lock the UI.
-constexpr int kMaxLcsLines = 2000;
+// Cap LCS to bound the O(m*n) cell count. Compact hunks skip this path.
+// 256² ints ≈ 260 KiB, one allocation, only on an expanded completed card
+// (collapsed cards skip body render; 80 ms debounce coalesces updates).
+constexpr int kMaxLcsLines = 256;
+constexpr int kMaxOmpDiffLines = 2000;
+constexpr int kMaxCompactDiffChars = 128 * 1024;
+constexpr int kMaxDiffSourceChars = 512 * 1024;
+constexpr int kKeepContext = 3;
 constexpr int kMaxRawOutputChars = 60000;
 constexpr int kBodyRenderDebounceMs = 80;
 
@@ -100,43 +108,358 @@ QVector<DiffLine> lcsLineDiff(const QStringList &oldLines, const QStringList &ne
 {
     const int m = oldLines.size();
     const int n = newLines.size();
-    QVector<QVector<int>> dp(m + 1, QVector<int>(n + 1, 0));
+    const int cols = n + 1;
+    QVector<int> dp((m + 1) * cols, 0);
+    auto at = [&](int i, int j) -> int & { return dp[i * cols + j]; };
     for (int i = 1; i <= m; ++i) {
+        const QString &oldLine = oldLines.at(i - 1);
         for (int j = 1; j <= n; ++j) {
-            if (oldLines[i - 1] == newLines[j - 1]) {
-                dp[i][j] = dp[i - 1][j - 1] + 1;
+            if (oldLine == newLines.at(j - 1)) {
+                at(i, j) = at(i - 1, j - 1) + 1;
             } else {
-                dp[i][j] = std::max(dp[i - 1][j], dp[i][j - 1]);
+                at(i, j) = std::max(at(i - 1, j), at(i, j - 1));
             }
         }
     }
     QVector<DiffLine> out;
     out.reserve(m + n);
-    int i = m, j = n;
+    int i = m;
+    int j = n;
     while (i > 0 && j > 0) {
-        if (oldLines[i - 1] == newLines[j - 1]) {
-            out.append({DiffKind::Context, i, j, oldLines[i - 1]});
+        if (oldLines.at(i - 1) == newLines.at(j - 1)) {
+            out.append({DiffKind::Context, i, j, oldLines.at(i - 1)});
             --i;
             --j;
-        } else if (dp[i - 1][j] > dp[i][j - 1]) {
-            out.append({DiffKind::Remove, i, 0, oldLines[i - 1]});
+        } else if (at(i - 1, j) >= at(i, j - 1)) {
+            out.append({DiffKind::Remove, i, 0, oldLines.at(i - 1)});
             --i;
         } else {
-            out.append({DiffKind::Add, 0, j, newLines[j - 1]});
+            out.append({DiffKind::Add, 0, j, newLines.at(j - 1)});
             --j;
         }
     }
     while (i > 0) {
-        out.append({DiffKind::Remove, i, 0, oldLines[i - 1]});
+        out.append({DiffKind::Remove, i, 0, oldLines.at(i - 1)});
         --i;
     }
     while (j > 0) {
-        out.append({DiffKind::Add, 0, j, newLines[j - 1]});
+        out.append({DiffKind::Add, 0, j, newLines.at(j - 1)});
         --j;
     }
     std::reverse(out.begin(), out.end());
     return out;
 }
+
+// O(m+n) fallback when either side exceeds kMaxLcsLines: common prefix/suffix
+// plus one middle replace. collapseContext then keeps 3 lines around the change.
+QVector<DiffLine> prefixSuffixDiff(const QStringList &oldLines, const QStringList &newLines)
+{
+    const int m = oldLines.size();
+    const int n = newLines.size();
+    int pre = 0;
+    while (pre < m && pre < n && oldLines.at(pre) == newLines.at(pre)) {
+        ++pre;
+    }
+    int oldEnd = m;
+    int newEnd = n;
+    while (oldEnd > pre && newEnd > pre
+           && oldLines.at(oldEnd - 1) == newLines.at(newEnd - 1)) {
+        --oldEnd;
+        --newEnd;
+    }
+    QVector<DiffLine> rows;
+    rows.reserve(qMin(m + n, kMaxOmpDiffLines));
+    for (int k = 0; k < pre && rows.size() < kMaxOmpDiffLines; ++k) {
+        rows.append({DiffKind::Context, k + 1, k + 1, oldLines.at(k)});
+    }
+    for (int k = pre; k < oldEnd && rows.size() < kMaxOmpDiffLines; ++k) {
+        rows.append({DiffKind::Remove, k + 1, 0, oldLines.at(k)});
+    }
+    for (int k = pre; k < newEnd && rows.size() < kMaxOmpDiffLines; ++k) {
+        rows.append({DiffKind::Add, 0, k + 1, newLines.at(k)});
+    }
+    for (int k = oldEnd; k < m && rows.size() < kMaxOmpDiffLines; ++k) {
+        rows.append({DiffKind::Context, k + 1, newEnd + (k - oldEnd) + 1, oldLines.at(k)});
+    }
+    return rows;
+}
+
+const QChar kBoxGutter(0x2502);
+
+int parseLeadingInt(QStringView s, int *consumed)
+{
+    int i = 0;
+    int n = 0;
+    const int len = s.size();
+    while (i < len) {
+        const ushort u = s.at(i).unicode();
+        if (u < '0' || u > '9') {
+            break;
+        }
+        n = n * 10 + static_cast<int>(u - '0');
+        ++i;
+        if (n > 10'000'000) {
+            break;
+        }
+    }
+    *consumed = i;
+    return n;
+}
+
+bool parseOmpNumberedLine(QStringView line, DiffLine *out)
+{
+    int i = 0;
+    const int n = line.size();
+    while (i < n && line.at(i) == QLatin1Char(' ')) {
+        ++i;
+    }
+    if (i >= n) {
+        return false;
+    }
+    QChar mark = QLatin1Char(' ');
+    const QChar first = line.at(i);
+    if (first == QLatin1Char('+') || first == QLatin1Char('-')) {
+        mark = first;
+        ++i;
+    }
+    int consumed = 0;
+    const int lineNo = parseLeadingInt(line.mid(i), &consumed);
+    if (consumed == 0 || lineNo <= 0) {
+        return false;
+    }
+    i += consumed;
+    while (i < n && line.at(i) == QLatin1Char(' ')) {
+        ++i;
+    }
+    if (i >= n) {
+        return false;
+    }
+    const QChar sep = line.at(i);
+    if (sep != QLatin1Char('|') && sep != kBoxGutter) {
+        return false;
+    }
+    ++i;
+    const QString text = line.mid(i).toString();
+    if (mark == QLatin1Char('+')) {
+        *out = {DiffKind::Add, 0, lineNo, text};
+    } else if (mark == QLatin1Char('-')) {
+        *out = {DiffKind::Remove, lineNo, 0, text};
+    } else {
+        *out = {DiffKind::Context, lineNo, lineNo, text};
+    }
+    return true;
+}
+
+QVector<DiffLine> parseOmpNumberedDiff(const QString &text)
+{
+    QVector<DiffLine> rows;
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    bool started = false;
+    for (QString line : lines) {
+        if (line.endsWith(QLatin1Char('\r'))) {
+            line.chop(1);
+        }
+        if (line.isEmpty()) {
+            continue;
+        }
+        DiffLine row{};
+        if (!parseOmpNumberedLine(QStringView{line}, &row)) {
+            if (!started) {
+                return {};
+            }
+            continue;
+        }
+        started = true;
+        rows.append(row);
+        if (rows.size() >= kMaxOmpDiffLines) {
+            break;
+        }
+    }
+    return rows;
+}
+
+bool parseUnifiedHunkHeader(QStringView line, int *oldStart, int *newStart)
+{
+    const int minus = line.indexOf(QLatin1Char('-'));
+    const int plus = line.indexOf(QLatin1Char('+'));
+    if (minus < 0 || plus <= minus) {
+        return false;
+    }
+    int consumed = 0;
+    const int oldN = parseLeadingInt(line.mid(minus + 1), &consumed);
+    if (consumed == 0) {
+        return false;
+    }
+    consumed = 0;
+    const int newN = parseLeadingInt(line.mid(plus + 1), &consumed);
+    if (consumed == 0) {
+        return false;
+    }
+    *oldStart = oldN > 0 ? oldN : 1;
+    *newStart = newN > 0 ? newN : 1;
+    return true;
+}
+
+QVector<DiffLine> parseUnifiedDiff(const QString &text)
+{
+    QVector<DiffLine> rows;
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    int oldL = 0;
+    int newL = 0;
+    bool seenHunk = false;
+    for (QString line : lines) {
+        if (line.endsWith(QLatin1Char('\r'))) {
+            line.chop(1);
+        }
+        if (line.startsWith(QLatin1String("@@"))) {
+            if (!parseUnifiedHunkHeader(QStringView{line}, &oldL, &newL)) {
+                if (!seenHunk) {
+                    return {};
+                }
+                continue;
+            }
+            seenHunk = true;
+            continue;
+        }
+        if (line.startsWith(QLatin1String("---"))
+            || line.startsWith(QLatin1String("+++"))
+            || line.startsWith(QLatin1String("diff "))
+            || line.startsWith(QLatin1String("index "))
+            || line.startsWith(QLatin1Char('\\'))) {
+            continue;
+        }
+        if (line.isEmpty()) {
+            if (seenHunk && oldL > 0) {
+                rows.append({DiffKind::Context, oldL, newL, QString()});
+                ++oldL;
+                ++newL;
+            }
+            continue;
+        }
+        const QChar mark = line.at(0);
+        const QString body = line.mid(1);
+        if (mark == QLatin1Char('+')) {
+            if (newL <= 0) {
+                newL = 1;
+            }
+            seenHunk = true;
+            rows.append({DiffKind::Add, 0, newL, body});
+            ++newL;
+        } else if (mark == QLatin1Char('-')) {
+            if (oldL <= 0) {
+                oldL = 1;
+            }
+            seenHunk = true;
+            rows.append({DiffKind::Remove, oldL, 0, body});
+            ++oldL;
+        } else if (mark == QLatin1Char(' ') || mark == QLatin1Char('\t')) {
+            if (oldL <= 0) {
+                oldL = 1;
+            }
+            if (newL <= 0) {
+                newL = 1;
+            }
+            seenHunk = true;
+            rows.append({DiffKind::Context, oldL, newL, body});
+            ++oldL;
+            ++newL;
+        } else if (!seenHunk) {
+            continue;
+        }
+        if (rows.size() >= kMaxOmpDiffLines) {
+            break;
+        }
+    }
+    return rows;
+}
+
+QVector<DiffLine> collapseContext(const QVector<DiffLine> &rows)
+{
+    if (rows.isEmpty()) {
+        return rows;
+    }
+    bool anyChange = false;
+    bool anyContext = false;
+    for (const auto &row : rows) {
+        if (row.kind == DiffKind::Context) {
+            anyContext = true;
+        } else {
+            anyChange = true;
+        }
+    }
+    if (!anyChange || !anyContext) {
+        return rows;
+    }
+
+    QVector<DiffLine> out;
+    out.reserve(qMin(rows.size(), kMaxOmpDiffLines));
+    const int n = rows.size();
+    int i = 0;
+    while (i < n && out.size() < kMaxOmpDiffLines) {
+        if (rows.at(i).kind != DiffKind::Context) {
+            out.append(rows.at(i));
+            ++i;
+            continue;
+        }
+        int j = i;
+        while (j < n && rows.at(j).kind == DiffKind::Context) {
+            ++j;
+        }
+        const int run = j - i;
+        const bool leading = (i == 0);
+        const bool trailing = (j == n);
+        if (run <= kKeepContext) {
+            for (int k = i; k < j && out.size() < kMaxOmpDiffLines; ++k) {
+                out.append(rows.at(k));
+            }
+        } else if (leading) {
+            out.append({DiffKind::Context, 0, 0, QStringLiteral("...")});
+            for (int k = j - kKeepContext; k < j && out.size() < kMaxOmpDiffLines; ++k) {
+                out.append(rows.at(k));
+            }
+        } else if (trailing) {
+            for (int k = i; k < i + kKeepContext && out.size() < kMaxOmpDiffLines; ++k) {
+                out.append(rows.at(k));
+            }
+            if (out.size() < kMaxOmpDiffLines) {
+                out.append({DiffKind::Context, 0, 0, QStringLiteral("...")});
+            }
+        } else if (run <= 2 * kKeepContext) {
+            for (int k = i; k < j && out.size() < kMaxOmpDiffLines; ++k) {
+                out.append(rows.at(k));
+            }
+        } else {
+            for (int k = i; k < i + kKeepContext && out.size() < kMaxOmpDiffLines; ++k) {
+                out.append(rows.at(k));
+            }
+            if (out.size() < kMaxOmpDiffLines) {
+                out.append({DiffKind::Context, 0, 0, QStringLiteral("...")});
+            }
+            for (int k = j - kKeepContext; k < j && out.size() < kMaxOmpDiffLines; ++k) {
+                out.append(rows.at(k));
+            }
+        }
+        i = j;
+    }
+    return out;
+}
+
+QVector<DiffLine> rowsFromCompactDiff(const QString &compact)
+{
+    if (compact.isEmpty()) {
+        return {};
+    }
+    QString src = compact;
+    if (src.size() > kMaxCompactDiffChars) {
+        src.truncate(kMaxCompactDiffChars);
+    }
+    QVector<DiffLine> rows = parseOmpNumberedDiff(src);
+    if (rows.isEmpty()) {
+        rows = parseUnifiedDiff(src);
+    }
+    return rows;
+}
+
 
 QString padNumber(int n, int width)
 {
@@ -189,9 +512,11 @@ QString renderDiffBlock(const QJsonObject &block, const DiffPalette &pal)
     const QString path = block.value(QStringLiteral("path")).toString();
     const QJsonValue oldVal = block.value(QStringLiteral("oldText"));
     const QJsonValue newVal = block.value(QStringLiteral("newText"));
+    const QJsonValue compactVal = block.value(QStringLiteral("diff"));
     const bool oldIsNull = oldVal.isNull() || oldVal.isUndefined();
-    const QString oldText = oldIsNull ? QString() : oldVal.toString();
-    const QString newText = newVal.toString();
+    const QString oldText = oldVal.isString() ? oldVal.toString() : QString();
+    const QString newText = newVal.isString() ? newVal.toString() : QString();
+    const QString compact = compactVal.isString() ? compactVal.toString() : QString();
 
     auto splitLines = [](const QString &s) {
         QStringList lines = s.split(QLatin1Char('\n'));
@@ -204,33 +529,48 @@ QString renderDiffBlock(const QJsonObject &block, const DiffPalette &pal)
         lines.removeAll(QStringLiteral("No newline at end of file"));
         return lines;
     };
-    const QStringList oldLines = splitLines(oldText);
-    const QStringList newLines = splitLines(newText);
 
-    QVector<DiffLine> rows;
-    if (oldIsNull || oldText.isEmpty()) {
-        rows.reserve(newLines.size());
-        for (int k = 0; k < newLines.size(); ++k) {
-            rows.append({DiffKind::Add, 0, k + 1, newLines[k]});
+    QVector<DiffLine> rows = rowsFromCompactDiff(compact);
+    if (rows.isEmpty()) {
+        if (oldText.size() > kMaxDiffSourceChars || newText.size() > kMaxDiffSourceChars) {
+            rows.append({DiffKind::Context, 0, 0,
+                         QStringLiteral("… (diff too large to render)")});
+        } else {
+            const QStringList oldLines = splitLines(oldText);
+            const QStringList newLines = splitLines(newText);
+            if (oldIsNull || oldText.isEmpty()) {
+                const int limit = qMin(newLines.size(), kMaxOmpDiffLines);
+                rows.reserve(limit);
+                for (int k = 0; k < limit; ++k) {
+                    rows.append({DiffKind::Add, 0, k + 1, newLines.at(k)});
+                }
+            } else if (oldLines.size() > kMaxLcsLines || newLines.size() > kMaxLcsLines) {
+                rows = prefixSuffixDiff(oldLines, newLines);
+            } else {
+                rows = lcsLineDiff(oldLines, newLines);
+            }
         }
-    } else if (oldLines.size() > kMaxLcsLines || newLines.size() > kMaxLcsLines) {
-        rows.reserve(oldLines.size() + newLines.size());
-        for (int k = 0; k < oldLines.size(); ++k) {
-            rows.append({DiffKind::Remove, k + 1, 0, oldLines[k]});
-        }
-        for (int k = 0; k < newLines.size(); ++k) {
-            rows.append({DiffKind::Add, 0, k + 1, newLines[k]});
-        }
-    } else {
-        rows = lcsLineDiff(oldLines, newLines);
     }
 
-    const int numWidth = qMax(1,
-        qMax(QString::number(oldLines.size()).size(),
-             QString::number(newLines.size()).size()));
+    bool onlyAdds = !rows.isEmpty();
+    for (const auto &row : rows) {
+        if (row.kind != DiffKind::Add) {
+            onlyAdds = false;
+            break;
+        }
+    }
+    if (!onlyAdds) {
+        rows = collapseContext(rows);
+    }
+
+    int maxNum = 1;
+    for (const auto &row : rows) {
+        maxNum = qMax(maxNum, qMax(row.oldLine, row.newLine));
+    }
+    const int numWidth = qMax(1, QString::number(maxNum).size());
 
     QString html;
-    html.reserve(path.size() + oldText.size() + newText.size() + rows.size() * 96 + 256);
+    html.reserve(path.size() + rows.size() * 96 + 256);
     html += QStringLiteral(
                 "<div style=\"background: %1; color: %2; padding: 4px 6px; "
                 "border: 1px solid %3; border-radius: 4px; "
@@ -289,6 +629,32 @@ bool isEmptyContentJson(const QString &text)
     }
     return false;
 }
+
+// omp acp often ships the hashline edit payload as a sibling type:text
+// (`[file#tag]\\n1:old\\n2:new`) next to type:diff. The colored hunk is enough.
+bool looksLikeOmpHashlinePayload(const QString &text)
+{
+    int i = 0;
+    const int n = text.size();
+    while (i < n && text.at(i).isSpace())
+        ++i;
+    if (i >= n || text.at(i) != QLatin1Char('['))
+        return false;
+    ++i;
+    bool sawHash = false;
+    while (i < n) {
+        const QChar c = text.at(i);
+        if (c == QLatin1Char(']'))
+            return sawHash;
+        if (c == QLatin1Char('#'))
+            sawHash = true;
+        else if (c == QLatin1Char('\n') || c == QLatin1Char('\r'))
+            return false;
+        ++i;
+    }
+    return false;
+}
+
 
 QString firstLine(QString text)
 {
@@ -663,16 +1029,17 @@ void AcpToolCallCard::maybeAutoExpandForDiff()
 
 QString AcpToolCallCard::statusGlyph() const
 {
-    if (m_status == QLatin1String("completed")) return QStringLiteral("✓");
-    if (m_status == QLatin1String("failed"))    return QStringLiteral("✗");
-    if (m_status == QLatin1String("running"))   return QStringLiteral("⚙");
+    const QString ui = AcpProtocol::toolCallStatusForUi(m_status);
+    if (ui == QLatin1String("completed")) return QStringLiteral("✓");
+    if (ui == QLatin1String("failed"))    return QStringLiteral("✗");
+    if (ui == QLatin1String("running"))   return QStringLiteral("⚙");
     return QStringLiteral("⏳");
 }
 
 QString AcpToolCallCard::computeEnrichedTitle() const
 {
     if (m_title == QLatin1String("TaskOutput")) {
-        return m_status == QLatin1String("running")
+        return AcpProtocol::toolCallStatusForUi(m_status) == QLatin1String("running")
             ? tr("Waiting for background jobs...")
             : tr("Background jobs complete");
     }
@@ -737,41 +1104,50 @@ QString AcpToolCallCard::computeEnrichedTitle() const
         return t.mid(10);
     }
 
+    const QString mutatedPath = AcpProtocol::toolCallMutatedPath(
+        m_rawInput, m_content, m_rawOutput);
+    const bool writeLike =
+        m_kind == QLatin1String("edit")
+        && m_rawInput.value(QStringLiteral("content")).isString()
+        && !m_rawInput.contains(QStringLiteral("input"))
+        && !m_rawInput.contains(QStringLiteral("edits"));
+
     static const QStringList readTitles = {
         QStringLiteral("read"), QStringLiteral("read file")
     };
-    if (readTitles.contains(tLower)) {
-        QString path = m_rawInput.value(QStringLiteral("file_path")).toString();
-        if (path.isEmpty())
-            path = m_rawInput.value(QStringLiteral("path")).toString();
-        if (!path.isEmpty())
-            return QStringLiteral("Read: %1").arg(path);
+    if (readTitles.contains(tLower)
+        || tLower.startsWith(QLatin1String("read:"))
+        || tLower.startsWith(QLatin1String("read "))
+        || m_kind == QLatin1String("read")) {
+        if (!mutatedPath.isEmpty())
+            return QStringLiteral("Read: %1").arg(mutatedPath);
         return t;
     }
 
     static const QStringList writeTitles = {
         QStringLiteral("write"), QStringLiteral("write file")
     };
-    if (writeTitles.contains(tLower)) {
-        QString path = m_rawInput.value(QStringLiteral("file_path")).toString();
-        if (path.isEmpty())
-            path = m_rawInput.value(QStringLiteral("path")).toString();
-        if (!path.isEmpty())
-            return QStringLiteral("Write: %1").arg(path);
+    if (writeTitles.contains(tLower)
+        || tLower.startsWith(QLatin1String("write:"))
+        || tLower.startsWith(QLatin1String("write "))
+        || writeLike) {
+        if (!mutatedPath.isEmpty())
+            return QStringLiteral("Write: %1").arg(mutatedPath);
         return t;
     }
 
     static const QStringList editTitles = {
         QStringLiteral("edit"), QStringLiteral("edit file")
     };
-    if (editTitles.contains(tLower)) {
-        QString path = m_rawInput.value(QStringLiteral("file_path")).toString();
-        if (path.isEmpty())
-            path = m_rawInput.value(QStringLiteral("path")).toString();
-        if (!path.isEmpty())
-            return QStringLiteral("Edit: %1").arg(path);
+    if (editTitles.contains(tLower)
+        || tLower.startsWith(QLatin1String("edit:"))
+        || tLower.startsWith(QLatin1String("edit "))
+        || m_kind == QLatin1String("edit")) {
+        if (!mutatedPath.isEmpty())
+            return QStringLiteral("Edit: %1").arg(mutatedPath);
         return t;
     }
+
 
     static const QStringList bashTitles = {
         QStringLiteral("bash"), QStringLiteral("terminal")
@@ -935,6 +1311,8 @@ void AcpToolCallCard::rerenderBody()
             const QString type = obj.value(QStringLiteral("type")).toString();
             if (type == QLatin1String("text")) {
                 const QString t = obj.value(QStringLiteral("text")).toString();
+                if (looksLikeOmpHashlinePayload(t))
+                    continue;
                 if (!t.isEmpty() && !isEmptyContentJson(t)) {
                     html += QStringLiteral("<pre style=\"%1 "
                                            "color: %2; white-space: pre-wrap; "
@@ -962,6 +1340,8 @@ void AcpToolCallCard::rerenderBody()
                 if (innerType == QLatin1String("text")) {
                     const QString clean = sanitizeToolText(
                         inner.value(QStringLiteral("text")).toString());
+                    if (looksLikeOmpHashlinePayload(clean))
+                        continue;
                     if (!clean.isEmpty() && !isEmptyContentJson(clean)) {
                         html += QStringLiteral("<pre style=\"%1 "
                                                "color: %2; white-space: pre-wrap; "

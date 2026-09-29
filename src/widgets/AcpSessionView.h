@@ -169,9 +169,9 @@ private:
     void appendMessageWidget(int idx);
     // Insert a widget into the transcript timeline at the tail, just above
     // the inline heartbeat indicator (if present) and the trailing stretch.
-    // All bubbles, tool-call cards, plan widgets, and permission prompts go
-    // through here so the heartbeat always trails the freshest content.
+    // The plan widget is a viewport footer outside the scroll area.
     void insertTimelineWidget(QWidget *w, bool syncWidth = true);
+    int timelineTailIndex(QWidget *exclude) const;
     void maybeTruncateTranscript();
     void removeTranscriptWidget(QWidget *w);
     QWidget *widgetForTimelineEntry(const AcpTimelineEntry &entry) const;

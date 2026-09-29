@@ -850,6 +850,8 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         tc.rawInput = update.value(QStringLiteral("rawInput")).toObject();
         tc.rawOutput = update.value(QStringLiteral("rawOutput")).toObject();
         tc.groupId = update.value(QStringLiteral("groupId")).toInt(0);
+        AcpProtocol::injectToolCallPath(
+            tc.rawInput, update.value(QStringLiteral("locations")).toArray());
         emit toolCallReceived(tc);
     } else if (kind == QLatin1String("tool_call_update")) {
         m_promptProducedOutput = true;
@@ -878,6 +880,8 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         const QJsonValue ri = update.value(QStringLiteral("rawInput"));
         if (ri.isObject()) {
             u.rawInput = ri.toObject();
+            AcpProtocol::injectToolCallPath(
+                *u.rawInput, update.value(QStringLiteral("locations")).toArray());
         }
         const QJsonValue ro = update.value(QStringLiteral("rawOutput"));
         if (ro.isObject()) {

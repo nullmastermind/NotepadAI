@@ -35,6 +35,18 @@ private slots:
     void terminalOutputDeltaFromMeta();
     void stripTerminalContentBlocks();
     void appendToolCallTextDeltaAccumulates();
+    void toolCallStatusForUiMapsOmpPending();
+    void toolCallMutatedPathReadsOmpFields();
+    void injectToolCallPathFromLocationsAndHashline();
+    void ensureDiffContentSynthesizesWriteAndDetails();
+    void ensureDiffContentAttachesCompactAndAcceptsFlatRawOutput();
+    void preserveDiffBlocksKeepsPreviousWhenIncomingHasNone();
+    void isGoalCommandNameMatchesGoalOnly();
+    void ensureHostGoalCommandPrependsWhenMissing();
+    void commandsIncludeGoalIgnoresHostInject();
+
+
+
 };
 
 void TestAcpProtocolSerialization::textContentBlockRoundtrip()
@@ -195,6 +207,246 @@ void TestAcpProtocolSerialization::appendToolCallTextDeltaAccumulates()
     QCOMPARE(content.at(0).toObject().value(QStringLiteral("text")).toString(),
              QStringLiteral("foobar"));
 }
+
+void TestAcpProtocolSerialization::toolCallStatusForUiMapsOmpPending()
+{
+    QCOMPARE(AcpProtocol::toolCallStatusForUi(QStringLiteral("pending")),
+             QStringLiteral("running"));
+    QCOMPARE(AcpProtocol::toolCallStatusForUi(QStringLiteral("in_progress")),
+             QStringLiteral("running"));
+    QCOMPARE(AcpProtocol::toolCallStatusForUi(QStringLiteral("running")),
+             QStringLiteral("running"));
+    QCOMPARE(AcpProtocol::toolCallStatusForUi(QStringLiteral("completed")),
+             QStringLiteral("completed"));
+    QCOMPARE(AcpProtocol::toolCallStatusForUi(QStringLiteral("failed")),
+             QStringLiteral("failed"));
+}
+
+void TestAcpProtocolSerialization::toolCallMutatedPathReadsOmpFields()
+{
+    QJsonObject raw;
+    raw.insert(QStringLiteral("path"), QStringLiteral("omp.txt"));
+    QCOMPARE(AcpProtocol::toolCallMutatedPath(raw, QJsonArray(), QJsonObject()),
+             QStringLiteral("omp.txt"));
+
+    QJsonObject claude;
+    claude.insert(QStringLiteral("file_path"), QStringLiteral("claude.cpp"));
+    claude.insert(QStringLiteral("path"), QStringLiteral("omp.txt"));
+    QCOMPARE(AcpProtocol::toolCallMutatedPath(claude, QJsonArray(), QJsonObject()),
+             QStringLiteral("claude.cpp"));
+
+    QJsonObject hash;
+    hash.insert(QStringLiteral("input"), QStringLiteral("[conflict.txt#A1B2]\nPUT 1:"));
+    QCOMPARE(AcpProtocol::toolCallMutatedPath(hash, QJsonArray(), QJsonObject()),
+             QStringLiteral("conflict.txt"));
+
+    QJsonArray locations;
+    QJsonObject loc;
+    loc.insert(QStringLiteral("path"), QStringLiteral("from-loc.ts"));
+    locations.append(loc);
+    QCOMPARE(AcpProtocol::toolCallMutatedPath(QJsonObject(), QJsonArray(), QJsonObject(), locations),
+             QStringLiteral("from-loc.ts"));
+
+    QJsonArray content;
+    QJsonObject diff;
+    diff.insert(QStringLiteral("type"), QStringLiteral("diff"));
+    diff.insert(QStringLiteral("path"), QStringLiteral("from-diff.rs"));
+    content.append(diff);
+    QCOMPARE(AcpProtocol::toolCallMutatedPath(QJsonObject(), content, QJsonObject()),
+             QStringLiteral("from-diff.rs"));
+
+    QJsonObject details;
+    details.insert(QStringLiteral("path"), QStringLiteral("from-details.md"));
+    QJsonObject rawOut;
+    rawOut.insert(QStringLiteral("details"), details);
+    QCOMPARE(AcpProtocol::toolCallMutatedPath(QJsonObject(), QJsonArray(), rawOut),
+             QStringLiteral("from-details.md"));
+}
+
+void TestAcpProtocolSerialization::injectToolCallPathFromLocationsAndHashline()
+{
+    QJsonObject raw;
+    QJsonArray locations;
+    QJsonObject loc;
+    loc.insert(QStringLiteral("path"), QStringLiteral("loc.cpp"));
+    locations.append(loc);
+    AcpProtocol::injectToolCallPath(raw, locations);
+    QCOMPARE(raw.value(QStringLiteral("path")).toString(), QStringLiteral("loc.cpp"));
+
+    QJsonObject existing;
+    existing.insert(QStringLiteral("file_path"), QStringLiteral("keep.cpp"));
+    AcpProtocol::injectToolCallPath(existing, locations);
+    QVERIFY(!existing.contains(QStringLiteral("path")));
+    QCOMPARE(existing.value(QStringLiteral("file_path")).toString(),
+             QStringLiteral("keep.cpp"));
+
+    QJsonObject emptyPath;
+    emptyPath.insert(QStringLiteral("path"), QString());
+    AcpProtocol::injectToolCallPath(emptyPath, locations);
+    QCOMPARE(emptyPath.value(QStringLiteral("path")).toString(), QStringLiteral("loc.cpp"));
+
+    QJsonObject hash;
+    hash.insert(QStringLiteral("input"), QStringLiteral("[probe.txt#dead]\nx"));
+    AcpProtocol::injectToolCallPath(hash, QJsonArray());
+    QCOMPARE(hash.value(QStringLiteral("path")).toString(), QStringLiteral("probe.txt"));
+    QJsonObject nullPath;
+    nullPath.insert(QStringLiteral("path"), QJsonValue::Null);
+    AcpProtocol::injectToolCallPath(nullPath, locations);
+    QCOMPARE(nullPath.value(QStringLiteral("path")).toString(), QStringLiteral("loc.cpp"));
+}
+
+void TestAcpProtocolSerialization::ensureDiffContentSynthesizesWriteAndDetails()
+{
+    QJsonObject raw;
+    raw.insert(QStringLiteral("path"), QStringLiteral("new.txt"));
+    raw.insert(QStringLiteral("content"), QStringLiteral("hello\n"));
+    const QJsonArray synthesized =
+        AcpProtocol::ensureDiffContent(QJsonArray(), raw, QJsonObject());
+    QCOMPARE(synthesized.size(), 1);
+    const QJsonObject writeDiff = synthesized.at(0).toObject();
+    QCOMPARE(writeDiff.value(QStringLiteral("type")).toString(), QStringLiteral("diff"));
+    QCOMPARE(writeDiff.value(QStringLiteral("path")).toString(), QStringLiteral("new.txt"));
+    QVERIFY(writeDiff.value(QStringLiteral("oldText")).isNull());
+    QCOMPARE(writeDiff.value(QStringLiteral("newText")).toString(), QStringLiteral("hello\n"));
+
+    QJsonObject details;
+    details.insert(QStringLiteral("path"), QStringLiteral("edit.txt"));
+    details.insert(QStringLiteral("oldText"), QStringLiteral("a\n"));
+    details.insert(QStringLiteral("newText"), QStringLiteral("b\n"));
+    details.insert(QStringLiteral("diff"), QStringLiteral("@@ -1 +1 @@\n-a\n+b\n"));
+    QJsonObject rawOut;
+    rawOut.insert(QStringLiteral("details"), details);
+    const QJsonArray fromDetails =
+        AcpProtocol::ensureDiffContent(QJsonArray(), QJsonObject(), rawOut);
+    QCOMPARE(fromDetails.size(), 1);
+    const QJsonObject editDiff = fromDetails.at(0).toObject();
+    QCOMPARE(editDiff.value(QStringLiteral("path")).toString(), QStringLiteral("edit.txt"));
+    QCOMPARE(editDiff.value(QStringLiteral("oldText")).toString(), QStringLiteral("a\n"));
+    QCOMPARE(editDiff.value(QStringLiteral("diff")).toString(),
+             QStringLiteral("@@ -1 +1 @@\n-a\n+b\n"));
+
+    QJsonArray already;
+    already.append(writeDiff);
+    const QJsonArray unchanged =
+        AcpProtocol::ensureDiffContent(already, raw, QJsonObject());
+    QCOMPARE(unchanged.size(), 1);
+}
+
+void TestAcpProtocolSerialization::ensureDiffContentAttachesCompactAndAcceptsFlatRawOutput()
+{
+    QJsonObject fullFile;
+    fullFile.insert(QStringLiteral("type"), QStringLiteral("diff"));
+    fullFile.insert(QStringLiteral("path"), QStringLiteral("big.cpp"));
+    fullFile.insert(QStringLiteral("oldText"), QStringLiteral("a\nb\nc\n"));
+    fullFile.insert(QStringLiteral("newText"), QStringLiteral("a\nB\nc\n"));
+    QJsonArray content;
+    content.append(fullFile);
+
+    QJsonObject details;
+    details.insert(QStringLiteral("diff"), QStringLiteral("@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n"));
+    QJsonObject rawOut;
+    rawOut.insert(QStringLiteral("details"), details);
+    const QJsonArray attached = AcpProtocol::ensureDiffContent(content, QJsonObject(), rawOut);
+    QCOMPARE(attached.size(), 1);
+    QCOMPARE(attached.at(0).toObject().value(QStringLiteral("diff")).toString(),
+             QStringLiteral("@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n"));
+
+    QJsonObject flat;
+    flat.insert(QStringLiteral("path"), QStringLiteral("flat.txt"));
+    flat.insert(QStringLiteral("diff"), QStringLiteral("@@ -1 +1 @@\n-a\n+b\n"));
+    const QJsonArray fromFlat =
+        AcpProtocol::ensureDiffContent(QJsonArray(), QJsonObject(), flat);
+    QCOMPARE(fromFlat.size(), 1);
+    QCOMPARE(fromFlat.at(0).toObject().value(QStringLiteral("path")).toString(),
+             QStringLiteral("flat.txt"));
+    QCOMPARE(fromFlat.at(0).toObject().value(QStringLiteral("diff")).toString(),
+             QStringLiteral("@@ -1 +1 @@\n-a\n+b\n"));
+
+    QJsonObject skip;
+    skip.insert(QStringLiteral("type"), QStringLiteral("diff"));
+    skip.insert(QStringLiteral("path"), QStringLiteral("kept.cpp"));
+    QJsonArray already;
+    already.append(skip);
+    const QJsonArray identity =
+        AcpProtocol::ensureDiffContent(already, QJsonObject(), QJsonObject());
+    QCOMPARE(identity.size(), 1);
+    QVERIFY(!identity.at(0).toObject().contains(QStringLiteral("diff")));
+}
+
+void TestAcpProtocolSerialization::preserveDiffBlocksKeepsPreviousWhenIncomingHasNone()
+{
+    QJsonArray previous;
+    QJsonObject diff;
+    diff.insert(QStringLiteral("type"), QStringLiteral("diff"));
+    diff.insert(QStringLiteral("path"), QStringLiteral("kept.txt"));
+    previous.append(diff);
+
+    QJsonArray incoming;
+    QJsonObject text;
+    text.insert(QStringLiteral("type"), QStringLiteral("text"));
+    text.insert(QStringLiteral("text"), QStringLiteral("Wrote kept.txt"));
+    incoming.append(text);
+
+    const QJsonArray merged = AcpProtocol::preserveDiffBlocks(incoming, previous);
+    QCOMPARE(merged.size(), 2);
+    QCOMPARE(merged.at(1).toObject().value(QStringLiteral("path")).toString(),
+             QStringLiteral("kept.txt"));
+
+    const QJsonArray keepIncoming = AcpProtocol::preserveDiffBlocks(previous, incoming);
+    QCOMPARE(keepIncoming.size(), 1);
+    QCOMPARE(keepIncoming.at(0).toObject().value(QStringLiteral("type")).toString(),
+             QStringLiteral("diff"));
+}
+
+
+void TestAcpProtocolSerialization::isGoalCommandNameMatchesGoalOnly()
+{
+    QVERIFY(AcpProtocol::isGoalCommandName(QStringLiteral("goal")));
+    QVERIFY(AcpProtocol::isGoalCommandName(QStringLiteral("/goal")));
+    QVERIFY(AcpProtocol::isGoalCommandName(QStringLiteral("  /Goal  ")));
+    QVERIFY(!AcpProtocol::isGoalCommandName(QStringLiteral("goals")));
+    QVERIFY(!AcpProtocol::isGoalCommandName(QStringLiteral("/compact")));
+    QVERIFY(!AcpProtocol::isGoalCommandName(QString()));
+}
+
+void TestAcpProtocolSerialization::ensureHostGoalCommandPrependsWhenMissing()
+{
+    QList<AcpProtocol::AcpCommandInfo> empty;
+    AcpProtocol::ensureHostGoalCommand(empty);
+    QCOMPARE(empty.size(), 1);
+    QCOMPARE(empty.first().name, QStringLiteral("goal"));
+    QCOMPARE(empty.first().description, QStringLiteral("Set a goal for this session"));
+    QCOMPARE(empty.first().inputHint, QStringLiteral("criterion"));
+
+    AcpProtocol::AcpCommandInfo compact;
+    compact.name = QStringLiteral("compact");
+    QList<AcpProtocol::AcpCommandInfo> cmds{compact};
+    AcpProtocol::ensureHostGoalCommand(cmds);
+    QCOMPARE(cmds.size(), 2);
+    QCOMPARE(cmds.first().name, QStringLiteral("goal"));
+    QCOMPARE(cmds.at(1).name, QStringLiteral("compact"));
+
+    AcpProtocol::AcpCommandInfo agentGoal;
+    agentGoal.name = QStringLiteral("/goal");
+    agentGoal.description = QStringLiteral("agent copy");
+    QList<AcpProtocol::AcpCommandInfo> already{agentGoal, compact};
+    AcpProtocol::ensureHostGoalCommand(already);
+    QCOMPARE(already.size(), 2);
+    QCOMPARE(already.first().description, QStringLiteral("agent copy"));
+}
+
+void TestAcpProtocolSerialization::commandsIncludeGoalIgnoresHostInject()
+{
+    QList<AcpProtocol::AcpCommandInfo> empty;
+    QVERIFY(!AcpProtocol::commandsIncludeGoal(empty));
+    AcpProtocol::AcpCommandInfo compact;
+    compact.name = QStringLiteral("compact");
+    QVERIFY(!AcpProtocol::commandsIncludeGoal({compact}));
+    AcpProtocol::AcpCommandInfo goal;
+    goal.name = QStringLiteral("/goal");
+    QVERIFY(AcpProtocol::commandsIncludeGoal({compact, goal}));
+}
+
 
 QTEST_GUILESS_MAIN(TestAcpProtocolSerialization)
 #include "test_acp_protocol_serialization.moc"
