@@ -83,6 +83,12 @@ constexpr const char *kFrameStyleAssistant =
     "AcpMessageWidget[role=\"assistant\"][goalSet=\"true\"] { background: rgba(180, 140, 50, 48); border: 1px solid rgba(180, 140, 50, 80); border-radius: 6px; }";
 constexpr const char *kFrameStyleThought =
     "AcpMessageWidget[role=\"thought\"] { background: palette(base); border-radius: 6px; }";
+// Extra left inset under "Thinking…". Not in the layout margins — those wrap
+// the header too. Italic glyphs also overhang their advance by a few px, so
+// wrap width must leave that slack inside the viewport or the last letters
+// clip and QTextBrowser opens a horizontal scroll range.
+constexpr int kThoughtBrowserPadLeft = 4;
+constexpr int kThoughtItalicRightSlack = 4;
 constexpr const char *kFrameStyleSystem =
     "AcpMessageWidget[role=\"system\"] { background: rgba(180, 140, 50, 32); border: 1px solid rgba(180, 140, 50, 60); border-radius: 6px; }";
 
@@ -219,7 +225,10 @@ AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
         m_layout->addWidget(m_thoughtHeader);
 
         m_browser = new QTextBrowser(this);
-        m_browser->setStyleSheet(QStringLiteral("QTextBrowser { background: transparent; border: none; font-style: italic; padding-left: 4px; }"));
+        m_browser->setStyleSheet(
+            QStringLiteral("QTextBrowser { background: transparent; border: none; "
+                           "font-style: italic; padding-left: %1px; }")
+                .arg(kThoughtBrowserPadLeft));
         m_browser->setOpenExternalLinks(true);
         configureBubbleBrowser(m_browser);
         // QTextDocument paragraphs carry an implicit ~12px bottom margin even
@@ -535,12 +544,16 @@ void AcpMessageWidget::refitBrowserHeight()
         // already have unless we just collapsed to header-only above.
         return;
     }
+    int textW = w;
+    if (m_thoughtHeader) {
+        textW = qMax(0, w - kThoughtBrowserPadLeft - kThoughtItalicRightSlack);
+    }
     QTextDocument *doc = m_browser->document();
     // Force a full layout pass for the current width before measuring —
     // QTextDocument under-reports height for freshly-set multi-line text
     // until the layout engine has run, which clips an expanded thought down
     // to roughly its first line.
-    const int browserH = qMax(0, static_cast<int>(std::ceil(layoutDocumentHeight(doc, w))));
+    const int browserH = qMax(0, static_cast<int>(std::ceil(layoutDocumentHeight(doc, textW))));
     m_browser->setFixedHeight(browserH);
     bubbleH += browserH;
     setFixedHeight(bubbleH);

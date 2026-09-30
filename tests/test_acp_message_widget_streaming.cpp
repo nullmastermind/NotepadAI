@@ -22,6 +22,7 @@ private slots:
     void thought_collapse_after_streaming_done();
     void thought_renders_markdown_as_raw_text();
     void thought_keeps_body_height_while_hidden();
+    void thought_body_does_not_overflow_viewport();
     void thought_reexpand_while_hidden_restores_body_height();
 };
 
@@ -125,6 +126,33 @@ void TestAcpMessageWidgetStreaming::thought_keeps_body_height_while_hidden()
              qPrintable(QStringLiteral("expanded=%1 collapsed=%2")
                             .arg(expandedH)
                             .arg(collapsedH)));
+}
+
+void TestAcpMessageWidgetStreaming::thought_body_does_not_overflow_viewport()
+{
+    // Thought body has stylesheet padding-left and italic glyphs that overhang
+    // their advance. Layout at the frame content width makes the document a
+    // few px wider than the viewport: horizontal scroll + clipped last letters.
+    AcpMessageWidget w(QStringLiteral("thought"));
+    w.resize(420, 40);
+    w.setText(QStringLiteral(
+        "The compile timed out again at 300s while compiling. The crate is huge. "
+        "I need a longer timeout. 0 disable. the deadline? The bash tool says "
+        "timeout 0 disables the command deadline. I should set timeout 0."));
+
+    auto *browser = w.findChild<QTextBrowser *>();
+    QVERIFY(browser);
+    QTextDocument *doc = browser->document();
+    QVERIFY(doc);
+
+    const qreal contentW = w.width() - 8; // thought layout margins 4+4
+    QVERIFY(doc->textWidth() > 0);
+    // Must leave pad-left (4) plus italic overhang slack (>=2) inside the
+    // allocated width. Equality with contentW is the bug this test exists for.
+    QVERIFY2(doc->textWidth() <= contentW - 4 - 2,
+             qPrintable(QStringLiteral("textWidth=%1 contentW=%2")
+                            .arg(doc->textWidth())
+                            .arg(contentW)));
 }
 
 void TestAcpMessageWidgetStreaming::thought_reexpand_while_hidden_restores_body_height()
