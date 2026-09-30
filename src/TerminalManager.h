@@ -23,6 +23,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QString>
+#include <QStringList>
 
 #include "TerminalTaskRegistry.h"
 
@@ -66,13 +67,22 @@ public slots:
 
     TerminalDock *findTaskDock(const QString &command, const QString &cwd) const;
 
+    void applyWorkspaceFilter(const QString &activeWorkspaceRoot, const QStringList &openWorkspaceRoots);
+    void closeTerminalsForWorkspace(const QString &workspaceRoot, const QStringList &openWorkspaceRoots);
+
 private:
     void wireContextMenu(TerminalDock *dock);
     void placeInEditor(TerminalDock *dock);
+    void rememberDock(TerminalDock *dock);
+    bool forgetDock(QObject *obj);
 
     NotepadNextApplication *m_app;
     MainWindow *m_mainWindow;
     QList<QPointer<TerminalDock>> m_docks;
+    QString m_filterActiveRoot;
+    QStringList m_filterOpenRoots;
+    bool m_shuttingDown = false;
+
 };
 
 #endif

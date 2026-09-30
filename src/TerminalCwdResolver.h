@@ -19,7 +19,9 @@
 #ifndef TERMINALCWDRESOLVER_H
 #define TERMINALCWDRESOLVER_H
 
+#include <QList>
 #include <QString>
+#include <QStringList>
 
 namespace remote { class ExecutionContext; }
 
@@ -47,6 +49,42 @@ public:
     // is local or null: delegates to resolveWorkspace() so the existing local
     // behavior is byte-for-byte preserved. Returns empty on a disabled case.
     static QString resolveForContext(remote::ExecutionContext *ctx, const QString &requested);
+
+    enum class CwdSpace : quint8 { Local, Remote };
+
+    // True iff captured terminal cwd is the workspace root or a descendant.
+    // Local space matches only local (non-ssh) roots. Remote space matches only
+    // ssh:// roots, comparing POSIX cwd (or an ssh:// cwd's remotePath) to the
+    // URI's remotePath.
+    static bool cwdBelongsToWorkspace(const QString &cwd, CwdSpace space, const QString &workspaceRoot);
+
+    // Open workspace root that owns `cwd` (longest matching prefix), or empty.
+    static QString matchingWorkspace(const QString &cwd, CwdSpace space, const QStringList &workspaceRoots);
+
+    // Tab-strip visibility. Filter to the active workspace unless any terminal
+    // matches no open workspace — then every index is visible (no filter).
+    // Empty active root or empty open-roots → all visible.
+    static QList<int> visibleTerminalIndices(const QStringList &cwds,
+                                             const QList<CwdSpace> &spaces,
+                                             const QStringList &workspaceRoots,
+                                             const QString &activeWorkspaceRoot);
+    static bool workspaceRootsEqual(const QString &a, const QString &b);
+
+    // Per-tab want after the unmatched scan. `anyUnmatched` true → show every
+    // tab (no workspace filter). Otherwise only the active workspace's owner.
+    static bool terminalTabWanted(const QString &cwd, CwdSpace space,
+                                  const QStringList &openWorkspaceRoots,
+                                  const QString &activeWorkspaceRoot,
+                                  bool anyUnmatched);
+
+
+    // Terminals owned by `closingWorkspaceRoot` (longest matching prefix among
+    // open roots plus the closing root). Empty closing root → none.
+    static QList<int> closeTerminalIndices(const QStringList &cwds,
+                                           const QList<CwdSpace> &spaces,
+                                           const QStringList &openWorkspaceRoots,
+                                           const QString &closingWorkspaceRoot);
+
 };
 
 #endif

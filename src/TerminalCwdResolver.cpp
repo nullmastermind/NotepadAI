@@ -157,3 +157,159 @@ QString TerminalCwdResolver::resolveForContext(remote::ExecutionContext *ctx, co
     }
     return ctx->resolveCwd(requested);
 }
+
+static Qt::CaseSensitivity localPathCs()
+{
+#ifdef Q_OS_WIN
+    return Qt::CaseInsensitive;
+#else
+    return Qt::CaseSensitive;
+#endif
+}
+
+static bool pathIsUnder(const QString &child, const QString &root, Qt::CaseSensitivity cs)
+{
+    if (root.isEmpty() || child.isEmpty())
+        return false;
+    if (child.compare(root, cs) == 0)
+        return true;
+    if (root == QLatin1Char('/'))
+        return child.startsWith(QLatin1Char('/'));
+    return child.startsWith(root + QLatin1Char('/'), cs);
+}
+
+static QString posixComparable(const QString &path)
+{
+    if (remote::isSshUri(path)) {
+        const remote::SshUri uri = remote::parseSshUri(path);
+        return uri.valid ? QDir::cleanPath(uri.remotePath) : QString();
+    }
+    return QDir::cleanPath(path);
+}
+
+bool TerminalCwdResolver::workspaceRootsEqual(const QString &a, const QString &b)
+{
+    if (a.isEmpty() || b.isEmpty())
+        return false;
+    if (remote::isSshUri(a) || remote::isSshUri(b)) {
+        const remote::SshUri ua = remote::parseSshUri(a);
+        const remote::SshUri ub = remote::parseSshUri(b);
+        return ua.valid && ub.valid && ua.profileId == ub.profileId
+            && QDir::cleanPath(ua.remotePath) == QDir::cleanPath(ub.remotePath);
+    }
+    return QDir::cleanPath(a).compare(QDir::cleanPath(b), localPathCs()) == 0;
+}
+
+
+bool TerminalCwdResolver::cwdBelongsToWorkspace(const QString &cwd, CwdSpace space, const QString &workspaceRoot)
+{
+    if (cwd.isEmpty() || workspaceRoot.isEmpty())
+        return false;
+    if (space == CwdSpace::Local) {
+        if (remote::isSshUri(workspaceRoot) || remote::isSshUri(cwd))
+            return false;
+        return pathIsUnder(QDir::cleanPath(cwd), QDir::cleanPath(workspaceRoot), localPathCs());
+    }
+    if (!remote::isSshUri(workspaceRoot))
+        return false;
+    const remote::SshUri uri = remote::parseSshUri(workspaceRoot);
+    if (!uri.valid)
+        return false;
+    return pathIsUnder(posixComparable(cwd), QDir::cleanPath(uri.remotePath), Qt::CaseSensitive);
+}
+
+QString TerminalCwdResolver::matchingWorkspace(const QString &cwd, CwdSpace space, const QStringList &workspaceRoots)
+{
+    QString best;
+    int bestLen = -1;
+    for (const QString &root : workspaceRoots) {
+        if (!cwdBelongsToWorkspace(cwd, space, root))
+            continue;
+        const QString comparable = (space == CwdSpace::Remote)
+            ? posixComparable(root)
+            : QDir::cleanPath(root);
+        const int len = comparable.size();
+        if (len > bestLen) {
+            bestLen = len;
+            best = root;
+        }
+    }
+    return best;
+}
+
+QList<int> TerminalCwdResolver::visibleTerminalIndices(const QStringList &cwds,
+                                                       const QList<CwdSpace> &spaces,
+                                                       const QStringList &workspaceRoots,
+                                                       const QString &activeWorkspaceRoot)
+{
+    const int n = cwds.size();
+    QList<int> all;
+    all.reserve(n);
+    for (int i = 0; i < n; ++i)
+        all.append(i);
+    if (n == 0 || activeWorkspaceRoot.isEmpty() || workspaceRoots.isEmpty() || spaces.size() != n)
+        return all;
+
+    bool anyUnmatched = false;
+    QList<int> matchedActive;
+    matchedActive.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        const QString owner = matchingWorkspace(cwds.at(i), spaces.at(i), workspaceRoots);
+        if (owner.isEmpty()) {
+            anyUnmatched = true;
+            continue;
+        }
+        if (workspaceRootsEqual(owner, activeWorkspaceRoot))
+            matchedActive.append(i);
+    }
+    if (anyUnmatched)
+        return all;
+    return matchedActive;
+}
+
+bool TerminalCwdResolver::terminalTabWanted(const QString &cwd, CwdSpace space,
+                                            const QStringList &openWorkspaceRoots,
+                                            const QString &activeWorkspaceRoot,
+                                            bool anyUnmatched)
+{
+    if (anyUnmatched || activeWorkspaceRoot.isEmpty() || openWorkspaceRoots.isEmpty())
+        return true;
+    return workspaceRootsEqual(matchingWorkspace(cwd, space, openWorkspaceRoots),
+                               activeWorkspaceRoot);
+}
+
+
+QList<int> TerminalCwdResolver::closeTerminalIndices(const QStringList &cwds,
+                                                     const QList<CwdSpace> &spaces,
+                                                     const QStringList &openWorkspaceRoots,
+                                                     const QString &closingWorkspaceRoot)
+{
+    QList<int> out;
+    const int n = cwds.size();
+    if (closingWorkspaceRoot.isEmpty() || n == 0 || spaces.size() != n)
+        return out;
+
+    const QStringList *roots = &openWorkspaceRoots;
+    QStringList withClosing;
+    bool hasClosing = false;
+    for (const QString &root : openWorkspaceRoots) {
+        if (workspaceRootsEqual(root, closingWorkspaceRoot)) {
+            hasClosing = true;
+            break;
+        }
+    }
+    if (!hasClosing) {
+        withClosing = openWorkspaceRoots;
+        withClosing.append(closingWorkspaceRoot);
+        roots = &withClosing;
+    }
+
+    out.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        const QString owner = matchingWorkspace(cwds.at(i), spaces.at(i), *roots);
+        if (workspaceRootsEqual(owner, closingWorkspaceRoot))
+            out.append(i);
+    }
+    return out;
+}
+

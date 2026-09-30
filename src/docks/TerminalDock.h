@@ -26,6 +26,7 @@
 
 class QToolButton;
 class TerminalWidget;
+namespace ads { class CDockWidget; }
 namespace remote { class ExecutionContext; }
 
 class TerminalDock : public QWidget
@@ -49,6 +50,8 @@ public:
     QString initialCwd() const { return m_initialCwd; }
     void setCwdWarning(const QString &warning) { m_cwdWarning = warning; }
     void restartTask();
+    bool isRemoteSession() const { return m_remoteSession; }
+    ads::CDockWidget *hostDockWidget() const;
 
     // Prompt if a process is still running. Returns false when the user cancels.
     bool confirmClose();
@@ -70,6 +73,7 @@ private:
     // Captured-at-spawn execution context. Null → local terminal. A QPointer so
     // a context torn down underneath us reads null rather than dangling.
     QPointer<remote::ExecutionContext> m_context;
+    bool m_remoteSession = false;
 };
 
 #endif

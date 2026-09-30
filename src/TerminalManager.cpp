@@ -25,6 +25,7 @@
 #include "MainWindow.h"
 #include "NotepadNextApplication.h"
 #include "TerminalAiHelper.h"
+#include "TerminalCwdResolver.h"
 #include "TerminalDock.h"
 #include "TerminalTaskRegistry.h"
 #include "TerminalWidget.h"
@@ -45,6 +46,8 @@
 #include <QMessageBox>
 #include <QScopedPointer>
 #include <QStandardPaths>
+#include <QCoreApplication>
+
 
 TerminalManager::TerminalManager(NotepadNextApplication *app, MainWindow *mainWindow)
     : QObject(mainWindow)
@@ -120,16 +123,7 @@ void TerminalManager::openTerminal(const QString &cwd)
     auto *dock = new TerminalDock(shell, cwd, m_mainWindow);
     wireContextMenu(dock);
 
-    QPointer<TerminalDock> p(dock);
-    m_docks.append(p);
-
-    connect(dock, &QObject::destroyed, this, [this](QObject *obj) {
-        for (int i = m_docks.size() - 1; i >= 0; --i) {
-            if (m_docks[i].isNull() || m_docks[i].data() == obj) {
-                m_docks.removeAt(i);
-            }
-        }
-    });
+    rememberDock(dock);
 
     if (m_app) {
         const TerminalColorScheme scheme = m_app->isEffectiveThemeDark()
@@ -162,16 +156,7 @@ void TerminalManager::openRemoteTerminal(remote::ExecutionContext *ctx,
     auto *dock = new TerminalDock(ctx, shell, remoteCwd, m_mainWindow);
     wireContextMenu(dock);
 
-    QPointer<TerminalDock> p(dock);
-    m_docks.append(p);
-
-    connect(dock, &QObject::destroyed, this, [this](QObject *obj) {
-        for (int i = m_docks.size() - 1; i >= 0; --i) {
-            if (m_docks[i].isNull() || m_docks[i].data() == obj) {
-                m_docks.removeAt(i);
-            }
-        }
-    });
+    rememberDock(dock);
 
     if (m_app) {
         const TerminalColorScheme scheme = m_app->isEffectiveThemeDark()
@@ -282,16 +267,7 @@ void TerminalManager::openTask(const QString &workspaceCwd, const TerminalTask &
         dock->setCwdWarning(cwdWarning);
     wireContextMenu(dock);
 
-    QPointer<TerminalDock> p(dock);
-    m_docks.append(p);
-
-    connect(dock, &QObject::destroyed, this, [this](QObject *obj) {
-        for (int i = m_docks.size() - 1; i >= 0; --i) {
-            if (m_docks[i].isNull() || m_docks[i].data() == obj) {
-                m_docks.removeAt(i);
-            }
-        }
-    });
+    rememberDock(dock);
 
     if (m_app) {
         const TerminalColorScheme scheme = m_app->isEffectiveThemeDark()
@@ -331,16 +307,7 @@ void TerminalManager::openRemoteTask(remote::ExecutionContext *ctx,
     auto *dock = new TerminalDock(ctx, remoteCwd, task.command, task.name, m_mainWindow);
     wireContextMenu(dock);
 
-    QPointer<TerminalDock> p(dock);
-    m_docks.append(p);
-
-    connect(dock, &QObject::destroyed, this, [this](QObject *obj) {
-        for (int i = m_docks.size() - 1; i >= 0; --i) {
-            if (m_docks[i].isNull() || m_docks[i].data() == obj) {
-                m_docks.removeAt(i);
-            }
-        }
-    });
+    rememberDock(dock);
 
     if (m_app) {
         const TerminalColorScheme scheme = m_app->isEffectiveThemeDark()
@@ -394,6 +361,7 @@ void TerminalManager::applyFont()
 
 void TerminalManager::shutdown()
 {
+    m_shuttingDown = true;
     // killProcess() routes to TerminateProcess (Windows) / SIGKILL (POSIX)
     // which mark the child for teardown synchronously at the kernel level.
     // The app is exiting — no downstream operation needs the child actually
@@ -405,6 +373,7 @@ void TerminalManager::shutdown()
         }
     }
 }
+
 
 TerminalDock *TerminalManager::findTaskDock(const QString &command, const QString &cwd) const
 {
@@ -463,22 +432,43 @@ void TerminalManager::setTasks(const QString &workspacePath, const QList<Termina
 void TerminalManager::placeInEditor(TerminalDock *dock)
 {
     DockedEditor *editor = m_mainWindow->getDockedEditor();
+    if (!editor)
+        return;
     ads::CDockWidget *dw = editor->addBottomToolTab(dock, dock->windowTitle(), QIcon());
+    if (!dw)
+        return;
+
 
     connect(dock, &QWidget::windowTitleChanged, dw, [dw](const QString &title) {
         dw->setWindowTitle(title);
     });
 
     dw->setFeature(ads::CDockWidget::DockWidgetFeature::CustomCloseHandling, true);
-    connect(dw, &ads::CDockWidget::closeRequested, dock, [dock, dw]() {
-        if (dock->confirmClose())
+    connect(dw, &ads::CDockWidget::closeRequested, this,
+            [this, dock = QPointer<TerminalDock>(dock),
+             dw = QPointer<ads::CDockWidget>(dw)]() {
+        if (dock.isNull())
+            return;
+        if (!dock->confirmClose())
+            return;
+        // confirmClose runs a nested event loop; workspace close may have
+        // already forgotten and queued delete on this tab.
+        if (dock.isNull())
+            return;
+        const bool removed = forgetDock(dock.data());
+        if (!dw.isNull())
             dw->closeDockWidget();
+        else if (!dock.isNull())
+            dock->deleteLater();
+        if (removed)
+            applyWorkspaceFilter(m_filterActiveRoot, m_filterOpenRoots);
     });
 
     dw->toggleView(true);
     dw->raise();
     if (auto *tw = dock->terminalWidget())
         tw->setFocus();
+    applyWorkspaceFilter(m_filterActiveRoot, m_filterOpenRoots);
 }
 
 void TerminalManager::wireContextMenu(TerminalDock *dock)
@@ -501,3 +491,125 @@ void TerminalManager::wireContextMenu(TerminalDock *dock)
         });
     });
 }
+
+void TerminalManager::rememberDock(TerminalDock *dock)
+{
+    m_docks.append(QPointer<TerminalDock>(dock));
+    connect(dock, &QObject::destroyed, this, [this](QObject *obj) {
+        if (forgetDock(obj))
+            applyWorkspaceFilter(m_filterActiveRoot, m_filterOpenRoots);
+    });
+}
+
+bool TerminalManager::forgetDock(QObject *obj)
+{
+    if (!obj)
+        return false;
+    bool removed = false;
+    for (int i = m_docks.size() - 1; i >= 0; --i) {
+        if (m_docks[i].isNull() || m_docks[i].data() == obj) {
+            m_docks.removeAt(i);
+            removed = true;
+        }
+    }
+    return removed;
+}
+
+void TerminalManager::applyWorkspaceFilter(const QString &activeWorkspaceRoot,
+                                           const QStringList &openWorkspaceRoots)
+{
+    if (m_shuttingDown || QCoreApplication::closingDown())
+        return;
+    m_filterActiveRoot = activeWorkspaceRoot;
+    m_filterOpenRoots = openWorkspaceRoots;
+
+
+    // Two linear passes over live docks. No cwd/space/index scratch lists —
+    // ADS toggleView/layout dominates. N is the open terminal count (tens).
+    bool anyUnmatched = activeWorkspaceRoot.isEmpty() || openWorkspaceRoots.isEmpty();
+    if (!anyUnmatched) {
+        for (const auto &d : m_docks) {
+            if (d.isNull())
+                continue;
+            const auto space = d->isRemoteSession()
+                                   ? TerminalCwdResolver::CwdSpace::Remote
+                                   : TerminalCwdResolver::CwdSpace::Local;
+            if (TerminalCwdResolver::matchingWorkspace(d->initialCwd(), space, m_filterOpenRoots)
+                    .isEmpty()) {
+                anyUnmatched = true;
+                break;
+            }
+        }
+    }
+
+    for (const auto &d : m_docks) {
+        if (d.isNull())
+            continue;
+        ads::CDockWidget *dw = d->hostDockWidget();
+        if (!dw)
+            continue;
+        const auto space = d->isRemoteSession()
+                               ? TerminalCwdResolver::CwdSpace::Remote
+                               : TerminalCwdResolver::CwdSpace::Local;
+        const bool want = TerminalCwdResolver::terminalTabWanted(
+            d->initialCwd(), space, m_filterOpenRoots, m_filterActiveRoot, anyUnmatched);
+        if (want) {
+            if (dw->isClosed())
+                dw->toggleView(true);
+        } else if (!dw->isClosed()) {
+            dw->toggleView(false);
+        }
+    }
+}
+
+
+void TerminalManager::closeTerminalsForWorkspace(const QString &workspaceRoot,
+                                                 const QStringList &openWorkspaceRoots)
+{
+    if (workspaceRoot.isEmpty())
+        return;
+
+    QStringList cwds;
+    QList<TerminalCwdResolver::CwdSpace> spaces;
+    QList<QPointer<TerminalDock>> live;
+    const int n = m_docks.size();
+    cwds.reserve(n);
+    spaces.reserve(n);
+    live.reserve(n);
+    for (const auto &d : m_docks) {
+        if (d.isNull())
+            continue;
+        live.append(d);
+        cwds.append(d->initialCwd());
+        spaces.append(d->isRemoteSession()
+                          ? TerminalCwdResolver::CwdSpace::Remote
+                          : TerminalCwdResolver::CwdSpace::Local);
+    }
+
+    const QList<int> idxs = TerminalCwdResolver::closeTerminalIndices(
+        cwds, spaces, openWorkspaceRoots, workspaceRoot);
+    QList<QPointer<TerminalDock>> toClose;
+    toClose.reserve(idxs.size());
+    for (int idx : idxs) {
+        if (idx >= 0 && idx < live.size() && !live.at(idx).isNull())
+            toClose.append(live.at(idx));
+    }
+
+    for (const QPointer<TerminalDock> &dock : toClose)
+        forgetDock(dock.data());
+
+    for (const QPointer<TerminalDock> &dock : toClose) {
+        if (dock.isNull())
+            continue;
+        if (auto *w = dock->terminalWidget())
+            w->killProcess();
+        if (dock.isNull())
+            continue;
+        if (ads::CDockWidget *dw = dock->hostDockWidget())
+            dw->closeDockWidget();
+        else
+            dock->deleteLater();
+    }
+}
+
+

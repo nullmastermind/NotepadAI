@@ -58,6 +58,7 @@ TerminalDock::TerminalDock(remote::ExecutionContext *ctx, const QString &shell, 
     , m_initialCwd(cwd)
     , m_shell(shell)
     , m_context(ctx)
+    , m_remoteSession(true)
 {
     init(shell, cwd);
 }
@@ -70,6 +71,7 @@ TerminalDock::TerminalDock(remote::ExecutionContext *ctx, const QString &remoteC
     , m_taskCommand(taskCommand)
     , m_taskName(taskName.isEmpty() ? taskCommand : taskName)
     , m_context(ctx)
+    , m_remoteSession(true)
 {
     init(QString(), remoteCwd);
     setupTaskTitleBar();
@@ -205,15 +207,19 @@ bool TerminalDock::confirmClose()
     return true;
 }
 
+ads::CDockWidget *TerminalDock::hostDockWidget() const
+{
+    for (QWidget *w = const_cast<TerminalDock *>(this); w; w = w->parentWidget()) {
+        if (auto *dw = qobject_cast<ads::CDockWidget *>(w))
+            return dw;
+    }
+    return nullptr;
+}
+
 void TerminalDock::reveal()
 {
-    QWidget *w = this;
-    while (w) {
-        if (auto *dw = qobject_cast<ads::CDockWidget *>(w)) {
-            dw->toggleView(true);
-            dw->raise();
-            return;
-        }
-        w = w->parentWidget();
+    if (ads::CDockWidget *dw = hostDockWidget()) {
+        dw->toggleView(true);
+        dw->raise();
     }
 }

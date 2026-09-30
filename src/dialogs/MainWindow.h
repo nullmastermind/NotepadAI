@@ -278,6 +278,8 @@ private:
     void wireWorkspaceGitSignals(FolderAsWorkspaceDock *dock);
     FolderAsWorkspaceDock *activeWorkspaceDock() const;
     QString currentWorkspaceRoot() const;
+    QStringList openWorkspaceRoots() const;
+    void syncTerminalWorkspaceFilter(const FolderAsWorkspaceDock *exclude = nullptr);
 
     // Resolve which open workspace dock should host a "Show in Workspace"
     // reveal of the given file. Walks all open workspace docks (findChildren)

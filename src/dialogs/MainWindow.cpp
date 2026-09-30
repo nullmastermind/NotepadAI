@@ -1761,6 +1761,10 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
     terminalManager = new TerminalManager(app, this);
     connect(app, &NotepadNextApplication::effectiveThemeChanged, terminalManager, &TerminalManager::applyTheme);
     connect(app->getSettings(), &ApplicationSettings::terminalFontChanged, terminalManager, &TerminalManager::applyFont);
+    connect(this, &MainWindow::activeWorkspaceChanged, this,
+            [this](FolderAsWorkspaceDock *, FolderAsWorkspaceDock *) {
+                syncTerminalWorkspaceFilter();
+            });
     ui->actionOpenTerminalInWorkspace->setEnabled(false);
     ui->actionOpenTerminalInFolder->setEnabled(false);
 
@@ -2761,6 +2765,9 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             [this](const QString &path, FolderAsWorkspaceDock *self) {
         if (path.isEmpty() || !self) return;
 
+        if (terminalManager)
+            terminalManager->closeTerminalsForWorkspace(path, openWorkspaceRoots());
+
         // Tear down the SSH connection when an SSH workspace closes so the
         // bulk SFTP lane (and any wedged ops) is fully reset. Without this,
         // the SshConnection stays alive in State::Ready and re-opening the
@@ -2784,7 +2791,9 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         // The dirty bit no longer needs flushing for THIS dock — its state
         // just went to disk. Leave the bit for other docks that may still
         // have unflushed changes.
+        syncTerminalWorkspaceFilter(self);
     });
+
 
     // User-driven tree / tab changes mark the workspace state dirty so the
     // 60s autosave timer flushes them (defense vs crash mid-session).
@@ -3847,6 +3856,43 @@ QString MainWindow::currentWorkspaceRoot() const
 {
     FolderAsWorkspaceDock *dock = activeWorkspaceDock();
     return dock ? dock->rootPath() : QString();
+}
+
+QStringList MainWindow::openWorkspaceRoots() const
+{
+    QStringList roots;
+    const auto docks = findChildren<FolderAsWorkspaceDock *>();
+    roots.reserve(docks.size());
+    for (FolderAsWorkspaceDock *d : docks) {
+        const QString p = d->rootPath();
+        if (!p.isEmpty())
+            roots.append(p);
+    }
+    return roots;
+}
+
+void MainWindow::syncTerminalWorkspaceFilter(const FolderAsWorkspaceDock *exclude)
+{
+    if (m_isClosing || QCoreApplication::closingDown())
+        return;
+    if (!terminalManager)
+        return;
+
+    QStringList roots;
+    QString activeRoot;
+    const auto docks = findChildren<FolderAsWorkspaceDock *>();
+    roots.reserve(docks.size());
+    for (FolderAsWorkspaceDock *d : docks) {
+        if (d == exclude)
+            continue;
+        const QString p = d->rootPath();
+        if (p.isEmpty())
+            continue;
+        roots.append(p);
+        if (d == m_activeWorkspace.data())
+            activeRoot = p;
+    }
+    terminalManager->applyWorkspaceFilter(activeRoot, roots);
 }
 
 remote::ExecutionContext *MainWindow::activeExecutionContext() const

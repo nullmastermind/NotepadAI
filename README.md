@@ -18,7 +18,8 @@ Inline blame, gutter diff markers, commit history, staging and unstaging (includ
 
 ### Terminal
 
-A PTY terminal built on libvterm and libptyqt, with mouse reporting and a scrollback buffer. New terminals open as a bottom tab under the editor. Programs launched from a local terminal share a memory ceiling (16 GB by default, changeable under Preferences → Terminal) so a runaway process is stopped instead of exhausting the machine. It reads Justfile, Makefile, package.json, and deno.json, finds which tasks you can run, and draws clickable run icons in the editor margin. Open a terminal at the active workspace or at the current file's folder.
+A PTY terminal built on libvterm and libptyqt, with mouse reporting and a scrollback buffer. New terminals open as a bottom tab under the editor. The tab strip follows the raised workspace: only terminals whose working directory belongs to that folder (or a nested workspace, longest match) are shown. If any open terminal sits outside every workspace, the filter turns off and every tab stays visible. Closing a workspace closes its terminals. Programs launched from a local terminal share a memory ceiling (16 GB by default, changeable under Preferences → Terminal) so a runaway process is stopped instead of exhausting the machine. It reads Justfile, Makefile, package.json, and deno.json, finds which tasks you can run, and draws clickable run icons in the editor margin. Open a terminal at the active workspace or at the current file's folder.
+
 
 ### Editor
 
