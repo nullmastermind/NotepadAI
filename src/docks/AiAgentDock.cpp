@@ -220,6 +220,15 @@ void AiAgentDock::wireSlotSignals(Slot &slot)
         connect(slot.view, &AcpSessionView::cancelRequested,
                 this, &AiAgentDock::stopGoalAgentIfActive,
                 Qt::UniqueConnection);
+        connect(slot.view, &AcpSessionView::deferredGoalDispatched,
+                this, &AiAgentDock::onDeferredGoalDispatched,
+                Qt::UniqueConnection);
+        connect(slot.view, &AcpSessionView::deferredGoalRemoved,
+                this, &AiAgentDock::onDeferredGoalRemoved,
+                Qt::UniqueConnection);
+        connect(slot.view, &AcpSessionView::promptQueueChanged,
+                this, &AiAgentDock::onPromptQueueChanged,
+                Qt::UniqueConnection);
         connect(slot.view, &AcpSessionView::inputFocused,
                 this, &AiAgentDock::inputFocused,
                 Qt::UniqueConnection);
@@ -260,8 +269,35 @@ void AiAgentDock::stopGoalAgentIfActive()
 
 void AiAgentDock::onNativeGoalPromptEnded()
 {
-    Slot *slot = slotForConnection(sender());
-    if (!slot || !slot->nativeAutoCompact)
+    maybeSendNativeAutoCompact(slotForConnection(sender()));
+}
+
+void AiAgentDock::onDeferredGoalDispatched()
+{
+    Slot *slot = slotForView(qobject_cast<AcpSessionView *>(sender()));
+    if (slot && slot->goal)
+        slot->goal->noteDeferredGoalDispatched();
+}
+
+void AiAgentDock::onDeferredGoalRemoved()
+{
+    Slot *slot = slotForView(qobject_cast<AcpSessionView *>(sender()));
+    if (slot && slot->goal)
+        slot->goal->noteDeferredGoalDropped();
+}
+
+void AiAgentDock::onPromptQueueChanged()
+{
+    maybeSendNativeAutoCompact(slotForView(qobject_cast<AcpSessionView *>(sender())));
+}
+
+void AiAgentDock::maybeSendNativeAutoCompact(Slot *slot)
+{
+    if (!slot || !slot->nativeAutoCompact || !slot->connection)
+        return;
+    if (slot->model && slot->model->isProcessing())
+        return;
+    if (slot->view && slot->view->queuedPromptCount() > 0)
         return;
     slot->nativeAutoCompact = false;
     GoalAgent::sendAutoCompactTo(slot->connection, slot->model);
@@ -1049,6 +1085,15 @@ bool AiAgentDock::attachGoalAgent(GoalAgent *goal, const QString &sessionId)
             return text;
         return view->applyNewWorktreeInstruction(text);
     });
+    QPointer<GoalAgent> goalPtr = goal;
+    connect(goal, &GoalAgent::goalFollowUpQueued, this, [view, goalPtr](const QString &text) {
+        if (view) {
+            view->enqueueFollowUp(text, true);
+            return;
+        }
+        if (goalPtr)
+            goalPtr->noteDeferredGoalDropped();
+    });
 
     const QString sid = slot->sessionId;
     connect(slot->goal, &GoalAgent::debugLogEntry, this, [this](const QString &entry) {
@@ -1216,7 +1261,16 @@ void AiAgentDock::sendWithGoal()
                                          : composerText;
             live->connection->sendPrompt(wireText, imageList);
         }
+        // Re-read processing each command: SendNow opens a turn, so the next
+        // /goal must queue instead of stopping that turn.
         for (const QString &goalCommand : goalCommands) {
+            if (GoalAgent::mustQueueGoalFollowUp(live->model->isProcessing(),
+                                                 live->model->agentAdvertisesGoalCommand(),
+                                                 goalCommand)) {
+                if (live->view)
+                    live->view->enqueueFollowUp(goalCommand, false);
+                continue;
+            }
             live->model->appendUserMessage(goalCommand, {});
             const QString wireGoal = live->view
                                          ? live->view->applyNewWorktreeInstruction(goalCommand)

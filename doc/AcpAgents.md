@@ -100,7 +100,7 @@ Stderr from the child agent is captured and logged with a `[<sessionId>]` prefix
 
 **Inbound notifications**: `session/update` carries `agent_message_chunk`, `agent_thought_chunk`, `tool_call`, `tool_call_update`, `plan`, `available_commands_update`, `current_mode_update`, `session_info_update`, `prompt_start`, `prompt_end`. Unknown variants are silently dropped.
 
-Host `/goal`: `ensureHostGoalCommand` prepends `goal` when `initialize` / `available_commands_update` omit it (omp ACP drops TUI-only `/goal`). Agent-provided `goal`/`/goal` is kept. Composer `/goal` while a turn is in flight is a native side-prompt only if the agent advertised the command; otherwise it enqueues like any other message (text already has the `/goal` prefix).
+Host `/goal`: `ensureHostGoalCommand` prepends `goal` when `initialize` / `available_commands_update` omit it (omp ACP drops TUI-only `/goal`). Agent-provided `goal`/`/goal` is kept. Composer `/goal` and Send with Goal, while a turn is in flight, are a native side-prompt only if the agent advertised the command; otherwise they enqueue on the composer queue (text already has the `/goal` prefix). A second `session/prompt` while a turn is open stops agents that do not support `/goal`.
 
 
 ## Tool-call UI normalization (`omp acp` vs Claude/Codex)

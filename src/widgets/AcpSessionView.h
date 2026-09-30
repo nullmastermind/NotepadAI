@@ -98,6 +98,10 @@ public:
     void setGoalActive(int criterionIndex, int totalCriteria, int iteration, int maxIterations);
     void setGoalTerminal(const QString &statusText);
     void clearGoalStatus();
+    // Same queue as a composer send while a turn is running. Does not
+    // session/prompt now — that write stops agents that do not support /goal.
+    void enqueueFollowUp(const QString &text, bool fromGoalAgent = false);
+    int queuedPromptCount() const;
 
     // Detach from the current model + connection and re-attach to a new pair
     // (typically after AcpAgentManager::restartSession). Clears the
@@ -119,6 +123,10 @@ signals:
     // torn down together.
     void cancelRequested();
     void inputFocused();
+    // A fromGoalAgent queue item was sent (turn now open) or removed.
+    void deferredGoalDispatched();
+    void deferredGoalRemoved();
+    void promptQueueChanged();
 
 private slots:
     void onShowDebugLogClicked();
@@ -189,7 +197,8 @@ private:
     void scheduleFlushQueuedPrompt();
     void flushQueuedPrompt();
     void dispatchPrompt(const QString &text,
-                        const QVector<QPair<QByteArray, QString>> &images);
+                        const QVector<QPair<QByteArray, QString>> &images,
+                        bool fromGoalAgent = false);
     bool inputKeyEventIsSubmit(QKeyEvent *ke) const;
     // Heartbeat indicator at the tail of the transcript: shows time since the
     // last structural event (new message / thought / tool call / plan /

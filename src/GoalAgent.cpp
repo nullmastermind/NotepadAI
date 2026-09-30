@@ -206,9 +206,40 @@ void GoalAgent::sendFirstCriterionGoal()
     if (m_criteria.isEmpty() || !m_targetConnection)
         return;
     const QString sent = prefixGoalMessage(m_criteria[0].text);
+    const bool processing = m_targetModel && m_targetModel->isProcessing();
+    const bool advertises = m_targetModel && m_targetModel->agentAdvertisesGoalCommand();
+    if (mustQueueGoalFollowUp(processing, advertises, sent)) {
+        m_deferredPrefixGoal = true;
+        emit goalFollowUpQueued(sent);
+        return;
+    }
     if (m_targetModel)
         m_targetModel->appendUserMessage(sent, {}, /*fromGoalAgent=*/true);
     m_targetConnection->sendSidePrompt(wireTextForTarget(sent));
+}
+
+bool GoalAgent::mustQueueGoalFollowUp(bool processing, bool agentAdvertisesGoal,
+                                      const QString &text)
+{
+    return processing && !text.isEmpty()
+        && !nativeGoalUsesSidePrompt(text, agentAdvertisesGoal);
+}
+
+void GoalAgent::noteDeferredGoalDispatched()
+{
+    m_deferredPrefixGoal = false;
+}
+
+void GoalAgent::noteDeferredGoalDropped()
+{
+    if (!m_deferredPrefixGoal)
+        return;
+    m_deferredPrefixGoal = false;
+    if (m_status != Active || m_awaitingJudgeResponse || m_awaitingAuthoring)
+        return;
+    if (m_targetModel && m_targetModel->isProcessing())
+        return;
+    evaluateCurrentCriterion();
 }
 
 void GoalAgent::stop()
@@ -312,6 +343,10 @@ void GoalAgent::onTargetPromptEnded()
     }
     if (m_awaitingAuthoring) {
         logDebug(QStringLiteral("onTargetPromptEnded: skipped (awaiting authoring)"));
+        return;
+    }
+    if (m_deferredPrefixGoal) {
+        logDebug(QStringLiteral("onTargetPromptEnded: skipped (deferred /goal still queued)"));
         return;
     }
     logDebug(QStringLiteral("onTargetPromptEnded: evaluating criterion %1").arg(m_currentCriterionIndex));

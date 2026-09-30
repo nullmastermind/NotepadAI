@@ -67,9 +67,16 @@ public:
     bool start(const StartRequest &req);
     void stop();
     void setTargetSession(AcpConnection *conn, AcpSessionModel *model);
-    // When prefixGoal is on, send `/goal <first criterion>` now (side prompt
-    // if a turn is already in flight). Later criteria still wait for Achieved.
+    // When prefixGoal is on, deliver `/goal <first criterion>`. Side-prompt
+    // only if the agent advertised `/goal`. Otherwise, while a turn is running,
+    // emit goalFollowUpQueued instead of session/prompt (that write stops the
+    // running turn). Later criteria still wait for Achieved.
     void sendFirstCriterionGoal();
+    // Composer queue finished sending the deferred `/goal`, or the user
+    // removed it. Until one of these, a turn end must not judge — the goal
+    // has not been delivered yet.
+    void noteDeferredGoalDispatched();
+    void noteDeferredGoalDropped();
 
     // Composer + session state → whether Goal sends a new prompt, attaches to
     // the existing turn, or refuses. Processing never sends (no stacked prompt).
@@ -121,6 +128,11 @@ public:
     static bool isNativeGoalSlash(const QString &text);
     // Side-prompt `/goal` only when the ACP agent advertised the command.
     static bool nativeGoalUsesSidePrompt(const QString &text, bool agentAdvertisesGoal);
+    // True when a follow-up must wait on the composer queue. A second
+    // session/prompt while a turn is open stops agents that did not advertise
+    // /goal. O(1); no allocation.
+    static bool mustQueueGoalFollowUp(bool processing, bool agentAdvertisesGoal,
+                                      const QString &text);
 
     // Prepend "/goal " unless text is empty or already a /goal command.
     static QString prefixGoalMessage(const QString &text);
@@ -145,6 +157,9 @@ signals:
     void iterationChanged(int criterionIndex, int iteration);
     void debugLogEntry(const QString &entry);
     void httpJudgeBusyChanged(bool busy);
+    // Display text for a `/goal` that must wait on the composer queue. Not
+    // appended to the transcript until the queue flushes.
+    void goalFollowUpQueued(const QString &text);
 
 private slots:
     void onTargetPromptEnded();
@@ -196,6 +211,7 @@ private:
     QString m_promptTemplateId;
     bool m_autoCompact = false;
     bool m_prefixGoal = false;
+    bool m_deferredPrefixGoal = false;
     QString m_originalUserMessage;
     QString m_developerRequests;
     QString m_lastActionText;

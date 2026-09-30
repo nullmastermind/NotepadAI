@@ -40,6 +40,9 @@ public:
     struct Item {
         QString text;
         QVector<QPair<QByteArray, QString>> images;
+        // Flushed as a goal-agent message so the badge and judge handshake match
+        // a side-prompt that was deferred onto this queue.
+        bool fromGoalAgent = false;
     };
 
     static SendKind classifySend(bool processing, bool hasContent, bool nativeGoalSlash);

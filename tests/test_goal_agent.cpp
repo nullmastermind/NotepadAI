@@ -100,6 +100,11 @@ private slots:
     void isNativeGoalSlash_matchesGoalCommandOnly();
     void prefixGoalMessage_prefixesUnlessAlreadyGoal();
     void nativeGoalUsesSidePrompt_onlyWhenAgentAdvertisesGoal();
+    void sendFirstCriterionGoal_turnInFlight_withoutAdvertisedGoal_queuesInsteadOfSending();
+    void deferredGoal_turnEnd_doesNotJudgeBeforeDispatch();
+    void mustQueueGoalFollowUp_onlyWhenBusyAndAgentOmitsGoal();
+    void sendFirstCriterionGoal_turnInFlight_advertisedGoal_sidePrompts();
+    void deferredGoal_afterDispatch_turnEndJudges();
 
     void sidePrompt_whileTurnInFlight_doesNotEndTurn();
     void sidePrompts_twoGoalsWhileTurnInFlight_bothGoOutImmediately();
@@ -541,6 +546,178 @@ void TestGoalAgent::sendFirstCriterionGoal_withPrefixGoal_sendsImmediatelyWithou
     QVERIFY(channel->written.contains("\"/goal hi in Vietnamese\""));
     QCOMPARE(goal.currentCriterionIndex(), 0);
     QVERIFY(!channel->written.contains("\"/goal hi in Japanese\""));
+}
+
+void TestGoalAgent::sendFirstCriterionGoal_turnInFlight_withoutAdvertisedGoal_queuesInsteadOfSending()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+    target.setSessionIdForTest(QStringLiteral("s1"));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    connect(&target, &AcpConnection::promptStarted,
+            &model, &AcpSessionModel::onPromptStarted);
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("hi in Vietnamese"),
+                                          QStringLiteral("hi in Japanese")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.prefixGoal = true;
+    QVERIFY(goal.start(req));
+
+    QSignalSpy queued(&goal, &GoalAgent::goalFollowUpQueued);
+    target.sendPrompt(QStringLiteral("do the work"), {});
+    QVERIFY(model.isProcessing());
+    QVERIFY(!model.agentAdvertisesGoalCommand());
+    const int messagesBefore = model.messages().size();
+
+    goal.sendFirstCriterionGoal();
+
+    QCOMPARE(queued.count(), 1);
+    QCOMPARE(queued.at(0).at(0).toString(), QStringLiteral("/goal hi in Vietnamese"));
+    QVERIFY(!channel->written.contains("\"/goal hi in Vietnamese\""));
+    QCOMPARE(model.messages().size(), messagesBefore);
+    QVERIFY(!channel->written.contains("\"/goal hi in Japanese\""));
+}
+
+void TestGoalAgent::deferredGoal_turnEnd_doesNotJudgeBeforeDispatch()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+    target.setSessionIdForTest(QStringLiteral("s1"));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    model.appendUserMessage(QStringLiteral("do the work"), {});
+    model.onPromptStarted();
+    goal.setTargetSession(&target, &model);
+
+    QSignalSpy logs(&goal, &GoalAgent::debugLogEntry);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("hi in Vietnamese")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.prefixGoal = true;
+    req.attachToExistingConversation = true;
+    QVERIFY(goal.start(req));
+    QVERIFY(model.isProcessing());
+    QVERIFY(!channel->written.contains("\"/goal hi in Vietnamese\""));
+
+    goal.onTargetPromptEnded();
+
+    bool evaluated = false;
+    for (const auto &row : logs) {
+        const QString line = row.at(0).toString();
+        if (line.contains(QLatin1String("evaluating criterion"))
+            || line.contains(QLatin1String("evaluateViaHttp"))
+            || line.contains(QLatin1String("evaluateCurrentCriterion")))
+            evaluated = true;
+    }
+    QVERIFY(!evaluated);
+}
+
+void TestGoalAgent::mustQueueGoalFollowUp_onlyWhenBusyAndAgentOmitsGoal()
+{
+    QVERIFY(GoalAgent::mustQueueGoalFollowUp(true, false, QStringLiteral("/goal x")));
+    QVERIFY(!GoalAgent::mustQueueGoalFollowUp(true, true, QStringLiteral("/goal x")));
+    QVERIFY(!GoalAgent::mustQueueGoalFollowUp(false, false, QStringLiteral("/goal x")));
+    QVERIFY(!GoalAgent::mustQueueGoalFollowUp(true, false, QString()));
+    QVERIFY(GoalAgent::mustQueueGoalFollowUp(true, true, QStringLiteral("hello")));
+}
+
+void TestGoalAgent::sendFirstCriterionGoal_turnInFlight_advertisedGoal_sidePrompts()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+    target.setSessionIdForTest(QStringLiteral("s1"));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    AcpProtocol::AcpCommandInfo agentGoal;
+    agentGoal.name = QStringLiteral("/goal");
+    model.onAvailableCommandsUpdated({agentGoal});
+    QVERIFY(model.agentAdvertisesGoalCommand());
+    connect(&target, &AcpConnection::promptStarted,
+            &model, &AcpSessionModel::onPromptStarted);
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("hi in Vietnamese")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.prefixGoal = true;
+    QVERIFY(goal.start(req));
+
+    QSignalSpy queued(&goal, &GoalAgent::goalFollowUpQueued);
+    target.sendPrompt(QStringLiteral("do the work"), {});
+    QVERIFY(model.isProcessing());
+    goal.sendFirstCriterionGoal();
+
+    QCOMPARE(queued.count(), 0);
+    QVERIFY(channel->written.contains("\"/goal hi in Vietnamese\""));
+    QCOMPARE(model.messages().last().fromGoalAgent, true);
+    QCOMPARE(model.messages().last().content.first().text,
+             QStringLiteral("/goal hi in Vietnamese"));
+}
+
+void TestGoalAgent::deferredGoal_afterDispatch_turnEndJudges()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *channel = new RecordingChannel(&target);
+    target.attachChannelForTest(channel);
+    channel->start();
+    target.setSessionIdForTest(QStringLiteral("s1"));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    model.appendUserMessage(QStringLiteral("do the work"), {});
+    model.onPromptStarted();
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("hi in Vietnamese")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    req.prefixGoal = true;
+    req.attachToExistingConversation = true;
+    QVERIFY(goal.start(req));
+
+    goal.noteDeferredGoalDispatched();
+    QSignalSpy logs(&goal, &GoalAgent::debugLogEntry);
+    goal.onTargetPromptEnded();
+
+    bool evaluated = false;
+    for (const auto &row : logs) {
+        if (row.at(0).toString().contains(QLatin1String("evaluating criterion")))
+            evaluated = true;
+    }
+    QVERIFY(evaluated);
 }
 
 void TestGoalAgent::sendFirstCriterionGoal_withoutPrefixGoal_isNoOp()

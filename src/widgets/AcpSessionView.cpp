@@ -517,8 +517,14 @@ void AcpSessionView::buildUi()
 
     m_queueStrip = new AcpPromptQueueStrip(this);
     connect(m_queueStrip, &AcpPromptQueueStrip::removeRequested, this, [this](int index) {
+        if (index < 0 || index >= m_promptQueue.size())
+            return;
+        const bool deferredGoal = m_promptQueue.items().at(index).fromGoalAgent;
         m_promptQueue.removeAt(index);
         refreshQueueStrip();
+        if (deferredGoal)
+            emit deferredGoalRemoved();
+        emit promptQueueChanged();
     });
     outer->addWidget(m_queueStrip);
 
@@ -1784,16 +1790,39 @@ void AcpSessionView::flushQueuedPrompt()
     if (!item)
         return;
     refreshQueueStrip();
-    dispatchPrompt(item->text, item->images);
+    const bool fromGoalAgent = item->fromGoalAgent;
+    dispatchPrompt(item->text, item->images, fromGoalAgent);
+    if (fromGoalAgent)
+        emit deferredGoalDispatched();
+}
+
+void AcpSessionView::enqueueFollowUp(const QString &text, bool fromGoalAgent)
+{
+    if (text.isEmpty())
+        return;
+    AcpPromptQueue::Item item;
+    item.text = text;
+    item.fromGoalAgent = fromGoalAgent;
+    m_promptQueue.enqueue(std::move(item));
+    refreshQueueStrip();
+    emit promptQueueChanged();
+    if (!m_model || !m_model->isProcessing())
+        scheduleFlushQueuedPrompt();
+}
+
+int AcpSessionView::queuedPromptCount() const
+{
+    return m_promptQueue.size();
 }
 
 void AcpSessionView::dispatchPrompt(const QString &text,
-                                    const QVector<QPair<QByteArray, QString>> &images)
+                                    const QVector<QPair<QByteArray, QString>> &images,
+                                    bool fromGoalAgent)
 {
     if (!m_connection || !m_model)
         return;
     const QString wireText = applyNewWorktreeInstruction(text);
-    m_model->appendUserMessage(text, images);
+    m_model->appendUserMessage(text, images, fromGoalAgent);
     QList<QPair<QByteArray, QString>> imageList;
     imageList.reserve(images.size());
     for (const auto &p : images)

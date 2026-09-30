@@ -154,6 +154,9 @@ private slots:
     // button and the composer Cancel button. No-op when no goal is active.
     void stopGoalAgentIfActive();
     void onNativeGoalPromptEnded();
+    void onDeferredGoalDispatched();
+    void onDeferredGoalRemoved();
+    void onPromptQueueChanged();
 
 private:
     struct Slot {
@@ -173,6 +176,7 @@ private:
     void refreshTitle();
     void refreshProjectTooltip();
     void wireSlotSignals(Slot &slot);
+    void maybeSendNativeAutoCompact(Slot *slot);
     void unwireSlot(Slot &slot);
     void destroySlotGoal(Slot &slot);
     Slot *currentSlot();

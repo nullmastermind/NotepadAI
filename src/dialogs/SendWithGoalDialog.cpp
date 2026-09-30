@@ -66,7 +66,9 @@ SendWithGoalDialog::SendWithGoalDialog(AcpAgentRegistry *registry,
     m_useNativeGoalCheck = new QCheckBox(tr("Use Native Goal"), this);
     m_useNativeGoalCheck->setObjectName(QStringLiteral("useNativeGoalCheck"));
     m_useNativeGoalCheck->setToolTip(
-        tr("Send /goal to the ACP agent after your prompt. No goal-agent UI."));
+        tr("Send /goal to the ACP agent after your prompt. No goal-agent UI. "
+           "If the agent did not advertise /goal, the command waits on the message queue "
+           "instead of stopping the running turn."));
     m_useNativeGoalCheck->setChecked(true);
     if (m_settings) {
         const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
@@ -97,7 +99,9 @@ SendWithGoalDialog::SendWithGoalDialog(AcpAgentRegistry *registry,
     m_prefixGoalCheck->setObjectName(QStringLiteral("prefixGoalCheck"));
     m_prefixGoalCheck->setToolTip(
         tr("Prepend /goal to messages the goal-agent sends. "
-           "The first criterion is sent immediately; later ones wait until the previous is achieved."));
+           "If the agent advertised /goal, the first criterion is a side-prompt. "
+           "Otherwise it waits on the message queue so it does not stop the running turn. "
+           "Later criteria wait until the previous is achieved."));
     if (m_settings) {
         const QString settingsJson = m_settings->get("Ai/GoalAgentSettings", QString());
         if (!settingsJson.isEmpty()) {

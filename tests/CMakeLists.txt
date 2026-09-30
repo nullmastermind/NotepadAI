@@ -1880,6 +1880,8 @@ target_sources(test_goal_agent PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpHistoryStore.h
     ${CMAKE_SOURCE_DIR}/src/AcpProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpProtocol.h
+    ${CMAKE_SOURCE_DIR}/src/AcpPromptQueue.cpp
+    ${CMAKE_SOURCE_DIR}/src/AcpPromptQueue.h
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpSessionModel.h
     ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
