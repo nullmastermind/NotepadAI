@@ -47,6 +47,9 @@
 #include <QScopedPointer>
 #include <QStandardPaths>
 #include <QCoreApplication>
+#include <QTimer>
+#include <QHash>
+
 
 
 TerminalManager::TerminalManager(NotepadNextApplication *app, MainWindow *mainWindow)
@@ -54,7 +57,13 @@ TerminalManager::TerminalManager(NotepadNextApplication *app, MainWindow *mainWi
     , m_app(app)
     , m_mainWindow(mainWindow)
 {
+    m_statsTimer = new QTimer(this);
+    m_statsTimer->setInterval(TerminalProcessStats::statsPollMs(false));
+    m_statsTimer->setTimerType(Qt::CoarseTimer);
+    connect(m_statsTimer, &QTimer::timeout, this, &TerminalManager::refreshProcessStats);
+    m_statsTimer->start();
 }
+
 
 TerminalManager::~TerminalManager() = default;
 
@@ -362,6 +371,9 @@ void TerminalManager::applyFont()
 void TerminalManager::shutdown()
 {
     m_shuttingDown = true;
+    if (m_statsTimer)
+        m_statsTimer->stop();
+
     // killProcess() routes to TerminateProcess (Windows) / SIGKILL (POSIX)
     // which mark the child for teardown synchronously at the kernel level.
     // The app is exiting — no downstream operation needs the child actually
@@ -373,6 +385,96 @@ void TerminalManager::shutdown()
         }
     }
 }
+
+void TerminalManager::refreshProcessStats()
+{
+    if (m_shuttingDown)
+        return;
+
+    bool anyLive = false;
+    for (const auto &d : m_docks) {
+        if (d.isNull() || d->isRemoteSession())
+            continue;
+        TerminalWidget *w = d->terminalWidget();
+        if (w && w->ptyPid() > 0) {
+            anyLive = true;
+            break;
+        }
+    }
+
+    if (!anyLive) {
+        for (const auto &d : m_docks) {
+            if (d.isNull() || d->isRemoteSession())
+                continue;
+            d->setProcessStats({});
+            d->setCoreLoad({});
+        }
+        m_treeCpu.clear();
+        m_processorPrev.clear();
+        m_processorPct.clear();
+        return;
+    }
+
+    QString coreLoad;
+    if (TerminalProcessStats::enumerateProcessorTicks(m_processorNow)) {
+        if (m_processorPct.size() != m_processorNow.size())
+            m_processorPct.resize(m_processorNow.size());
+        const bool sameSpan = m_processorPrev.size() == m_processorNow.size();
+        TerminalProcessStats::processorLoad(
+            m_processorNow.constData(), m_processorNow.size(),
+            sameSpan ? m_processorPrev.constData() : nullptr,
+            m_processorPct.data());
+        if (sameSpan) {
+            coreLoad = TerminalProcessStats::coreLoadLabel(
+                m_processorPct.constData(), m_processorPct.size());
+        }
+        m_processorPrev = m_processorNow;
+    } else {
+        m_processorPrev.clear();
+    }
+
+    if (!TerminalProcessStats::enumerateProcesses(m_processSnapshot)) {
+        for (const auto &d : m_docks) {
+            if (d.isNull() || d->isRemoteSession())
+                continue;
+            d->setCoreLoad(coreLoad);
+        }
+        return;
+    }
+
+    const quint64 now = TerminalProcessStats::nowWall100ns();
+    const int cpus = TerminalProcessStats::logicalCpuCount();
+    QHash<quint32, TerminalProcessStats::TreeCpuState> nextState;
+    nextState.reserve(m_docks.size());
+
+    const TerminalProcessStats::ProcessSample *samples = m_processSnapshot.constData();
+    const int n = m_processSnapshot.size();
+
+    for (const auto &d : m_docks) {
+        if (d.isNull() || d->isRemoteSession())
+            continue;
+        TerminalWidget *w = d->terminalWidget();
+        const qint64 pid64 = w ? w->ptyPid() : 0;
+        if (pid64 <= 0 || pid64 > static_cast<qint64>(0xffffffffu)) {
+            d->setProcessStats({});
+            d->setCoreLoad({});
+            continue;
+        }
+        const quint32 pid = static_cast<quint32>(pid64);
+        const auto it = m_treeCpu.constFind(pid);
+        const TerminalProcessStats::TreeCpuState *prev =
+            (it == m_treeCpu.cend()) ? nullptr : &it.value();
+        TerminalProcessStats::TreeCpuState out{};
+        const TerminalProcessStats::TreeStats stats = TerminalProcessStats::aggregateTree(
+            samples, n, pid, prev, now, cpus, &out);
+        d->setProcessStats(stats);
+        d->setCoreLoad(coreLoad);
+        if (stats.valid)
+            nextState.insert(pid, out);
+    }
+    m_treeCpu.swap(nextState);
+}
+
 
 
 TerminalDock *TerminalManager::findTaskDock(const QString &command, const QString &cwd) const
@@ -495,10 +597,35 @@ void TerminalManager::wireContextMenu(TerminalDock *dock)
 void TerminalManager::rememberDock(TerminalDock *dock)
 {
     m_docks.append(QPointer<TerminalDock>(dock));
+    connect(dock, &TerminalDock::cpuHoverChanged, this, [this]() {
+        if (syncStatsPoll())
+            refreshProcessStats();
+    });
     connect(dock, &QObject::destroyed, this, [this](QObject *obj) {
         if (forgetDock(obj))
             applyWorkspaceFilter(m_filterActiveRoot, m_filterOpenRoots);
+        syncStatsPoll();
     });
+}
+
+bool TerminalManager::syncStatsPoll()
+{
+    bool open = false;
+    for (const auto &d : m_docks) {
+        if (d && d->cpuLabelUnderMouse()) {
+            open = true;
+            break;
+        }
+    }
+    if (m_statsTimer) {
+        const int ms = TerminalProcessStats::statsPollMs(open);
+        if (m_statsTimer->interval() != ms) {
+            m_statsTimer->setInterval(ms);
+            if (open)
+                m_statsTimer->start();
+        }
+    }
+    return open;
 }
 
 bool TerminalManager::forgetDock(QObject *obj)

@@ -101,6 +101,16 @@ target_sources(test_terminal_cwd_resolver PRIVATE
     ${CMAKE_SOURCE_DIR}/src/remote/ExecutionContext.h
 )
 add_test(NAME TerminalCwdResolver COMMAND test_terminal_cwd_resolver)
+# --- TerminalProcessStats: PTY process-tree CPU/RAM aggregation ---
+qt_add_executable(test_terminal_process_stats test_terminal_process_stats.cpp)
+target_include_directories(test_terminal_process_stats PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_terminal_process_stats PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_terminal_process_stats PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/TerminalProcessStats.cpp
+    ${CMAKE_SOURCE_DIR}/src/TerminalProcessStats.h
+)
+add_test(NAME TerminalProcessStats COMMAND test_terminal_process_stats)
+
 
 # --- terminalTabTitle: cwd as the ADS tab label, never the PTY process image ---
 qt_add_executable(test_terminal_tab_title test_terminal_tab_title.cpp)

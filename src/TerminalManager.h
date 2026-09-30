@@ -20,12 +20,18 @@
 #define TERMINALMANAGER_H
 
 #include <QList>
+#include <QHash>
+#include <QTimer>
+#include <QVector>
+
 #include <QObject>
 #include <QPointer>
 #include <QString>
 #include <QStringList>
 
 #include "TerminalTaskRegistry.h"
+#include "TerminalProcessStats.h"
+
 
 class NotepadNextApplication;
 class MainWindow;
@@ -75,6 +81,9 @@ private:
     void placeInEditor(TerminalDock *dock);
     void rememberDock(TerminalDock *dock);
     bool forgetDock(QObject *obj);
+    void refreshProcessStats();
+    bool syncStatsPoll();
+
 
     NotepadNextApplication *m_app;
     MainWindow *m_mainWindow;
@@ -82,6 +91,13 @@ private:
     QString m_filterActiveRoot;
     QStringList m_filterOpenRoots;
     bool m_shuttingDown = false;
+    QTimer *m_statsTimer = nullptr;
+    QVector<TerminalProcessStats::ProcessSample> m_processSnapshot;
+    QVector<TerminalProcessStats::ProcessorTick> m_processorNow;
+    QVector<TerminalProcessStats::ProcessorTick> m_processorPrev;
+    QVector<double> m_processorPct;
+    QHash<quint32, TerminalProcessStats::TreeCpuState> m_treeCpu;
+
 
 };
 

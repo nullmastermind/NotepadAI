@@ -493,6 +493,9 @@ qt_add_executable(NotepadAI
 	TerminalTabTitle.h
 	AiDockGroup.h
 	TerminalCwdResolver.cpp
+	TerminalProcessStats.h
+	TerminalProcessStats.cpp
+
 	TerminalManager.h
 	TerminalManager.cpp
 	TerminalTaskRegistry.h

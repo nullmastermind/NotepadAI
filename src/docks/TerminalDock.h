@@ -24,7 +24,12 @@
 #include <QString>
 #include <QStringList>
 
+#include "TerminalProcessStats.h"
+
+
 class QToolButton;
+class QLabel;
+
 class TerminalWidget;
 namespace ads { class CDockWidget; }
 namespace remote { class ExecutionContext; }
@@ -57,10 +62,21 @@ public:
     bool confirmClose();
     // Raise the hosting ADS dock widget (this is no longer a QDockWidget).
     void reveal();
+    void setProcessStats(const TerminalProcessStats::TreeStats &stats);
+    void setCoreLoad(const QString &label);
+    bool cpuLabelUnderMouse() const;
+
+signals:
+    void cpuHoverChanged();
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void init(const QString &shell, const QString &cwd);
-    void setupTaskTitleBar();
+    void setupChrome();
+    void wireTerminalStats();
+
 
     TerminalWidget *m_terminal = nullptr;
     QString m_initialCwd;
@@ -70,6 +86,11 @@ private:
     QStringList m_taskEnv;
     QString m_cwdWarning;
     QToolButton *m_restartBtn = nullptr;
+    QLabel *m_cpuLabel = nullptr;
+
+    QLabel *m_ramLabel = nullptr;
+    QPoint m_coreTipAnchor;
+
     // Captured-at-spawn execution context. Null → local terminal. A QPointer so
     // a context torn down underneath us reads null rather than dangling.
     QPointer<remote::ExecutionContext> m_context;

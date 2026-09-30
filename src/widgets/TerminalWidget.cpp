@@ -463,6 +463,12 @@ bool TerminalWidget::isProcessRunning() const
     return m_pty->pid() > 0;
 }
 
+qint64 TerminalWidget::ptyPid() const
+{
+    return m_pty ? m_pty->pid() : 0;
+}
+
+
 void TerminalWidget::killProcess()
 {
     if (m_pty) {

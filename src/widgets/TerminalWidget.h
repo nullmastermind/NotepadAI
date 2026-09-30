@@ -58,6 +58,8 @@ public:
     void setTerminalFont(const QFont &font);
 
     bool isProcessRunning() const;
+    qint64 ptyPid() const;
+
     void killProcess();
     void writeToPty(const QByteArray &data);
 

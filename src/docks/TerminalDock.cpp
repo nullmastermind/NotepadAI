@@ -26,10 +26,14 @@
 #include "DockWidget.h"
 
 #include <QHBoxLayout>
+#include <QFontMetrics>
+
 #include <QLabel>
 #include <QMessageBox>
 #include <QToolButton>
-#include <QVBoxLayout>
+#include <QToolTip>
+#include <QCursor>
+#include <QHelpEvent>
 #include <QWidget>
 
 TerminalDock::TerminalDock(const QString &shell, const QString &cwd, QWidget *parent)
@@ -49,7 +53,7 @@ TerminalDock::TerminalDock(const QString &shell, const QString &cwd, const QStri
     , m_taskEnv(env)
 {
     init(shell, cwd);
-    setupTaskTitleBar();
+
     setWindowTitle(tr("Task — %1").arg(m_taskName));
 }
 
@@ -74,7 +78,7 @@ TerminalDock::TerminalDock(remote::ExecutionContext *ctx, const QString &remoteC
     , m_remoteSession(true)
 {
     init(QString(), remoteCwd);
-    setupTaskTitleBar();
+
     setWindowTitle(tr("Task — %1").arg(m_taskName));
 }
 
@@ -134,30 +138,128 @@ void TerminalDock::init(const QString &shell, const QString &cwd)
             m_terminal->writeToPty(cmd);
         }, Qt::SingleShotConnection);
     }
+
+    if (!m_remoteSession || !m_taskCommand.isEmpty())
+        setupChrome();
+    wireTerminalStats();
+
 }
 
 TerminalDock::~TerminalDock() = default;
 
-void TerminalDock::setupTaskTitleBar()
+void TerminalDock::setupChrome()
 {
     auto *titleBar = new QWidget(this);
     auto *layout = new QHBoxLayout(titleBar);
     layout->setContentsMargins(4, 2, 4, 2);
     layout->setSpacing(4);
 
-    auto *label = new QLabel(m_taskName, titleBar);
-    label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    layout->addWidget(label);
+    if (!m_taskCommand.isEmpty()) {
+        auto *label = new QLabel(m_taskName, titleBar);
+        label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        layout->addWidget(label);
+    } else {
+        layout->addStretch(1);
+    }
 
-    m_restartBtn = new QToolButton(titleBar);
-    m_restartBtn->setText(tr("Restart"));
-    m_restartBtn->setToolTip(tr("Restart task"));
-    connect(m_restartBtn, &QToolButton::clicked, this, &TerminalDock::restartTask);
-    layout->addWidget(m_restartBtn);
+    if (!m_remoteSession) {
+        m_cpuLabel = new QLabel(titleBar);
+        m_ramLabel = new QLabel(titleBar);
+        const QString style = QStringLiteral("color: palette(placeholder-text);");
+        m_cpuLabel->setStyleSheet(style);
+        m_ramLabel->setStyleSheet(style);
+        m_cpuLabel->setTextFormat(Qt::PlainText);
+        m_ramLabel->setTextFormat(Qt::PlainText);
+        m_cpuLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        m_ramLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        const QFontMetrics fm(m_cpuLabel->font());
+        m_cpuLabel->setMinimumWidth(fm.horizontalAdvance(QStringLiteral("CPU 100%")));
+        m_cpuLabel->installEventFilter(this);
+        m_ramLabel->setMinimumWidth(fm.horizontalAdvance(QStringLiteral("RAM 1023 MB")));
+        m_cpuLabel->setText(TerminalProcessStats::cpuLabel(false, 0.0));
+        m_ramLabel->setText(TerminalProcessStats::ramLabel(false, 0));
+        layout->addWidget(m_cpuLabel);
+        layout->addWidget(m_ramLabel);
+    }
+
+    if (!m_taskCommand.isEmpty()) {
+        m_restartBtn = new QToolButton(titleBar);
+        m_restartBtn->setText(tr("Restart"));
+        m_restartBtn->setToolTip(tr("Restart task"));
+        connect(m_restartBtn, &QToolButton::clicked, this, &TerminalDock::restartTask);
+        layout->addWidget(m_restartBtn);
+    }
 
     auto *outer = qobject_cast<QVBoxLayout *>(this->layout());
     outer->insertWidget(0, titleBar);
 }
+
+void TerminalDock::wireTerminalStats()
+{
+    if (!m_terminal)
+        return;
+    connect(m_terminal, &TerminalWidget::processExited, this, [this](int) {
+        setProcessStats({});
+    });
+}
+
+void TerminalDock::setProcessStats(const TerminalProcessStats::TreeStats &stats)
+{
+    if (m_cpuLabel)
+        m_cpuLabel->setText(TerminalProcessStats::cpuLabel(stats.valid, stats.cpuPercent));
+    if (m_ramLabel)
+        m_ramLabel->setText(TerminalProcessStats::ramLabel(stats.valid, stats.rssBytes));
+    if (!stats.valid)
+        setCoreLoad({});
+}
+
+bool TerminalDock::cpuLabelUnderMouse() const
+{
+    return m_cpuLabel && m_cpuLabel->underMouse();
+}
+
+void TerminalDock::setCoreLoad(const QString &label)
+{
+    if (!m_cpuLabel)
+        return;
+    const bool visible = QToolTip::isVisible();
+    const QString shown = visible ? QToolTip::text() : QString();
+    const bool over = m_cpuLabel->underMouse();
+    m_cpuLabel->setToolTip(label);
+    if (!TerminalProcessStats::coreTipNeedsPush(visible, over, shown, label))
+        return;
+    if (label.isEmpty()) {
+        QToolTip::hideText();
+        return;
+    }
+    QPoint anchor = m_coreTipAnchor.isNull() ? QCursor::pos() : m_coreTipAnchor;
+    if (m_coreTipAnchor.isNull())
+        m_coreTipAnchor = anchor;
+    // Same anchor so Qt reuses the tip instead of jumping it to the cursor.
+    QToolTip::showText(anchor, label, m_cpuLabel, m_cpuLabel->rect());
+}
+
+bool TerminalDock::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_cpuLabel) {
+        switch (event->type()) {
+        case QEvent::Enter:
+        case QEvent::Leave:
+        case QEvent::Hide:
+            if (event->type() != QEvent::Enter)
+                m_coreTipAnchor = {};
+            emit cpuHoverChanged();
+            break;
+        case QEvent::ToolTip:
+            m_coreTipAnchor = static_cast<QHelpEvent *>(event)->globalPos();
+            break;
+        default:
+            break;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 
 void TerminalDock::restartTask()
 {
@@ -189,6 +291,10 @@ void TerminalDock::restartTask()
     }, Qt::SingleShotConnection);
 
     m_terminal->setFocus();
+
+    setProcessStats({});
+    wireTerminalStats();
+
 }
 
 bool TerminalDock::confirmClose()
