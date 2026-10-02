@@ -48,7 +48,8 @@ void TestAcpMessageWidgetStreaming::assistant_goalSetPrefix_usesKingGoldFrame()
 void TestAcpMessageWidgetStreaming::assistant_goalSet_hidesWorktreeInjection()
 {
     const QString instruction = QStringLiteral(
-        "Create a new git worktree for this task. When finished, merge the result "
+        "Create a new git worktree for this task inside the repository's .claude/worktrees "
+        "directory. Do not choose any other location. When finished, merge the result "
         "into the current branch and remove the worktree to free disk space.");
 
     AcpMessageWidget echoed(QStringLiteral("assistant"));

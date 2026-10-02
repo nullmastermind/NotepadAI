@@ -1473,7 +1473,8 @@ void TestGoalAgent::nativeGoalWireText_appendsWorktreeInstruction()
     QCOMPARE(GoalAgent::nativeGoalWireText(command, false), command);
     QCOMPARE(GoalAgent::nativeGoalWireText(command, true),
              QStringLiteral("/goal say hi in korean\n\n"
-                            "Create a new git worktree for this task. When finished, merge the result "
+                            "Create a new git worktree for this task inside the repository's .claude/worktrees "
+                            "directory. Do not choose any other location. When finished, merge the result "
                             "into the current branch and remove the worktree to free disk space."));
 }
 

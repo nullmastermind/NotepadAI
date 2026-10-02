@@ -86,7 +86,8 @@ public:
     static QString nativeGoalWorktreeInstruction()
     {
         return QStringLiteral(
-            "Create a new git worktree for this task. When finished, merge the result "
+            "Create a new git worktree for this task inside the repository's .claude/worktrees "
+            "directory. Do not choose any other location. When finished, merge the result "
             "into the current branch and remove the worktree to free disk space.");
     }
     // Agent echoes the wire suffix inside "Goal set:". Hide that sentence in the
