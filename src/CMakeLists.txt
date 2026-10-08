@@ -338,6 +338,8 @@ qt_add_executable(NotepadAI
 	git/CommitSubmitPolicy.h
 	git/FileEncodingDetector.cpp
 	git/FileEncodingDetector.h
+	git/ForceRemovePath.cpp
+	git/ForceRemovePath.h
 	git/GitBlameParser.cpp
 	git/GitBlameParser.h
 	git/GitBlameFetcher.cpp

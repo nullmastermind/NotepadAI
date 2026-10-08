@@ -123,6 +123,12 @@ GitError GitErrorClassifier::classify(int exitCode, const QByteArray &stderr_, c
                     QString(),
                     details, {QStringLiteral("retry")});
 
+    if (rx(lowered, R"(failed to remove (?:.*[/\\])?(?:nul|con|prn|aux|com[1-9]|lpt[1-9])(?:\.[^:]+)?\s*:)"))
+        return make(GitError::ReservedName,
+                    tr("Could not delete a Windows reserved file name (such as nul)."),
+                    tr("NotepadAI retries with an extended path. Close other programs using the folder and try again."),
+                    details, {QStringLiteral("retry")});
+
     return make(GitError::Unknown,
                 tr("Git operation failed."),
                 QString(),

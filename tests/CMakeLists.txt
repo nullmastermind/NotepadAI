@@ -91,6 +91,21 @@ target_include_directories(test_git_refresh_coalescer PRIVATE
 target_link_libraries(test_git_refresh_coalescer PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME GitRefreshCoalescer COMMAND test_git_refresh_coalescer)
 
+# --- ForceRemovePath: unlink Windows reserved names (NUL/CON/…) that git clean cannot ---
+qt_add_executable(test_force_remove_path test_force_remove_path.cpp)
+target_include_directories(test_force_remove_path PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/git
+)
+target_link_libraries(test_force_remove_path PRIVATE Qt6::Core Qt6::Test)
+target_sources(test_force_remove_path PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/git/ForceRemovePath.cpp
+    ${CMAKE_SOURCE_DIR}/src/git/ForceRemovePath.h
+    ${CMAKE_SOURCE_DIR}/src/git/GitErrorClassifier.cpp
+    ${CMAKE_SOURCE_DIR}/src/git/GitErrorClassifier.h
+    ${CMAKE_SOURCE_DIR}/src/git/GitError.h
+)
+add_test(NAME ForceRemovePath COMMAND test_force_remove_path)
+
 # --- TerminalCwdResolver: pure path-resolution logic for the Terminal menu actions ---
 qt_add_executable(test_terminal_cwd_resolver test_terminal_cwd_resolver.cpp)
 target_include_directories(test_terminal_cwd_resolver PRIVATE ${CMAKE_SOURCE_DIR}/src)

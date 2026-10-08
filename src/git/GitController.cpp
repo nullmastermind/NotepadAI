@@ -21,6 +21,7 @@
 #include "BranchRefParser.h"
 #include "GitBaseBlobCache.h"
 #include "GitErrorClassifier.h"
+#include "ForceRemovePath.h"
 #include "GitNumstatParser.h"
 #include "GitProcessRunner.h"
 #include "GitRepoDiscovery.h"
@@ -659,6 +660,7 @@ void GitController::deleteUntrackedPaths(const QStringList &relPaths)
         op.argv.append(chunk);
         op.timeoutMs = kTimeoutNormal;
         op.humanName = tr_("Deleting untracked files");
+        op.meta.insert(QStringLiteral("relPaths"), chunk);
         enqueue(op);
     }
 }
@@ -1155,6 +1157,20 @@ void GitController::onRunFinished(int exit, const QByteArray &out, const QByteAr
     }
 
     if (exit != 0) {
+        if (kind == OpKind::CleanUntracked
+            && !GitRunnerFactory::isRemotePath(m_currentRepo)
+            && !GitRunnerFactory::isRemotePath(m_workspaceRoot)) {
+            const QStringList relPaths = m_current.meta.value(QStringLiteral("relPaths")).toStringList();
+            // git clean is the first attempt. Reserved DOS names (nul, con, …)
+            // make unlink() return EACCES; fall back to Win32 \\?\ delete.
+            if (ForceRemovePath::recoverFailedUntrackedDeletes(m_currentRepo, relPaths)) {
+                if (!humanName.isEmpty())
+                    emit opSucceeded(humanName);
+                refresh();
+                popAndAdvance();
+                return;
+            }
+        }
         const QByteArray classifyInput = err.trimmed().isEmpty() ? out : err;
         GitError e = GitErrorClassifier::classify(exit, classifyInput, m_current.argv);
         if (kind == OpKind::Toplevel) {

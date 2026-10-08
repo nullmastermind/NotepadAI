@@ -44,7 +44,8 @@ struct GitError
         LockHeld,
         Cancelled,
         Timeout,
-        Unknown
+        Unknown,
+        ReservedName
     };
 
     Kind kind = None;
