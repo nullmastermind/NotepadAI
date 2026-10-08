@@ -50,6 +50,10 @@ public:
     // target widget's top-level window (e.g. WebView2 on Windows).
     virtual void notifyFocusLost(QWidget *newFocusWidget) { Q_UNUSED(newFocusWidget); }
 
+    // Rebind the compositor to the current host HWND. ADS pin/restore
+    // reinserts the dock widget and can recreate that HWND.
+    virtual void reattachNativeHost() {}
+
     virtual void executeScript(const QString &js, std::function<void(const QString &)> callback = nullptr) = 0;
     virtual QString nativePostMessage() const = 0;
     virtual void ensureCspBypassed() {}

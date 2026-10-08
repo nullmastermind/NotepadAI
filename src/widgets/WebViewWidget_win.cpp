@@ -30,6 +30,7 @@
 #include <QNetworkRequest>
 #include <QPointer>
 #include <QSet>
+#include <QShowEvent>
 #include <QSizePolicy>
 #include <QStackedWidget>
 #include <QStandardPaths>
@@ -482,6 +483,8 @@ public:
         }
     }
 
+    void reattachNativeHost() override;
+
 protected:
     // Null live aliases first. Close pumps the message loop, and a resize or
     // the emulation timer must not call into the view being destroyed.
@@ -523,6 +526,27 @@ protected:
         bounds.right = r.x() + r.width();
         bounds.bottom = r.y() + r.height();
         controller->put_Bounds(bounds);
+    }
+
+    // WebView2 sets IsVisible=FALSE when the parent HWND is hidden at
+    // CreateCoreWebView2Controller. ADS pin-cluster moves also recreate that
+    // HWND. ShowWindow + put_Bounds do not restore composition.
+    void presentController(ICoreWebView2Controller *controller, QWidget *host)
+    {
+        if (!controller || !host)
+            return;
+        const HWND hwnd = reinterpret_cast<HWND>(host->winId());
+        if (!hwnd)
+            return;
+        controller->put_IsVisible(FALSE);
+        controller->put_ParentWindow(hwnd);
+        applyControllerBounds(controller, host);
+        if (host->isVisible()) {
+            ShowWindow(hwnd, SW_SHOW);
+            controller->put_IsVisible(TRUE);
+        }
+        if (host == m_hostWidget)
+            m_hwnd = hwnd;
     }
 
     void applyTouchEmulation(ICoreWebView2 *webView)
@@ -598,6 +622,9 @@ protected:
     {
         styleViewportHost(m_hostWidget);
         applyControllerBounds(m_controller, m_hostWidget);
+        if (m_controller && m_hostWidget && m_hostWidget->isVisible()
+            && m_hostWidget->width() > 0 && m_hostWidget->height() > 0)
+            m_controller->put_IsVisible(TRUE);
         if (!m_webView)
             return;
         if (m_webView != m_touchView || touchViewport() != m_touchOn) {
@@ -621,6 +648,12 @@ protected:
     {
         QWidget::resizeEvent(event);
         applyViewport();
+    }
+
+    void showEvent(QShowEvent *event) override
+    {
+        QWidget::showEvent(event);
+        reattachNativeHost();
     }
 
     bool eventFilter(QObject *watched, QEvent *event) override
@@ -814,6 +847,7 @@ private:
             new WindowCloseRequestedHandler(this), &closeToken);
 
         registerInitialPage();
+        reattachNativeHost();
 
         // Subscribe to SourceChanged to update the URL bar
         EventRegistrationToken srcToken;
@@ -1723,18 +1757,7 @@ private:
         m_hwnd = page.hwnd;
         if (m_stack && page.host)
             m_stack->setCurrentWidget(page.host);
-        // WebView2 sets IsVisible=FALSE when CreateCoreWebView2Controller
-        // runs against a hidden stacked host. ShowWindow + put_Bounds do not
-        // restore composition; the host background paints through.
-        for (int i = 0; i < m_pages.size(); ++i) {
-            if (m_pages[i].hwnd)
-                ShowWindow(m_pages[i].hwnd, i == index ? SW_SHOW : SW_HIDE);
-            if (ICoreWebView2Controller *controller = m_pages[i].controller)
-                controller->put_IsVisible(FALSE);
-        }
-        applyControllerBounds(m_controller, page.host);
-        if (m_controller)
-            m_controller->put_IsVisible(TRUE);
+        reattachNativeHost();
         applyTouchEmulation(m_webView);
         if (m_tabBar && m_tabBar->currentIndex() != index) {
             m_switching = true;
@@ -1957,6 +1980,37 @@ private:
     QTimer *m_cdpPollTimer = nullptr;
     int m_cdpPollCount = 0;
 };
+
+void WebViewWidgetWin::reattachNativeHost()
+{
+    if (m_pages.isEmpty()) {
+        presentController(m_controller, m_hostWidget);
+        return;
+    }
+    for (Page &page : m_pages) {
+        if (!page.host)
+            continue;
+        page.hwnd = reinterpret_cast<HWND>(page.host->winId());
+        if (page.controller && page.hwnd)
+            page.controller->put_ParentWindow(page.hwnd);
+    }
+    for (int i = 0; i < m_pages.size(); ++i) {
+        if (i == m_active)
+            continue;
+        Page &page = m_pages[i];
+        if (page.hwnd)
+            ShowWindow(page.hwnd, SW_HIDE);
+        if (page.controller)
+            page.controller->put_IsVisible(FALSE);
+    }
+    if (m_active < 0 || m_active >= m_pages.size())
+        return;
+    Page &page = m_pages[m_active];
+    m_controller = page.controller;
+    m_hostWidget = page.host;
+    presentController(page.controller, page.host);
+    page.hwnd = m_hwnd;
+}
 
 // Factory: Windows implementation
 WebViewWidget *WebViewWidget::create(const QString &appId, const QUrl &url, int debugPort,

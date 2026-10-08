@@ -184,7 +184,10 @@ void MiniAppManager::moveDockTabToPinCluster(ads::CDockWidget *dw, bool pinning)
     const int to = browserTabPinMoveTarget(flags, from, pinning);
     if (!moveDockWidgetToIndex(dw, to)) {
         qWarning("MiniAppManager: pin-cluster move failed from=%d to=%d", from, to);
+        return;
     }
+    if (auto *wv = dw->findChild<WebViewWidget *>())
+        wv->reattachNativeHost();
 }
 
 QString MiniAppManager::pinKeyFor(ads::CDockWidget *dw) const
