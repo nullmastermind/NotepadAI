@@ -1723,11 +1723,18 @@ private:
         m_hwnd = page.hwnd;
         if (m_stack && page.host)
             m_stack->setCurrentWidget(page.host);
+        // WebView2 sets IsVisible=FALSE when CreateCoreWebView2Controller
+        // runs against a hidden stacked host. ShowWindow + put_Bounds do not
+        // restore composition; the host background paints through.
         for (int i = 0; i < m_pages.size(); ++i) {
             if (m_pages[i].hwnd)
                 ShowWindow(m_pages[i].hwnd, i == index ? SW_SHOW : SW_HIDE);
+            if (ICoreWebView2Controller *controller = m_pages[i].controller)
+                controller->put_IsVisible(FALSE);
         }
         applyControllerBounds(m_controller, page.host);
+        if (m_controller)
+            m_controller->put_IsVisible(TRUE);
         applyTouchEmulation(m_webView);
         if (m_tabBar && m_tabBar->currentIndex() != index) {
             m_switching = true;
