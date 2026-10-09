@@ -302,6 +302,10 @@ bool commandsIncludeGoal(const QList<AcpCommandInfo> &commands);
 // Prepend `goal` when missing. O(n) over a few dozen commands; no heap if present.
 void ensureHostGoalCommand(QList<AcpCommandInfo> &commands);
 
+// omp ACP rejects session/prompt while an ownerless turn is streaming.
+// Typed form (18.0.7+): data.reason == "session_busy". Older: message text.
+bool rpcErrorIsSessionBusy(const QJsonValue &error);
+
 
 QJsonObject permissionOptionToJson(const AcpPermissionOption &opt);
 AcpPermissionOption permissionOptionFromJson(const QJsonObject &obj);

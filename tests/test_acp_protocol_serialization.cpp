@@ -44,6 +44,9 @@ private slots:
     void isGoalCommandNameMatchesGoalOnly();
     void ensureHostGoalCommandPrependsWhenMissing();
     void commandsIncludeGoalIgnoresHostInject();
+    void rpcErrorIsSessionBusy_alreadyProcessingMessage();
+    void rpcErrorIsSessionBusy_typedReason();
+    void rpcErrorIsSessionBusy_otherErrors();
 
 
 
@@ -445,6 +448,37 @@ void TestAcpProtocolSerialization::commandsIncludeGoalIgnoresHostInject()
     AcpProtocol::AcpCommandInfo goal;
     goal.name = QStringLiteral("/goal");
     QVERIFY(AcpProtocol::commandsIncludeGoal({compact, goal}));
+}
+
+void TestAcpProtocolSerialization::rpcErrorIsSessionBusy_alreadyProcessingMessage()
+{
+    QJsonObject err;
+    err.insert(QStringLiteral("code"), -32603);
+    err.insert(QStringLiteral("message"),
+               QStringLiteral("Agent is already processing. Use steer() or followUp() "
+                              "to queue messages, or wait for completion."));
+    QVERIFY(AcpProtocol::rpcErrorIsSessionBusy(err));
+}
+
+void TestAcpProtocolSerialization::rpcErrorIsSessionBusy_typedReason()
+{
+    QJsonObject data;
+    data.insert(QStringLiteral("reason"), QStringLiteral("session_busy"));
+    data.insert(QStringLiteral("hint"), QStringLiteral("steer|followUp|wait"));
+    QJsonObject err;
+    err.insert(QStringLiteral("code"), -32003);
+    err.insert(QStringLiteral("message"), QStringLiteral("Agent is already processing."));
+    err.insert(QStringLiteral("data"), data);
+    QVERIFY(AcpProtocol::rpcErrorIsSessionBusy(err));
+}
+
+void TestAcpProtocolSerialization::rpcErrorIsSessionBusy_otherErrors()
+{
+    QJsonObject err;
+    err.insert(QStringLiteral("code"), -32603);
+    err.insert(QStringLiteral("message"), QStringLiteral("Session not found"));
+    QVERIFY(!AcpProtocol::rpcErrorIsSessionBusy(err));
+    QVERIFY(!AcpProtocol::rpcErrorIsSessionBusy(QJsonValue()));
 }
 
 

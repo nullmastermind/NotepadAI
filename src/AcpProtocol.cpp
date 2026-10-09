@@ -743,4 +743,19 @@ void ensureHostGoalCommand(QList<AcpCommandInfo> &commands)
     commands.prepend(goal);
 }
 
+bool rpcErrorIsSessionBusy(const QJsonValue &error)
+{
+    if (!error.isObject())
+        return false;
+    const QJsonObject o = error.toObject();
+    const QJsonValue data = o.value(QStringLiteral("data"));
+    if (data.isObject()
+        && data.toObject().value(QStringLiteral("reason")).toString()
+               == QLatin1String("session_busy")) {
+        return true;
+    }
+    return o.value(QStringLiteral("message")).toString()
+        .contains(QLatin1String("already processing"), Qt::CaseInsensitive);
+}
+
 } // namespace AcpProtocol

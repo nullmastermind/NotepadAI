@@ -33,6 +33,7 @@
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QTime>
+#include <QTimer>
 #include <QUuid>
 
 #ifdef Q_OS_WIN
@@ -49,6 +50,10 @@ namespace {
 
 constexpr int kJsonRpcInvalidParams = -32602;
 constexpr int kJsonRpcMethodNotFound = -32601;
+constexpr int kPromptIdleEndDelayMs = 250;
+constexpr int kSessionBusyRetryInitialMs = 200;
+constexpr int kSessionBusyRetryMaxDelayMs = 2000;
+constexpr int kSessionBusyRetryGiveUpMs = 10000;
 
 QJsonObject makeRpcEnvelope(const QJsonValue &id, const QString &method, const QJsonValue &params)
 {
@@ -150,6 +155,21 @@ QString contentArrayText(const QJsonArray &arr)
 AcpConnection::AcpConnection(QObject *parent)
     : QObject(parent)
 {
+    m_promptIdleEndTimer = new QTimer(this);
+    m_promptIdleEndTimer->setSingleShot(true);
+    connect(m_promptIdleEndTimer, &QTimer::timeout, this, [this]() {
+        if (m_openPrompts > 0 || m_busyRetryPending)
+            return;
+        endPrompt();
+    });
+
+    m_sessionBusyRetryTimer = new QTimer(this);
+    m_sessionBusyRetryTimer->setSingleShot(true);
+    connect(m_sessionBusyRetryTimer, &QTimer::timeout, this, [this]() {
+        if (!m_busyRetryPending)
+            return;
+        dispatchSessionPrompt(m_busyRetryPrompt.text, m_busyRetryPrompt.images);
+    });
 }
 
 AcpConnection::~AcpConnection()
@@ -579,6 +599,26 @@ void AcpConnection::sendPrompt(const QString &text, const QList<QPair<QByteArray
         return;
     }
 
+    notePromptOpened();
+    dispatchSessionPrompt(text, images);
+}
+
+void AcpConnection::sendSidePrompt(const QString &text)
+{
+    // Idle, or session not up yet: this is a normal turn. Only a prompt that
+    // arrives while one is already in flight must not steal begin/end.
+    if (!m_promptInFlight || m_sessionId.isEmpty()) {
+        sendPrompt(text, {});
+        return;
+    }
+
+    notePromptOpened();
+    dispatchSessionPrompt(text, {});
+}
+
+void AcpConnection::dispatchSessionPrompt(const QString &text,
+                                         const QList<QPair<QByteArray, QString>> &images)
+{
     QJsonArray content;
     {
         AcpProtocol::AcpContentBlock t;
@@ -599,12 +639,17 @@ void AcpConnection::sendPrompt(const QString &text, const QList<QPair<QByteArray
     // ContentBlock), not `content`.
     params.insert(QStringLiteral("prompt"), content);
 
-    notePromptOpened();
     sendRequest(AcpProtocol::kMethodSessionPrompt, params,
-                [this](const QJsonValue &result, const QJsonValue &error) {
+                [this, text, images](const QJsonValue &result, const QJsonValue &error) {
                     if (!error.isUndefined() && !error.isNull()) {
+                        if (AcpProtocol::rpcErrorIsSessionBusy(error)) {
+                            startSessionBusyRetry(text, images);
+                            return;
+                        }
+                        stopSessionBusyRetry();
                         emit requestFailed(rpcErrorMessage(error));
                     } else if (result.isObject()) {
+                        stopSessionBusyRetry();
                         AcpProtocol::AcpUsage usage;
                         const QJsonObject usageObj =
                             result.toObject().value(QStringLiteral("usage")).toObject();
@@ -626,6 +671,8 @@ void AcpConnection::sendPrompt(const QString &text, const QList<QPair<QByteArray
                         if (!m_promptProducedOutput && !hasUsage) {
                             emit requestFailed(QStringLiteral("The agent ended the turn without a response. Open Debug for details."));
                         }
+                    } else {
+                        stopSessionBusyRetry();
                     }
                     // session/prompt response is one request finishing. The turn
                     // stays open while other prompts (native /goal) are still out.
@@ -633,41 +680,52 @@ void AcpConnection::sendPrompt(const QString &text, const QList<QPair<QByteArray
                 });
 }
 
-void AcpConnection::sendSidePrompt(const QString &text)
+void AcpConnection::startSessionBusyRetry(const QString &text,
+                                         const QList<QPair<QByteArray, QString>> &images)
 {
-    // Idle, or session not up yet: this is a normal turn. Only a prompt that
-    // arrives while one is already in flight must not steal begin/end.
-    if (!m_promptInFlight || m_sessionId.isEmpty()) {
-        sendPrompt(text, {});
+    if (m_openPrompts == 0) {
+        stopSessionBusyRetry();
         return;
     }
-
-    QJsonArray content;
-    {
-        AcpProtocol::AcpContentBlock t;
-        t.kind = AcpProtocol::AcpContentBlock::Kind::Text;
-        t.text = text;
-        content.append(AcpProtocol::contentBlockToJson(t));
+    if (m_busyRetryElapsedMs >= kSessionBusyRetryGiveUpMs) {
+        appendDebugLog(QStringLiteral("session/prompt: session_busy retry exhausted"));
+        stopSessionBusyRetry();
+        emit requestFailed(QStringLiteral(
+            "Agent is already processing. Use steer() or followUp() to queue messages, or wait for completion."));
+        notePromptClosed();
+        return;
     }
-    QJsonObject params;
-    params.insert(QStringLiteral("sessionId"), m_sessionId);
-    params.insert(QStringLiteral("prompt"), content);
+    m_busyRetryPending = true;
+    m_busyRetryPrompt = {text, images};
+    if (m_promptIdleEndTimer)
+        m_promptIdleEndTimer->stop();
+    if (m_busyRetryDelayMs <= 0)
+        m_busyRetryDelayMs = kSessionBusyRetryInitialMs;
+    appendDebugLog(QStringLiteral("session/prompt: session_busy, retry in %1ms")
+                       .arg(m_busyRetryDelayMs));
+    m_sessionBusyRetryTimer->start(m_busyRetryDelayMs);
+    m_busyRetryElapsedMs += m_busyRetryDelayMs;
+    m_busyRetryDelayMs = qMin(m_busyRetryDelayMs * 2, kSessionBusyRetryMaxDelayMs);
+}
 
-    notePromptOpened();
-    sendRequest(AcpProtocol::kMethodSessionPrompt, params,
-                [this](const QJsonValue &result, const QJsonValue &error) {
-                    Q_UNUSED(result);
-                    if (!error.isUndefined() && !error.isNull())
-                        emit requestFailed(rpcErrorMessage(error));
-                    notePromptClosed();
-                });
+void AcpConnection::stopSessionBusyRetry()
+{
+    if (m_sessionBusyRetryTimer)
+        m_sessionBusyRetryTimer->stop();
+    m_busyRetryPending = false;
+    m_busyRetryElapsedMs = 0;
+    m_busyRetryDelayMs = 0;
 }
 
 void AcpConnection::cancelPrompt()
 {
+    const bool hadBusyRetry = m_busyRetryPending;
+    stopSessionBusyRetry();
     QJsonObject params;
     params.insert(QStringLiteral("sessionId"), m_sessionId);
     sendNotification(AcpProtocol::kMethodSessionCancel, params);
+    if (hadBusyRetry)
+        notePromptClosed();
 }
 
 void AcpConnection::setMode(const QString &id)
@@ -830,16 +888,19 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
 
     if (kind == QLatin1String("agent_message_chunk")) {
         m_promptProducedOutput = true;
+        noteStreamingActivity();
         const QString text = AcpProtocol::contentBlockToChunkText(
             update.value(QStringLiteral("content")).toObject());
         emit messageChunk(text, update.value(QStringLiteral("messageId")).toString());
     } else if (kind == QLatin1String("agent_thought_chunk")) {
         m_promptProducedOutput = true;
+        noteStreamingActivity();
         const QString text = AcpProtocol::contentBlockToChunkText(
             update.value(QStringLiteral("content")).toObject());
         emit thoughtChunk(text);
     } else if (kind == QLatin1String("tool_call")) {
         m_promptProducedOutput = true;
+        noteStreamingActivity();
         AcpProtocol::AcpToolCall tc;
         tc.id = update.value(QStringLiteral("toolCallId")).toString();
         tc.title = update.value(QStringLiteral("title")).toString();
@@ -855,6 +916,7 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         emit toolCallReceived(tc);
     } else if (kind == QLatin1String("tool_call_update")) {
         m_promptProducedOutput = true;
+        noteStreamingActivity();
         AcpProtocol::AcpToolCallUpdate u;
         u.id = update.value(QStringLiteral("toolCallId")).toString();
         const QJsonValue title = update.value(QStringLiteral("title"));
@@ -895,6 +957,7 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         emit toolCallUpdated(u);
     } else if (kind == QLatin1String("plan")) {
         m_promptProducedOutput = true;
+        noteStreamingActivity();
         QList<AcpProtocol::AcpPlanEntry> plan;
         for (const auto &v : update.value(QStringLiteral("entries")).toArray()) {
             const QJsonObject o = v.toObject();
@@ -1401,6 +1464,10 @@ void AcpConnection::handleProcessFinished(int exitCode, QProcess::ExitStatus sta
                        .arg(status == QProcess::NormalExit ? QStringLiteral("normal")
                                                            : QStringLiteral("crash")));
     cancelAllPendingPermissions();
+    stopSessionBusyRetry();
+    if (m_promptIdleEndTimer)
+        m_promptIdleEndTimer->stop();
+    m_openPrompts = 0;
     // If the process died mid-turn, close the turn so the UI re-enables Send.
     endPrompt();
     // Surface the exit so the dock can switch into the "Agent exited" state.
@@ -1430,6 +1497,8 @@ void AcpConnection::beginPrompt()
 
 void AcpConnection::endPrompt()
 {
+    if (m_promptIdleEndTimer)
+        m_promptIdleEndTimer->stop();
     if (!m_promptInFlight)
         return;
     if (m_openPrompts > 0)
@@ -1440,6 +1509,8 @@ void AcpConnection::endPrompt()
 
 void AcpConnection::notePromptOpened()
 {
+    if (m_promptIdleEndTimer)
+        m_promptIdleEndTimer->stop();
     if (m_openPrompts == 0 && m_promptInFlight)
         m_openPrompts = 1;
     if (m_openPrompts++ == 0)
@@ -1451,7 +1522,22 @@ void AcpConnection::notePromptClosed()
     if (m_openPrompts > 0)
         --m_openPrompts;
     if (m_openPrompts == 0)
-        endPrompt();
+        schedulePromptIdleEnd();
+}
+
+void AcpConnection::noteStreamingActivity()
+{
+    if (!m_promptInFlight)
+        beginPrompt();
+    if (m_openPrompts == 0 && !m_busyRetryPending)
+        schedulePromptIdleEnd();
+}
+
+void AcpConnection::schedulePromptIdleEnd()
+{
+    if (!m_promptInFlight || m_openPrompts > 0 || m_busyRetryPending)
+        return;
+    m_promptIdleEndTimer->start(kPromptIdleEndDelayMs);
 }
 
 void AcpConnection::clearDebugLog()

@@ -10,6 +10,9 @@
 
 #include <QtTest>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 
 #include "AcpConnection.h"
@@ -43,6 +46,20 @@ public:
 
     void pushStdout(const QByteArray &chunk) { emit readyReadStdout(chunk); }
 
+    int sessionPromptCount() const
+    {
+        int n = 0;
+        qsizetype from = 0;
+        const QByteArray needle("\"method\":\"session/prompt\"");
+        while (true) {
+            const qsizetype i = written.indexOf(needle, from);
+            if (i < 0)
+                return n;
+            ++n;
+            from = i + needle.size();
+        }
+    }
+
     bool wroteSessionCancel() const
     {
         return written.contains("session/cancel");
@@ -51,6 +68,38 @@ public:
 private:
     bool m_running = false;
 };
+
+QByteArray rpcResultFrame(int id, const QJsonObject &result = {{QStringLiteral("stopReason"), QStringLiteral("end_turn")}})
+{
+    QJsonObject obj;
+    obj.insert(QStringLiteral("jsonrpc"), QStringLiteral("2.0"));
+    obj.insert(QStringLiteral("id"), id);
+    obj.insert(QStringLiteral("result"), result);
+    return QJsonDocument(obj).toJson(QJsonDocument::Compact) + '\n';
+}
+
+QByteArray rpcErrorFrame(int id, const QJsonObject &error)
+{
+    QJsonObject obj;
+    obj.insert(QStringLiteral("jsonrpc"), QStringLiteral("2.0"));
+    obj.insert(QStringLiteral("id"), id);
+    obj.insert(QStringLiteral("error"), error);
+    return QJsonDocument(obj).toJson(QJsonDocument::Compact) + '\n';
+}
+
+QByteArray sessionUpdateFrame(const QString &kind, const QJsonObject &extra = {})
+{
+    QJsonObject update = extra;
+    update.insert(QStringLiteral("sessionUpdate"), kind);
+    QJsonObject params;
+    params.insert(QStringLiteral("sessionId"), QStringLiteral("s1"));
+    params.insert(QStringLiteral("update"), update);
+    QJsonObject obj;
+    obj.insert(QStringLiteral("jsonrpc"), QStringLiteral("2.0"));
+    obj.insert(QStringLiteral("method"), QStringLiteral("session/update"));
+    obj.insert(QStringLiteral("params"), params);
+    return QJsonDocument(obj).toJson(QJsonDocument::Compact) + '\n';
+}
 
 class TestGoalAgent : public QObject
 {
@@ -109,6 +158,12 @@ private slots:
     void sidePrompt_whileTurnInFlight_doesNotEndTurn();
     void sidePrompts_twoGoalsWhileTurnInFlight_bothGoOutImmediately();
     void userPromptResult_whileGoalOutstanding_doesNotEndTurn();
+    void promptEnded_waitsIdleAfterRpcResult();
+    void promptEnded_chunkAfterRpcKeepsTurnOpen();
+    void promptEnded_availableCommandsDoesNotKeepTurnOpen();
+    void streamingChunk_whileIdle_startsTurn();
+    void sessionBusy_doesNotFail_retriesPrompt();
+    void sessionBusy_followUpAfterRpc_doesNotFireUntilIdle();
 };
 
 void TestGoalAgent::stop_doesNotCancelTargetAcpPrompt()
@@ -1547,7 +1602,7 @@ void TestGoalAgent::sidePrompt_whileTurnInFlight_doesNotEndTurn()
     QCOMPARE(started, 1);
 
     channel->pushStdout(QByteArray("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n"));
-    QCOMPARE(ended, 1);
+    QTRY_COMPARE(ended, 1);
 }
 
 void TestGoalAgent::sidePrompts_twoGoalsWhileTurnInFlight_bothGoOutImmediately()
@@ -1573,7 +1628,7 @@ void TestGoalAgent::sidePrompts_twoGoalsWhileTurnInFlight_bothGoOutImmediately()
     channel->pushStdout(QByteArray("{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}\n"));
     QCOMPARE(ended, 0);
     channel->pushStdout(QByteArray("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n"));
-    QCOMPARE(ended, 1);
+    QTRY_COMPARE(ended, 1);
 }
 
 void TestGoalAgent::userPromptResult_whileGoalOutstanding_doesNotEndTurn()
@@ -1594,7 +1649,166 @@ void TestGoalAgent::userPromptResult_whileGoalOutstanding_doesNotEndTurn()
     QCOMPARE(ended, 0);
 
     channel->pushStdout(QByteArray("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"stopReason\":\"end_turn\"}}\n"));
-    QCOMPARE(ended, 1);
+    QTRY_COMPARE(ended, 1);
+}
+
+void TestGoalAgent::promptEnded_waitsIdleAfterRpcResult()
+{
+    AcpConnection conn;
+    auto *channel = new RecordingChannel(&conn);
+    conn.attachChannelForTest(channel);
+    channel->start();
+    conn.setSessionIdForTest(QStringLiteral("s1"));
+
+    int ended = 0;
+    connect(&conn, &AcpConnection::promptEnded, &conn, [&]() { ++ended; });
+
+    conn.sendPrompt(QStringLiteral("hi"), {});
+    channel->pushStdout(rpcResultFrame(1));
+    QCOMPARE(ended, 0);
+    QTRY_COMPARE(ended, 1);
+}
+
+void TestGoalAgent::promptEnded_chunkAfterRpcKeepsTurnOpen()
+{
+    AcpConnection conn;
+    auto *channel = new RecordingChannel(&conn);
+    conn.attachChannelForTest(channel);
+    channel->start();
+    conn.setSessionIdForTest(QStringLiteral("s1"));
+
+    int ended = 0;
+    connect(&conn, &AcpConnection::promptEnded, &conn, [&]() { ++ended; });
+
+    conn.sendPrompt(QStringLiteral("hi"), {});
+    channel->pushStdout(rpcResultFrame(1));
+    QCOMPARE(ended, 0);
+
+    QJsonObject content;
+    content.insert(QStringLiteral("type"), QStringLiteral("text"));
+    content.insert(QStringLiteral("text"), QStringLiteral("still working"));
+    QTest::qWait(50);
+    QCOMPARE(ended, 0);
+    channel->pushStdout(sessionUpdateFrame(
+        QStringLiteral("agent_message_chunk"),
+        QJsonObject{{QStringLiteral("content"), content}}));
+    QTest::qWait(200);
+    QCOMPARE(ended, 0);
+    QTRY_COMPARE(ended, 1);
+}
+
+void TestGoalAgent::promptEnded_availableCommandsDoesNotKeepTurnOpen()
+{
+    AcpConnection conn;
+    auto *channel = new RecordingChannel(&conn);
+    conn.attachChannelForTest(channel);
+    channel->start();
+    conn.setSessionIdForTest(QStringLiteral("s1"));
+
+    int ended = 0;
+    connect(&conn, &AcpConnection::promptEnded, &conn, [&]() { ++ended; });
+
+    conn.sendPrompt(QStringLiteral("hi"), {});
+    channel->pushStdout(rpcResultFrame(1));
+    channel->pushStdout(sessionUpdateFrame(
+        QStringLiteral("available_commands_update"),
+        QJsonObject{{QStringLiteral("availableCommands"), QJsonArray{}}}));
+    QTRY_COMPARE(ended, 1);
+}
+
+void TestGoalAgent::streamingChunk_whileIdle_startsTurn()
+{
+    AcpConnection conn;
+    auto *channel = new RecordingChannel(&conn);
+    conn.attachChannelForTest(channel);
+    channel->start();
+    conn.setSessionIdForTest(QStringLiteral("s1"));
+
+    int started = 0;
+    int ended = 0;
+    connect(&conn, &AcpConnection::promptStarted, &conn, [&]() { ++started; });
+    connect(&conn, &AcpConnection::promptEnded, &conn, [&]() { ++ended; });
+
+    QJsonObject content;
+    content.insert(QStringLiteral("type"), QStringLiteral("text"));
+    content.insert(QStringLiteral("text"), QStringLiteral("autonomous"));
+    channel->pushStdout(sessionUpdateFrame(
+        QStringLiteral("agent_message_chunk"),
+        QJsonObject{{QStringLiteral("content"), content}}));
+    QCOMPARE(started, 1);
+    QCOMPARE(ended, 0);
+    QTRY_COMPARE(ended, 1);
+}
+
+void TestGoalAgent::sessionBusy_doesNotFail_retriesPrompt()
+{
+    AcpConnection conn;
+    auto *channel = new RecordingChannel(&conn);
+    conn.attachChannelForTest(channel);
+    channel->start();
+    conn.setSessionIdForTest(QStringLiteral("s1"));
+
+    int failed = 0;
+    int ended = 0;
+    connect(&conn, &AcpConnection::requestFailed, &conn, [&](const QString &msg) {
+        if (msg.contains(QLatin1String("already processing"), Qt::CaseInsensitive))
+            ++failed;
+    });
+    connect(&conn, &AcpConnection::promptEnded, &conn, [&]() { ++ended; });
+
+    conn.sendPrompt(QStringLiteral("hi"), {});
+    QCOMPARE(channel->sessionPromptCount(), 1);
+
+    QJsonObject err;
+    err.insert(QStringLiteral("code"), -32003);
+    err.insert(QStringLiteral("message"),
+               QStringLiteral("Agent is already processing. Use steer() or followUp() "
+                              "to queue messages, or wait for completion."));
+    QJsonObject data;
+    data.insert(QStringLiteral("reason"), QStringLiteral("session_busy"));
+    err.insert(QStringLiteral("data"), data);
+    channel->pushStdout(rpcErrorFrame(1, err));
+
+    QCOMPARE(failed, 0);
+    QCOMPARE(ended, 0);
+    QTRY_VERIFY(channel->sessionPromptCount() >= 2);
+
+    channel->pushStdout(rpcResultFrame(2));
+    QTRY_COMPARE(ended, 1);
+    QCOMPARE(failed, 0);
+}
+
+void TestGoalAgent::sessionBusy_followUpAfterRpc_doesNotFireUntilIdle()
+{
+    AcpConnection conn;
+    auto *channel = new RecordingChannel(&conn);
+    conn.attachChannelForTest(channel);
+    channel->start();
+    conn.setSessionIdForTest(QStringLiteral("s1"));
+
+    int followUps = 0;
+    connect(&conn, &AcpConnection::promptEnded, &conn, [&]() {
+        ++followUps;
+        conn.sendPrompt(QStringLiteral("goal follow-up"), {});
+    });
+
+    conn.sendPrompt(QStringLiteral("hi"), {});
+    channel->pushStdout(rpcResultFrame(1));
+    QCOMPARE(followUps, 0);
+    QCOMPARE(channel->sessionPromptCount(), 1);
+
+    QJsonObject content;
+    content.insert(QStringLiteral("type"), QStringLiteral("text"));
+    content.insert(QStringLiteral("text"), QStringLiteral("still going"));
+    channel->pushStdout(sessionUpdateFrame(
+        QStringLiteral("agent_message_chunk"),
+        QJsonObject{{QStringLiteral("content"), content}}));
+    QTest::qWait(200);
+    QCOMPARE(followUps, 0);
+    QCOMPARE(channel->sessionPromptCount(), 1);
+
+    QTRY_COMPARE(followUps, 1);
+    QCOMPARE(channel->sessionPromptCount(), 2);
 }
 
 QTEST_MAIN(TestGoalAgent)

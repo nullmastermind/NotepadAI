@@ -221,6 +221,11 @@ private:
     void endPrompt();
     void notePromptOpened();
     void notePromptClosed();
+    void noteStreamingActivity();
+    void schedulePromptIdleEnd();
+    void dispatchSessionPrompt(const QString &text, const QList<QPair<QByteArray, QString>> &images);
+    void startSessionBusyRetry(const QString &text, const QList<QPair<QByteArray, QString>> &images);
+    void stopSessionBusyRetry();
 
     // Append a single line to the debug ring buffer and also forward to the
     // lcAcp logging category. Safe to call from anywhere on the owning thread.
@@ -280,6 +285,12 @@ private:
     bool m_promptInFlight = false;
     int m_openPrompts = 0;
     bool m_promptProducedOutput = false;
+    QTimer *m_promptIdleEndTimer = nullptr;
+    QTimer *m_sessionBusyRetryTimer = nullptr;
+    PendingPrompt m_busyRetryPrompt;
+    bool m_busyRetryPending = false;
+    int m_busyRetryElapsedMs = 0;
+    int m_busyRetryDelayMs = 0;
 
     static constexpr int kDebugLogMaxLines = 2000;
     static constexpr int kDebugLogLineMaxChars = 4096;

@@ -535,7 +535,7 @@ protected:
     {
         if (!controller || !host)
             return;
-        const HWND hwnd = reinterpret_cast<HWND>(host->winId());
+        HWND hwnd = reinterpret_cast<HWND>(host->winId());
         if (!hwnd)
             return;
         controller->put_IsVisible(FALSE);
