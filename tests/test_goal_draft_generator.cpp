@@ -64,6 +64,7 @@ private slots:
     void conversationSummary_doesNotSplitSurrogatePairWhenTruncating();
     void conversationSummary_escapesToolCallXmlAttributes();
     void conversationSummary_omitsNonMutatingToolCalls();
+    void conversationSummary_omitsGoalJudgeRows();
     void conversationSummary_includesEditAndApplyPatchToolNames();
     void conversationSummary_mutatingToolCall_nameTitleAndKindFallback();
     void conversationSummary_includesBashAndPowershell_skipsGrep();
@@ -590,6 +591,32 @@ void TestGoalDraftGenerator::conversationSummary_omitsNonMutatingToolCalls()
     QVERIFY2(!xml.contains(QStringLiteral("id=\"read-1\"")), qPrintable(xml));
     QVERIFY2(!xml.contains(QStringLiteral("id=\"grep-1\"")), qPrintable(xml));
     QVERIFY(!xml.contains(QStringLiteral("\"pattern\":\"ls\"")));
+}
+
+void TestGoalDraftGenerator::conversationSummary_omitsGoalJudgeRows()
+{
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("gj-sum"),
+                          QStringLiteral("proj"),
+                          historyDir.path());
+    model.appendUserMessage(QStringLiteral("fix it"), {});
+    model.onMessageChunk(QStringLiteral("coding reply"));
+    model.appendGoalJudgeChunk(QStringLiteral("judge secret"));
+
+    AcpProtocol::AcpToolCall writeTc;
+    writeTc.id = QStringLiteral("write-1");
+    writeTc.title = QStringLiteral("Write");
+    writeTc.kind = QStringLiteral("edit");
+    writeTc.status = QStringLiteral("completed");
+    model.upsertGoalJudgeToolCall(writeTc);
+
+    const QString xml = GoalConversationSummary::fromModel(&model, 0);
+    QVERIFY2(xml.contains(QStringLiteral("fix it")), qPrintable(xml));
+    QVERIFY2(xml.contains(QStringLiteral("coding reply")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("judge secret")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("goal-judge:write-1")), qPrintable(xml));
+    QVERIFY2(!xml.contains(QStringLiteral("id=\"write-1\"")), qPrintable(xml));
 }
 
 void TestGoalDraftGenerator::conversationSummary_includesEditAndApplyPatchToolNames()

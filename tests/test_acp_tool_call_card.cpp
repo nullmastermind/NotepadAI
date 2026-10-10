@@ -35,6 +35,7 @@ private slots:
     void edit_full_file_old_new_shows_only_hunk();
     void numbered_full_file_dump_collapses_to_hunk();
     void omp_hashline_text_not_shown_when_diff_present();
+    void goalJudge_setsGoalAgentPropertyAndBadge();
 
 
 };
@@ -446,8 +447,24 @@ void TestAcpToolCallCard::omp_hashline_text_not_shown_when_diff_present()
     QVERIFY(!body.contains(QStringLiteral("86C8")));
 }
 
-
-
+void TestAcpToolCallCard::goalJudge_setsGoalAgentPropertyAndBadge()
+{
+    AcpToolCallCard card(baseCall());
+    QVERIFY(!card.property("goalAgent").toBool());
+    QVERIFY(card.isCollapsed());
+    card.setFromGoalAgent(true);
+    QCOMPARE(card.property("goalAgent").toBool(), true);
+    QVERIFY(card.isFromGoalAgent());
+    QVERIFY(card.isCollapsed());
+    bool found = false;
+    for (QLabel *label : card.findChildren<QLabel *>()) {
+        if (label->text() == QStringLiteral("Goal")) {
+            found = true;
+            break;
+        }
+    }
+    QVERIFY(found);
+}
 
 QTEST_MAIN(TestAcpToolCallCard)
 #include "test_acp_tool_call_card.moc"

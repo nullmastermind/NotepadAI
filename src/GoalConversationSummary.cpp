@@ -111,6 +111,8 @@ QString compactTruncated(const QJsonValue &value)
 
 void appendMessage(QString &xml, const AcpMessage &msg)
 {
+    if (msg.fromGoalJudge)
+        return;
     if (msg.role == QLatin1String("user")) {
         xml += QStringLiteral("  <message role=\"user\">")
                + textContent(msg).toHtmlEscaped()
@@ -273,7 +275,9 @@ QString GoalConversationSummary::fromModel(const AcpSessionModel *model, int sta
             continue;
         }
         const auto it = toolCalls.constFind(entry.toolCallId);
-        if (it != toolCalls.cend() && isMutatingToolCall(it.value()))
+        if (it != toolCalls.cend()
+            && !isGoalJudgeToolId(it.key())
+            && isMutatingToolCall(it.value()))
             appendToolCall(xml, it.value());
     }
 

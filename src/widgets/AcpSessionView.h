@@ -152,6 +152,8 @@ private slots:
     void onCurrentModeChanged(const QString &modeId);
     void onIsProcessingChanged(bool processing);
     void onTurnEnded(int groupId);
+    void onGoalJudgeTurnRemoved(const QVector<int> &messageIndices,
+                                const QStringList &toolCallIds);
     void onPermissionRequested(const AcpProtocol::AcpPermissionRequest &req);
     void onRequestFailed(const QString &message);
     void onErrorOccurred(AcpErrorClassifier::AcpErrorKind kind, const QString &friendly);

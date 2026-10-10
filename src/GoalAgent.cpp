@@ -13,8 +13,13 @@
 #include "GoalHttpJudge.h"
 #include "GoalHttpJudgeSession.h"
 #include "GoalPromptRenderer.h"
+#include "PiAcpJudgeConfig.h"
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QTemporaryDir>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QLoggingCategory>
@@ -77,6 +82,7 @@ bool GoalAgent::start(const StartRequest &req)
     m_lastActionText.clear();
     m_judgeResponseBuffer.clear();
     m_awaitingJudgeResponse = false;
+    m_judgeVerdictApplied = false;
     m_correctionAttempted = false;
     m_awaitingAuthoring = false;
     m_restartedSinceLastEval = false;
@@ -259,6 +265,7 @@ void GoalAgent::stop()
 
 void GoalAgent::markTerminal(Status s, const QString &reason)
 {
+    cancelJudgePromptTimeout();
     logDebug(QStringLiteral("markTerminal: %1, reason=%2").arg(s).arg(reason));
     if (m_targetConnection) {
         disconnect(m_targetConnection, &AcpConnection::promptEnded,
@@ -287,12 +294,180 @@ void GoalAgent::sendAutoCompactTo(AcpConnection *conn, AcpSessionModel *model)
 
 void GoalAgent::destroyJudgeConnection()
 {
+    collapseGoalJudgeTranscript();
+    m_judgeToolNames.clear();
+    m_judgeToolTitles.clear();
     if (m_judgeConnection) {
         logDebug(QStringLiteral("destroyJudgeConnection: tearing down judge"));
         disconnect(m_judgeConnection, nullptr, this, nullptr);
         m_judgeConnection->deleteLater();
         m_judgeConnection = nullptr;
     }
+    m_piJudgeAgentDir.reset();
+}
+
+void GoalAgent::attachVerdictMcp(AcpConnection *conn)
+{
+    if (!conn)
+        return;
+    if (m_targetConnection && m_targetConnection->executionContext()
+        && m_targetConnection->executionContext()->isRemote())
+        return;
+    const QString exe = QCoreApplication::applicationFilePath();
+    if (exe.isEmpty())
+        return;
+    QJsonObject server;
+    server.insert(QStringLiteral("name"), QStringLiteral("goal-verdict"));
+    server.insert(QStringLiteral("command"), exe);
+    server.insert(QStringLiteral("args"),
+                  QJsonArray{QStringLiteral("--goal-verdict-mcp")});
+    // ACP McpServerStdio requires env as EnvVariable[] — omit it and Zod
+    // agents (pi-acp, claude-agent-acp) reject session/new.
+    server.insert(QStringLiteral("env"), QJsonArray{});
+    conn->setMcpServers(QJsonArray{server});
+}
+
+void GoalAgent::stagePiAcpJudgeDir(AcpAgentDefinition *agent)
+{
+    if (!agent || !PiAcpJudgeConfig::isPiAcpAgent(*agent))
+        return;
+    if (m_targetConnection && m_targetConnection->executionContext()
+        && m_targetConnection->executionContext()->isRemote())
+        return;
+    m_piJudgeAgentDir = std::make_unique<QTemporaryDir>();
+    if (!m_piJudgeAgentDir->isValid()) {
+        m_piJudgeAgentDir.reset();
+        return;
+    }
+    const QString exe = QCoreApplication::applicationFilePath();
+    if (!PiAcpJudgeConfig::stageJudgeAgentDir(PiAcpJudgeConfig::sourceAgentDir(*agent),
+                                              m_piJudgeAgentDir->path(), exe)) {
+        m_piJudgeAgentDir.reset();
+        return;
+    }
+    agent->env.insert(QLatin1String(PiAcpJudgeConfig::kEnvAgentDir), m_piJudgeAgentDir->path());
+}
+
+void GoalAgent::considerJudgeVerdict(const QString &name, const QString &title,
+                                     const QJsonObject &rawInput)
+{
+    if (!m_awaitingJudgeResponse || m_judgeVerdictApplied)
+        return;
+    GoalAction action;
+    if (!GoalActionParser::parseToolCall(name, title, rawInput, &action))
+        return;
+    m_judgeVerdictApplied = true;
+    m_awaitingJudgeResponse = false;
+    cancelJudgePromptTimeout();
+    // Tool result does not end the judge turn. Cancel leftover generation
+    // before applyJudgeAction, which may session/prompt the same connection
+    // (authoring). A later evaluate must not queue behind that turn either.
+    if (m_judgeConnection)
+        m_judgeConnection->cancelPrompt();
+    applyJudgeAction(action);
+}
+
+void GoalAgent::handleJudgeToolCall(const AcpProtocol::AcpToolCall &tc)
+{
+    if (!m_awaitingJudgeResponse && !m_awaitingAuthoring)
+        return;
+    if (!tc.id.isEmpty()) {
+        if (!tc.name.isEmpty())
+            m_judgeToolNames.insert(tc.id, tc.name);
+        if (!tc.title.isEmpty())
+            m_judgeToolTitles.insert(tc.id, tc.title);
+    }
+    if (m_targetModel)
+        m_targetModel->upsertGoalJudgeToolCall(tc);
+    considerJudgeVerdict(tc.name, tc.title, tc.rawInput);
+}
+
+void GoalAgent::handleJudgeToolCallUpdate(const AcpProtocol::AcpToolCallUpdate &update)
+{
+    if (!m_awaitingJudgeResponse && !m_awaitingAuthoring)
+        return;
+    if (!update.id.isEmpty()) {
+        if (update.name && !update.name->isEmpty())
+            m_judgeToolNames.insert(update.id, *update.name);
+        if (update.title && !update.title->isEmpty())
+            m_judgeToolTitles.insert(update.id, *update.title);
+    }
+    if (m_targetModel)
+        m_targetModel->applyGoalJudgeToolCallUpdate(update);
+    // ACP tool_call_update omits unchanged fields. Name is only required on
+    // the first report; arguments often arrive later in rawInput.
+    const QString name = (update.name && !update.name->isEmpty())
+        ? *update.name
+        : m_judgeToolNames.value(update.id);
+    const QString title = (update.title && !update.title->isEmpty())
+        ? *update.title
+        : m_judgeToolTitles.value(update.id);
+    considerJudgeVerdict(name, title, update.rawInput.value_or(QJsonObject{}));
+}
+
+void GoalAgent::configureHeadlessJudge(AcpConnection *conn)
+{
+    if (!conn)
+        return;
+    // Same reason as AcpAgentManager::runHeadlessPrompt: this connection has
+    // no permission UI. Manual policy parks the request in
+    // m_pendingPermissions and the judge turn never ends.
+    conn->setAutoApprovePolicyProvider([]() {
+        return QStringLiteral("allowAll");
+    });
+}
+
+void GoalAgent::beginGoalJudgeTranscript(const QString &headline)
+{
+    if (!m_targetModel)
+        return;
+    m_targetModel->beginGoalJudgeTurn(headline);
+}
+
+void GoalAgent::finishGoalJudgeTranscript()
+{
+    if (m_targetModel)
+        m_targetModel->closeGoalJudgeStreaming();
+}
+
+void GoalAgent::collapseGoalJudgeTranscript()
+{
+    finishGoalJudgeTranscript();
+    if (m_targetModel)
+        m_targetModel->removeGoalJudgeTurn();
+}
+
+void GoalAgent::armJudgePromptTimeout()
+{
+    if (m_judgePromptTimeoutMs <= 0)
+        return;
+    if (!m_judgeTimeoutTimer) {
+        m_judgeTimeoutTimer = new QTimer(this);
+        m_judgeTimeoutTimer->setSingleShot(true);
+        connect(m_judgeTimeoutTimer, &QTimer::timeout, this, &GoalAgent::onJudgePromptTimedOut);
+    }
+    m_judgeTimeoutTimer->start(m_judgePromptTimeoutMs);
+}
+
+void GoalAgent::cancelJudgePromptTimeout()
+{
+    if (m_judgeTimeoutTimer)
+        m_judgeTimeoutTimer->stop();
+}
+
+void GoalAgent::onJudgePromptTimedOut()
+{
+    if (m_status != Active)
+        return;
+    if (!m_awaitingJudgeResponse && !m_awaitingAuthoring)
+        return;
+    logDebug(QStringLiteral("onJudgePromptTimedOut: judge did not end the turn"));
+    m_awaitingJudgeResponse = false;
+    m_awaitingAuthoring = false;
+    finishGoalJudgeTranscript();
+    m_lastActionText = tr("Goal agent did not return a verdict.");
+    destroyJudgeConnection();
+    markTerminal(Failed, QStringLiteral("judge_timeout"));
 }
 
 void GoalAgent::spawnJudgeForCriterion(int index)
@@ -308,9 +483,19 @@ void GoalAgent::spawnJudgeForCriterion(int index)
 
     auto *conn = new AcpConnection(this);
     m_judgeConnection = conn;
+    configureHeadlessJudge(conn);
+    attachVerdictMcp(conn);
 
     connect(conn, &AcpConnection::messageChunk,
             this, &GoalAgent::onJudgeMessageChunk);
+    connect(conn, &AcpConnection::thoughtChunk, this, [this](const QString &chunk) {
+        if (!m_awaitingJudgeResponse && !m_awaitingAuthoring)
+            return;
+        if (m_targetModel)
+            m_targetModel->appendGoalJudgeThoughtChunk(chunk);
+    });
+    connect(conn, &AcpConnection::toolCallReceived, this, &GoalAgent::handleJudgeToolCall);
+    connect(conn, &AcpConnection::toolCallUpdated, this, &GoalAgent::handleJudgeToolCallUpdate);
     connect(conn, &AcpConnection::promptEnded,
             this, &GoalAgent::onJudgePromptEnded);
     connect(conn, &AcpConnection::agentExited,
@@ -326,6 +511,8 @@ void GoalAgent::spawnJudgeForCriterion(int index)
         && m_targetConnection->executionContext()->isRemote() && m_manager) {
         conn->setRemoteSpawn(m_targetConnection->executionContext(),
                              m_manager->remoteChannelBuilder());
+    } else {
+        stagePiAcpJudgeDir(&agent);
     }
     conn->spawn(agent, cwd);
 
@@ -382,6 +569,9 @@ void GoalAgent::evaluateCurrentCriterion()
     }
 
     m_awaitingJudgeResponse = true;
+    m_judgeVerdictApplied = false;
+    m_judgeToolNames.clear();
+    m_judgeToolTitles.clear();
     m_correctionAttempted = false;
     m_judgeResponseBuffer.clear();
 
@@ -417,24 +607,40 @@ void GoalAgent::evaluateCurrentCriterion()
 
     logDebug(QStringLiteral("evaluateCurrentCriterion: sending judge prompt (%1 chars)")
                  .arg(prompt.size()));
+    beginGoalJudgeTranscript(tr("Goal · judging %1/%2")
+                                 .arg(m_currentCriterionIndex + 1)
+                                 .arg(m_criteria.size()));
     m_judgeConnection->sendPrompt(prompt, {});
+    armJudgePromptTimeout();
 }
 
 void GoalAgent::onJudgeMessageChunk(const QString &chunk)
 {
-    if (!m_awaitingJudgeResponse)
+    if (m_awaitingAuthoring) {
+        m_authoringBuffer.append(chunk);
+    } else if (m_awaitingJudgeResponse) {
+        m_judgeResponseBuffer.append(chunk);
+        if (m_judgeResponseBuffer.size() == chunk.size()) {
+            logDebug(QStringLiteral("onJudgeMessageChunk: first chunk (%1 chars)").arg(chunk.size()));
+        }
+    } else {
         return;
-    m_judgeResponseBuffer.append(chunk);
-    if (m_judgeResponseBuffer.size() == chunk.size()) {
-        logDebug(QStringLiteral("onJudgeMessageChunk: first chunk (%1 chars)").arg(chunk.size()));
     }
+    if (!m_targetModel)
+        return;
+    const QString &raw = m_awaitingAuthoring ? m_authoringBuffer : m_judgeResponseBuffer;
+    const QString shown = GoalActionParser::displayText(raw);
+    if (!shown.isEmpty())
+        m_targetModel->replaceGoalJudgeText(shown);
 }
 
 void GoalAgent::onJudgePromptEnded()
 {
     if (!m_awaitingJudgeResponse)
         return;
+    cancelJudgePromptTimeout();
     m_awaitingJudgeResponse = false;
+    finishGoalJudgeTranscript();
     logDebug(QStringLiteral("onJudgePromptEnded: response %1 chars, content=%2")
                  .arg(m_judgeResponseBuffer.size())
                  .arg(m_judgeResponseBuffer.left(300)));
@@ -468,7 +674,11 @@ void GoalAgent::processJudgeResponse()
             m_correctionAttempted = true;
             m_judgeResponseBuffer.clear();
             m_awaitingJudgeResponse = true;
+            beginGoalJudgeTranscript(tr("Goal · judging %1/%2")
+                                         .arg(m_currentCriterionIndex + 1)
+                                         .arg(m_criteria.size()));
             m_judgeConnection->sendPrompt(GoalActionParser::correctionPrompt(), {});
+            armJudgePromptTimeout();
             return;
         }
         markTerminal(Failed, QStringLiteral("parse_failure_2x"));
@@ -484,6 +694,7 @@ void GoalAgent::applyJudgeAction(const GoalAction &action)
     if (m_status != Active)
         return;
 
+    collapseGoalJudgeTranscript();
     m_lastActionText = action.text;
     QString typeName = QStringLiteral("continue");
     if (action.type == GoalAction::Complete)
@@ -698,13 +909,8 @@ void GoalAgent::beginAuthoringStep(const QString &verdict)
     m_authoringBuffer.clear();
     m_authoringVerdict = verdict;
 
-    // Disconnect the normal judge response handlers and wire authoring handlers.
-    disconnect(m_judgeConnection, &AcpConnection::messageChunk,
-               this, &GoalAgent::onJudgeMessageChunk);
     disconnect(m_judgeConnection, &AcpConnection::promptEnded,
                this, &GoalAgent::onJudgePromptEnded);
-    connect(m_judgeConnection, &AcpConnection::messageChunk,
-            this, &GoalAgent::onAuthoringChunk);
     connect(m_judgeConnection, &AcpConnection::promptEnded,
             this, &GoalAgent::onAuthoringPromptEnded);
 
@@ -731,21 +937,18 @@ void GoalAgent::beginAuthoringStep(const QString &verdict)
 
     logDebug(QStringLiteral("beginAuthoringStep: sending authoring prompt to old judge (%1 chars)")
                  .arg(authoringPrompt.size()));
+    beginGoalJudgeTranscript(tr("Goal · authoring next criterion"));
     m_judgeConnection->sendPrompt(authoringPrompt, {});
-}
-
-void GoalAgent::onAuthoringChunk(const QString &chunk)
-{
-    if (!m_awaitingAuthoring)
-        return;
-    m_authoringBuffer.append(chunk);
+    armJudgePromptTimeout();
 }
 
 void GoalAgent::onAuthoringPromptEnded()
 {
     if (!m_awaitingAuthoring)
         return;
+    cancelJudgePromptTimeout();
     m_awaitingAuthoring = false;
+    finishGoalJudgeTranscript();
 
     QString authored = m_authoringBuffer.trimmed();
     logDebug(QStringLiteral("onAuthoringPromptEnded: authored %1 chars, content=%2")
@@ -897,6 +1100,11 @@ void GoalAgent::evaluateViaHttp()
 
     m_awaitingJudgeResponse = true;
     logDebug(QStringLiteral("evaluateViaHttp: prompt=%1 chars").arg(prompt.size()));
+    beginGoalJudgeTranscript(tr("Goal · judging %1/%2")
+                                 .arg(m_currentCriterionIndex + 1)
+                                 .arg(m_criteria.size()));
+    if (m_targetModel)
+        m_targetModel->appendGoalJudgeChunk(tr("Goal is judging…"));
     m_httpSession->evaluate(m_appSettings, prompt);
 }
 
@@ -905,6 +1113,8 @@ void GoalAgent::onHttpVerdict(const GoalAction &action)
     if (m_status != Active)
         return;
     m_awaitingJudgeResponse = false;
+    if (m_targetModel)
+        m_targetModel->replaceGoalJudgeText(action.text);
     applyJudgeAction(action);
 }
 
@@ -914,6 +1124,8 @@ void GoalAgent::onHttpAssumedAchieved(const QString &reason)
         return;
     m_awaitingJudgeResponse = false;
     logDebug(QStringLiteral("onHttpAssumedAchieved: %1").arg(reason.left(120)));
+    if (m_targetModel)
+        m_targetModel->replaceGoalJudgeText(reason);
     GoalAction action;
     action.type = GoalAction::Complete;
     action.text = reason;
@@ -936,5 +1148,6 @@ void GoalAgent::onHttpFailed(const QString &message)
     }
     m_lastActionText = userMessage;
     logDebug(QStringLiteral("onHttpFailed: %1").arg(message));
+    collapseGoalJudgeTranscript();
     markTerminal(Failed, userMessage);
 }

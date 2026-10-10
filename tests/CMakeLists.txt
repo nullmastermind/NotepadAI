@@ -1915,6 +1915,10 @@ target_sources(test_goal_agent PRIVATE
     ${CMAKE_SOURCE_DIR}/src/DataPaths.h
     ${CMAKE_SOURCE_DIR}/src/GoalActionParser.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalActionParser.h
+    ${CMAKE_SOURCE_DIR}/src/GoalVerdictMcp.cpp
+    ${CMAKE_SOURCE_DIR}/src/GoalVerdictMcp.h
+    ${CMAKE_SOURCE_DIR}/src/PiAcpJudgeConfig.cpp
+    ${CMAKE_SOURCE_DIR}/src/PiAcpJudgeConfig.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.cpp
     ${CMAKE_SOURCE_DIR}/src/GoalAgent.h
     ${CMAKE_SOURCE_DIR}/src/GoalAgentSettings.cpp

@@ -33,6 +33,7 @@
 
 #include "CrashHandler.h"
 #include "DataPaths.h"
+#include "GoalVerdictMcp.h"
 #include "NotepadNextApplication.h"
 #include "ShutdownDiagnostics.h"
 
@@ -49,6 +50,8 @@ try
     // Test-only CLI flag wired up to scripts/test-crash-handler.sh. Parsed
     // before QApplication so we don't depend on SingleApplication forwarding.
     for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], GoalVerdictMcp::kCliFlag) == 0)
+            return GoalVerdictMcp::run();
         const char *prefix = "--__trigger-crash=";
         if (std::strncmp(argv[i], prefix, std::strlen(prefix)) == 0) {
             CrashHandler::triggerCrashForTest(argv[i] + std::strlen(prefix));

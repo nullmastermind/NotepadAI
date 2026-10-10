@@ -216,6 +216,7 @@ void AcpSessionModel::loadFromDisk()
             msg.exitCode = ec.toInt();
         }
         msg.fromGoalAgent = mo.value(QStringLiteral("fromGoalAgent")).toBool(false);
+        msg.fromGoalJudge = mo.value(QStringLiteral("fromGoalJudge")).toBool(false);
         msg.marker = mo.value(QStringLiteral("marker")).toString();
         m_messages.append(msg);
     }
@@ -298,6 +299,9 @@ QJsonObject AcpSessionModel::toHistoryJson() const
         }
         if (m.fromGoalAgent) {
             mo.insert(QStringLiteral("fromGoalAgent"), true);
+        }
+        if (m.fromGoalJudge) {
+            mo.insert(QStringLiteral("fromGoalJudge"), true);
         }
         if (!m.marker.isEmpty()) {
             mo.insert(QStringLiteral("marker"), m.marker);
@@ -896,5 +900,213 @@ void AcpSessionModel::appendSystemMessage(const QString &text, const QString &ma
     m_timeline.append(entry);
 
     emit messageAppended(idx);
+    schedulePersistIfNeeded();
+}
+
+namespace {
+
+QString namespacedGoalJudgeToolId(const QString &id)
+{
+    if (id.startsWith(QLatin1String(kGoalJudgeToolIdPrefix)))
+        return id;
+    return QString(QLatin1String(kGoalJudgeToolIdPrefix)) + id;
+}
+
+} // namespace
+
+void AcpSessionModel::beginGoalJudgeTurn(const QString &text)
+{
+    ++m_currentGroupId;
+    closeGoalJudgeStreaming();
+    if (m_goalJudgeTurnMessageBegin < 0) {
+        m_goalJudgeTurnMessageBegin = m_messages.size();
+        m_goalJudgeTurnTimelineBegin = m_timeline.size();
+        appendSystemMessage(text, QLatin1String(kAcpMarkerGoalJudging));
+    }
+}
+
+void AcpSessionModel::closeGoalJudgeStreaming()
+{
+    m_streamingGoalJudgeAssistantIndex = -1;
+    m_streamingGoalJudgeThoughtIndex = -1;
+}
+
+void AcpSessionModel::appendGoalJudgeChunk(const QString &text)
+{
+    m_streamingGoalJudgeThoughtIndex = -1;
+
+    if (m_streamingGoalJudgeAssistantIndex < 0) {
+        if (text.trimmed().isEmpty())
+            return;
+        AcpMessage msg;
+        msg.role = QStringLiteral("assistant");
+        msg.timestamp = QDateTime::currentMSecsSinceEpoch();
+        msg.fromGoalJudge = true;
+        AcpContentBlock block;
+        block.kind = AcpContentBlock::Kind::Text;
+        block.text = text;
+        msg.content.append(block);
+        m_messages.append(msg);
+        const int idx = m_messages.size() - 1;
+        m_streamingGoalJudgeAssistantIndex = idx;
+
+        AcpTimelineEntry entry;
+        entry.kind = AcpTimelineEntry::Kind::Message;
+        entry.messageIndex = idx;
+        entry.groupId = m_currentGroupId;
+        m_timeline.append(entry);
+
+        emit messageAppended(idx);
+    } else {
+        const int idx = m_streamingGoalJudgeAssistantIndex;
+        AcpMessage &msg = m_messages[idx];
+        if (msg.content.isEmpty()
+            || msg.content.first().kind != AcpContentBlock::Kind::Text) {
+            AcpContentBlock block;
+            block.kind = AcpContentBlock::Kind::Text;
+            block.text = text;
+            msg.content.prepend(block);
+            emit messageChunkAppended(idx, text);
+        } else {
+            msg.content.first().text.append(text);
+            emit messageChunkAppended(idx, text);
+        }
+    }
+    schedulePersistIfNeeded();
+}
+
+void AcpSessionModel::appendGoalJudgeThoughtChunk(const QString &text)
+{
+    if (m_streamingGoalJudgeThoughtIndex < 0) {
+        if (text.trimmed().isEmpty())
+            return;
+        m_streamingGoalJudgeAssistantIndex = -1;
+
+        AcpMessage msg;
+        msg.role = QStringLiteral("thought");
+        msg.timestamp = QDateTime::currentMSecsSinceEpoch();
+        msg.fromGoalJudge = true;
+        AcpContentBlock block;
+        block.kind = AcpContentBlock::Kind::Text;
+        block.text = text;
+        msg.content.append(block);
+        m_messages.append(msg);
+        const int idx = m_messages.size() - 1;
+        m_streamingGoalJudgeThoughtIndex = idx;
+
+        AcpTimelineEntry entry;
+        entry.kind = AcpTimelineEntry::Kind::Message;
+        entry.messageIndex = idx;
+        entry.groupId = m_currentGroupId;
+        m_timeline.append(entry);
+
+        emit thoughtAppended(idx);
+    } else {
+        const int idx = m_streamingGoalJudgeThoughtIndex;
+        AcpMessage &msg = m_messages[idx];
+        if (msg.content.isEmpty()
+            || msg.content.first().kind != AcpContentBlock::Kind::Text) {
+            AcpContentBlock block;
+            block.kind = AcpContentBlock::Kind::Text;
+            block.text = text;
+            msg.content.prepend(block);
+        } else {
+            msg.content.first().text.append(text);
+        }
+        emit thoughtChunkAppended(idx, text);
+    }
+    schedulePersistIfNeeded();
+}
+
+void AcpSessionModel::upsertGoalJudgeToolCall(const AcpToolCall &tc)
+{
+    AcpToolCall copy = tc;
+    copy.id = namespacedGoalJudgeToolId(tc.id);
+    closeGoalJudgeStreaming();
+    const int assistantIdx = m_streamingAssistantMessageIndex;
+    const int thoughtIdx = m_streamingThoughtMessageIndex;
+    const QString assistantId = m_streamingAssistantMessageId;
+    onToolCallReceived(copy);
+    m_streamingAssistantMessageIndex = assistantIdx;
+    m_streamingThoughtMessageIndex = thoughtIdx;
+    m_streamingAssistantMessageId = assistantId;
+}
+
+void AcpSessionModel::applyGoalJudgeToolCallUpdate(const AcpToolCallUpdate &update)
+{
+    AcpToolCallUpdate u = update;
+    u.id = namespacedGoalJudgeToolId(update.id);
+    const bool existed = m_toolCalls.contains(u.id);
+    if (!existed)
+        closeGoalJudgeStreaming();
+    const int assistantIdx = m_streamingAssistantMessageIndex;
+    const int thoughtIdx = m_streamingThoughtMessageIndex;
+    const QString assistantId = m_streamingAssistantMessageId;
+    onToolCallUpdated(u);
+    m_streamingAssistantMessageIndex = assistantIdx;
+    m_streamingThoughtMessageIndex = thoughtIdx;
+    m_streamingAssistantMessageId = assistantId;
+}
+
+void AcpSessionModel::replaceGoalJudgeText(const QString &fullText)
+{
+    int idx = m_streamingGoalJudgeAssistantIndex;
+    if (idx < 0) {
+        for (int i = m_messages.size() - 1; i >= 0; --i) {
+            if (m_messages.at(i).fromGoalJudge
+                && m_messages.at(i).role == QLatin1String("assistant")) {
+                idx = i;
+                break;
+            }
+        }
+    }
+    if (idx < 0) {
+        appendGoalJudgeChunk(fullText);
+        return;
+    }
+    AcpMessage &msg = m_messages[idx];
+    if (msg.content.isEmpty()
+        || msg.content.first().kind != AcpContentBlock::Kind::Text) {
+        msg.content.clear();
+        AcpContentBlock block;
+        block.kind = AcpContentBlock::Kind::Text;
+        block.text = fullText;
+        msg.content.append(block);
+    } else {
+        msg.content.first().text = fullText;
+    }
+    m_streamingGoalJudgeAssistantIndex = idx;
+    emit messageReplaced(idx, fullText);
+    schedulePersistIfNeeded();
+}
+
+void AcpSessionModel::removeGoalJudgeTurn()
+{
+    if (m_goalJudgeTurnMessageBegin < 0)
+        return;
+    const int tlBegin = m_goalJudgeTurnTimelineBegin;
+    const int msgBegin = m_goalJudgeTurnMessageBegin;
+    QVector<int> removedMsg;
+    QStringList removedTools;
+    if (tlBegin >= 0 && tlBegin < m_timeline.size()) {
+        removedMsg.reserve(m_timeline.size() - tlBegin);
+        for (int i = tlBegin; i < m_timeline.size(); ++i) {
+            const AcpTimelineEntry &e = m_timeline.at(i);
+            if (e.kind == AcpTimelineEntry::Kind::ToolCall) {
+                removedTools.append(e.toolCallId);
+                m_toolCalls.remove(e.toolCallId);
+            } else if (e.messageIndex >= 0) {
+                removedMsg.append(e.messageIndex);
+            }
+        }
+        m_timeline.resize(tlBegin);
+    }
+    if (msgBegin >= 0 && msgBegin < m_messages.size())
+        m_messages.resize(msgBegin);
+    closeGoalJudgeStreaming();
+    m_goalJudgeTurnMessageBegin = -1;
+    m_goalJudgeTurnTimelineBegin = -1;
+    if (!removedMsg.isEmpty() || !removedTools.isEmpty())
+        emit goalJudgeTurnRemoved(removedMsg, removedTools);
     schedulePersistIfNeeded();
 }

@@ -36,6 +36,7 @@ class QShowEvent;
 class AcpToolCallCard : public QFrame
 {
     Q_OBJECT
+    Q_PROPERTY(bool goalAgent READ isFromGoalAgent)
 
 public:
     explicit AcpToolCallCard(const AcpProtocol::AcpToolCall &initial, QWidget *parent = nullptr);
@@ -45,6 +46,10 @@ public:
     QString id() const { return m_id; }
     QString status() const { return m_status; }
     int groupId() const { return m_groupId; }
+
+    void setFromGoalAgent(bool goal);
+    void setGoalTint(bool on);
+    bool isFromGoalAgent() const { return m_fromGoalAgent; }
 
     void setCollapsed(bool collapsed);
     bool isCollapsed() const { return m_collapsed; }
@@ -96,6 +101,7 @@ private:
     bool m_chatFontSet = false;
 
     bool m_collapsed = false;
+    bool m_fromGoalAgent = false;
     bool m_userToggled = false;          // user has explicitly clicked the chevron
     bool m_autoExpandedForDiff = false;  // we've already auto-expanded once for a completed diff
     bool m_bodyDirty = true;             // body document is stale vs m_content/rawInput/rawOutput

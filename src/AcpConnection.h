@@ -21,6 +21,7 @@
 
 #include <QByteArray>
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QList>
@@ -75,6 +76,7 @@ public:
     // Auto-approve policy provider — Group 4 will hand a lambda that queries
     // the registry at request time so the latest policy is always observed.
     void setAutoApprovePolicyProvider(std::function<QString()> provider);
+    void setMcpServers(const QJsonArray &servers);
 
     QString sessionId() const { return m_sessionId; }
     AcpProtocol::AcpAgentInfo agentInfo() const { return m_agentInfo; }
@@ -108,6 +110,7 @@ public:
     }
 
     void setSessionIdForTest(const QString &id) { m_sessionId = id; }
+    QJsonArray mcpServersForTest() const { return m_mcpServers; }
 
 public slots:
     // Outbound request slots — wrappers that build params and dispatch.
@@ -266,6 +269,7 @@ private:
     QList<AcpProtocol::AcpModelInfo> m_models;
     QString m_currentModel;
     QList<AcpProtocol::AcpConfigOption> m_configOptions;
+    QJsonArray m_mcpServers;
 
     QHash<QString, std::function<void(const QString &outcome, const QString &optionId)>> m_pendingPermissions;
     std::function<QString()> m_autoApproveProvider;

@@ -263,6 +263,9 @@ AcpContentBlock contentBlockFromJson(const QJsonObject &obj);
 // no `.text`; fold name+uri into a markdown link so assistant bubbles (which
 // already render markdown with open-external-links) show a clickable path.
 QString contentBlockToChunkText(const QJsonObject &content);
+// pi-acp emits queue depth as agent_message_chunk. Drop those notices so they
+// are not assistant bubbles. Empty result = do not emit the chunk.
+QString stripPiAcpQueueNotices(QString text);
 
 // PI/Zed execute-tool `_meta.terminal_output.data` (empty if absent).
 QString terminalOutputDeltaFromMeta(const QJsonObject &meta);

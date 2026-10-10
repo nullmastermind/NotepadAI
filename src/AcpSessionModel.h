@@ -48,12 +48,22 @@ struct AcpMessage
     std::optional<QString> command;
     std::optional<int> exitCode;
     bool fromGoalAgent = false;
+    // Judge output mirrored into the target transcript. Distinct from
+    // fromGoalAgent (user prompts Goal sent *to* the coding agent).
+    bool fromGoalJudge = false;
     // Locale-stable tag for host-generated system rows. Display text is tr()'d;
     // the summarizer keys off this, not the translated body.
     QString marker;
 };
 
 inline constexpr char kAcpMarkerGoalAchieved[] = "goal-achieved";
+inline constexpr char kAcpMarkerGoalJudging[] = "goal-judging";
+inline constexpr char kGoalJudgeToolIdPrefix[] = "goal-judge:";
+
+inline bool isGoalJudgeToolId(const QString &id)
+{
+    return id.startsWith(QLatin1String(kGoalJudgeToolIdPrefix));
+}
 
 // One entry in the rendered transcript ordering. Either a pointer (by index)
 // into m_messages, or a tool-call id pointing into m_toolCalls. groupId
@@ -164,6 +174,17 @@ public slots:
                            bool fromGoalAgent = false);
     void appendSystemMessage(const QString &text, const QString &marker = {});
 
+    // Goal-judge mirror. Does not touch coding-agent streaming indices or
+    // isProcessing. Tool-call ids are stored with prefix kGoalJudgeToolIdPrefix.
+    void beginGoalJudgeTurn(const QString &text);
+    void appendGoalJudgeChunk(const QString &text);
+    void appendGoalJudgeThoughtChunk(const QString &text);
+    void upsertGoalJudgeToolCall(const AcpProtocol::AcpToolCall &tc);
+    void applyGoalJudgeToolCallUpdate(const AcpProtocol::AcpToolCallUpdate &update);
+    void replaceGoalJudgeText(const QString &fullText);
+    void closeGoalJudgeStreaming();
+    void removeGoalJudgeTurn();
+
 signals:
     void metadataChanged();
     void messageAppended(int idx);
@@ -180,6 +201,8 @@ signals:
     void usageChanged();
     void isProcessingChanged(bool processing);
     void turnEnded(int groupId);
+    void goalJudgeTurnRemoved(const QVector<int> &messageIndices,
+                              const QStringList &toolCallIds);
 
 private:
     void schedulePersistIfNeeded();
@@ -217,6 +240,10 @@ private:
     int m_streamingAssistantMessageIndex = -1;
     QString m_streamingAssistantMessageId;
     int m_streamingThoughtMessageIndex = -1;
+    int m_streamingGoalJudgeAssistantIndex = -1;
+    int m_streamingGoalJudgeThoughtIndex = -1;
+    int m_goalJudgeTurnMessageBegin = -1;
+    int m_goalJudgeTurnTimelineBegin = -1;
 };
 
 #endif // ACP_SESSION_MODEL_H

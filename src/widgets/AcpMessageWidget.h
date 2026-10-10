@@ -63,6 +63,8 @@ public:
     void markStreamingDone();
 
     void setFromGoalAgent(bool goal);
+    // King-gold frame without the Goal badge — live judge streaming.
+    void setGoalTint(bool on);
     bool isFromGoalAgent() const { return m_fromGoalAgent; }
 
     // Apply the chat (Default Font) typeface explicitly. Required because this
@@ -134,6 +136,7 @@ private:
 
     QTextBrowser *m_browser = nullptr;     // assistant + non-thought rendered widgets
     QToolButton *m_thoughtHeader = nullptr; // thought role
+    QLabel *m_goalBadge = nullptr;         // Goal badge on result rows
     QVBoxLayout *m_layout = nullptr;
 
     // Hover copy button for fenced code blocks (assistant role only). One

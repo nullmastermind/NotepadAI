@@ -1,24 +1,35 @@
 #ifndef GOAL_AGENT_H
 #define GOAL_AGENT_H
 
+#include <QHash>
+#include <QJsonObject>
 #include <QList>
 #include <QObject>
 #include <QPointer>
 #include <QProcess>
 #include <QString>
 #include <QStringList>
+#include <QTemporaryDir>
+#include <QTimer>
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 
 #include "GoalActionParser.h"
 #include "GoalAgentSettings.h"
 
+class AcpAgentDefinition;
 class AcpAgentManager;
 class AcpConnection;
 class AcpSessionModel;
 class ApplicationSettings;
 class GoalHttpJudgeSession;
+
+namespace AcpProtocol {
+struct AcpToolCall;
+struct AcpToolCallUpdate;
+}
 
 class GoalAgent : public QObject
 {
@@ -168,6 +179,7 @@ private slots:
     void onJudgeMessageChunk(const QString &chunk);
     void onJudgePromptEnded();
     void onJudgeExited(int exitCode, QProcess::ExitStatus exitStatus);
+    void onJudgePromptTimedOut();
 
 private:
     void setStatus(Status s);
@@ -176,7 +188,6 @@ private:
     void processJudgeResponse();
     void advanceToNextCriterion(const QString &verdict);
     void beginAuthoringStep(const QString &verdict);
-    void onAuthoringChunk(const QString &chunk);
     void onAuthoringPromptEnded();
     void finalizeHandoff(const QString &verdict, const QString &authoredText,
                          bool authoringSucceeded);
@@ -184,9 +195,21 @@ private:
     void maybeSendAutoCompact();
     void destroyJudgeConnection();
     void spawnJudgeForCriterion(int index);
+    void configureHeadlessJudge(AcpConnection *conn);
+    void beginGoalJudgeTranscript(const QString &headline);
+    void finishGoalJudgeTranscript();
+    void collapseGoalJudgeTranscript();
+    void armJudgePromptTimeout();
+    void cancelJudgePromptTimeout();
     void evaluateViaHttp();
     void ensureHttpJudge();
     void applyJudgeAction(const GoalAction &action);
+    void considerJudgeVerdict(const QString &name, const QString &title,
+                              const QJsonObject &rawInput);
+    void handleJudgeToolCall(const AcpProtocol::AcpToolCall &tc);
+    void handleJudgeToolCallUpdate(const AcpProtocol::AcpToolCallUpdate &update);
+    void attachVerdictMcp(AcpConnection *conn);
+    void stagePiAcpJudgeDir(AcpAgentDefinition *agent);
     bool consumeIfMaxIterations();
     void skipToNextCriterionAfterMaxIter();
     void restartWatchedSession(const QString &prompt);
@@ -225,6 +248,9 @@ private:
 
     QString m_judgeResponseBuffer;
     bool m_awaitingJudgeResponse = false;
+    bool m_judgeVerdictApplied = false;
+    QHash<QString, QString> m_judgeToolNames;
+    QHash<QString, QString> m_judgeToolTitles;
     bool m_correctionAttempted = false;
     int m_lastSeenTargetMessageCount = 0;
     bool m_restartingTarget = false;
@@ -235,6 +261,9 @@ private:
     bool m_awaitingAuthoring = false;
     QString m_authoringBuffer;
     QString m_authoringVerdict;
+    int m_judgePromptTimeoutMs = 10 * 60 * 1000;
+    QTimer *m_judgeTimeoutTimer = nullptr;
+    std::unique_ptr<QTemporaryDir> m_piJudgeAgentDir;
 };
 
 #endif // GOAL_AGENT_H

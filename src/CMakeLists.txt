@@ -25,6 +25,8 @@ qt_add_executable(NotepadAI
 	GoalConversationSummary.h
 	GoalDraftGenerator.h
 	GoalPromptRenderer.h
+	GoalVerdictMcp.h
+	PiAcpJudgeConfig.h
 	BrowserProxyArgs.h
 	QuickBrowseUrl.h
 	FaviconIcon.h
@@ -137,6 +139,8 @@ qt_add_executable(NotepadAI
 	GoalConversationSummary.cpp
 	GoalDraftGenerator.cpp
 	GoalPromptRenderer.cpp
+	GoalVerdictMcp.cpp
+	PiAcpJudgeConfig.cpp
 	BrowserProxyArgs.cpp
 	QuickBrowseUrl.cpp
 	FaviconIcon.cpp

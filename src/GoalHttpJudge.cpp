@@ -48,32 +48,21 @@ bool GoalHttpJudge::parseResponse(const QByteArray &json, GoalAction *out, Parse
         }
         if (type != QLatin1String("tool_use"))
             continue;
-        if (block.value(QLatin1String("name")).toString() != QLatin1String(kToolName))
-            continue;
-
-        const QJsonObject input = block.value(QLatin1String("input")).toObject();
-        const QString status = input.value(QLatin1String("status")).toString().toLower();
-        const QString text = input.value(QLatin1String("text")).toString().trimmed();
-
-        if (status != QLatin1String("continue") && status != QLatin1String("complete")
-            && status != QLatin1String("restart")) {
-            if (error) *error = InvalidStatus;
+        GoalAction parsed;
+        GoalActionParser::ParseError toolErr = GoalActionParser::NoToolCall;
+        if (!GoalActionParser::parseToolCall(block.value(QLatin1String("name")).toString(),
+                                             {},
+                                             block.value(QLatin1String("input")).toObject(),
+                                             &parsed, &toolErr)) {
+            if (toolErr == GoalActionParser::NoToolCall)
+                continue;
+            if (error) {
+                *error = (toolErr == GoalActionParser::InvalidType) ? InvalidStatus : EmptyText;
+            }
             return false;
         }
-        if (text.isEmpty()) {
-            if (error) *error = EmptyText;
-            return false;
-        }
-
-        if (out) {
-            if (status == QLatin1String("complete"))
-                out->type = GoalAction::Complete;
-            else if (status == QLatin1String("restart"))
-                out->type = GoalAction::Restart;
-            else
-                out->type = GoalAction::Continue;
-            out->text = text;
-        }
+        if (out)
+            *out = parsed;
         if (error) *error = NoError;
         return true;
     }

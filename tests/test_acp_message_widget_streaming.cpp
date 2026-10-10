@@ -8,6 +8,9 @@
 #include <QtTest>
 #include <QTextBrowser>
 #include <QToolButton>
+#include <QAbstractTextDocumentLayout>
+#include <QLabel>
+#include <QTextBlock>
 
 #include "AcpMessageWidget.h"
 
@@ -18,12 +21,17 @@ class TestAcpMessageWidgetStreaming : public QObject
 private slots:
     void assistant_streaming_buffers_chunks();
     void assistant_goalSetPrefix_usesKingGoldFrame();
+    void assistant_fromGoalJudge_setsGoalAgentPropertyAndBadge();
+    void assistant_goalTint_hasGoldWithoutBadge();
+    void assistant_plain_isNotGoalAgent();
     void assistant_goalSet_hidesWorktreeInjection();
     void thought_collapse_after_streaming_done();
     void thought_renders_markdown_as_raw_text();
     void thought_keeps_body_height_while_hidden();
     void thought_body_does_not_overflow_viewport();
     void thought_reexpand_while_hidden_restores_body_height();
+    void system_goalAchieved_heightIncludesBadge();
+    void system_goalAchieved_keepsBottomMargin();
 };
 
 void TestAcpMessageWidgetStreaming::assistant_streaming_buffers_chunks()
@@ -43,6 +51,34 @@ void TestAcpMessageWidgetStreaming::assistant_goalSetPrefix_usesKingGoldFrame()
     AcpMessageWidget reply(QStringLiteral("assistant"));
     reply.setText(QStringLiteral("こんにちは。"));
     QCOMPARE(reply.property("goalSet").toBool(), false);
+}
+
+void TestAcpMessageWidgetStreaming::assistant_fromGoalJudge_setsGoalAgentPropertyAndBadge()
+{
+    AcpMessageWidget w(QStringLiteral("assistant"));
+    QVERIFY(!w.property("goalAgent").toBool());
+    w.setFromGoalAgent(true);
+    QCOMPARE(w.property("goalAgent").toBool(), true);
+    QVERIFY(w.isFromGoalAgent());
+    auto *badge = w.findChild<QLabel *>();
+    QVERIFY(badge);
+    QCOMPARE(badge->text(), QStringLiteral("Goal"));
+}
+
+void TestAcpMessageWidgetStreaming::assistant_goalTint_hasGoldWithoutBadge()
+{
+    AcpMessageWidget w(QStringLiteral("assistant"));
+    w.setGoalTint(true);
+    QCOMPARE(w.property("goalAgent").toBool(), true);
+    QVERIFY(w.findChild<QLabel *>() == nullptr);
+}
+
+void TestAcpMessageWidgetStreaming::assistant_plain_isNotGoalAgent()
+{
+    AcpMessageWidget w(QStringLiteral("assistant"));
+    w.setText(QStringLiteral("hello"));
+    QVERIFY(!w.property("goalAgent").toBool());
+    QVERIFY(w.findChild<QLabel *>() == nullptr);
 }
 
 void TestAcpMessageWidgetStreaming::assistant_goalSet_hidesWorktreeInjection()
@@ -173,6 +209,65 @@ void TestAcpMessageWidgetStreaming::thought_reexpand_while_hidden_restores_body_
              qPrintable(QStringLiteral("expanded=%1 collapsed=%2")
                             .arg(w.height())
                             .arg(collapsedH)));
+}
+
+void TestAcpMessageWidgetStreaming::system_goalAchieved_heightIncludesBadge()
+{
+    // Goal achieved is a system row with a Goal badge. refit must add the
+    // badge to the frame height or the wrapped body is clipped to one line.
+    const QString text = QStringLiteral(
+        "✓ Goal achieved: The agent greeted in Bahasa Indonesia with \"Hai\", "
+        "which is the appropriate informal greeting.");
+
+    AcpMessageWidget plain(QStringLiteral("system"));
+    plain.resize(360, 40);
+    plain.setText(text);
+
+    AcpMessageWidget goal(QStringLiteral("system"));
+    goal.setFromGoalAgent(true);
+    goal.resize(360, 40);
+    goal.setText(text);
+
+    auto *badge = goal.findChild<QLabel *>();
+    QVERIFY(badge);
+    QCOMPARE(badge->text(), QStringLiteral("Goal"));
+    auto *browser = goal.findChild<QTextBrowser *>();
+    QVERIFY(browser);
+    QVERIFY(browser->toPlainText().contains(QStringLiteral("informal greeting")));
+
+    QVERIFY2(goal.height() >= plain.height() + badge->height(),
+             qPrintable(QStringLiteral("goal=%1 plain=%2 badge=%3")
+                            .arg(goal.height())
+                            .arg(plain.height())
+                            .arg(badge->height())));
+}
+
+void TestAcpMessageWidgetStreaming::system_goalAchieved_keepsBottomMargin()
+{
+    // Frame border is inside the widget. A height that only sums layout
+    // children eats the 6px bottom margin, so the last line sits on the border.
+    AcpMessageWidget w(QStringLiteral("system"));
+    w.setFromGoalAgent(true);
+    w.resize(360, 40);
+    w.setText(QStringLiteral(
+        "✓ Goal achieved: The assistant greeted the developer in Bahasa Indonesia "
+        "with \"Hai\" which fulfills the criterion of saying hi in Bahasa Indonesia."));
+    w.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&w));
+
+    auto *browser = w.findChild<QTextBrowser *>();
+    QVERIFY(browser);
+    QTextDocument *doc = browser->document();
+    QVERIFY(doc);
+    const QTextBlock last = doc->lastBlock();
+    const QRectF block = doc->documentLayout()->blockBoundingRect(last);
+    const int textBottom = browser->viewport()->mapTo(&w, block.bottomLeft().toPoint()).y();
+    const int gap = w.rect().bottom() - textBottom;
+    QVERIFY2(gap >= 6,
+             qPrintable(QStringLiteral("gap=%1 textBottom=%2 widgetH=%3")
+                            .arg(gap)
+                            .arg(textBottom)
+                            .arg(w.height())));
 }
 
 QTEST_MAIN(TestAcpMessageWidgetStreaming)

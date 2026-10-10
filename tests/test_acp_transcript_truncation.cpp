@@ -34,6 +34,7 @@ private slots:
     void neverHidesUserOrGoalOrSystem();
     void systemDoesNotStealCompletedSummary();
     void goalMessageSplitsTurn();
+    void judgingMarkerSplitsTurn();
     void lastAgentMayBeToolCall();
     void emptyTimeline();
     void gapsSitBetweenAnchorAndSummary_notAtHead();
@@ -305,6 +306,32 @@ void TestAcpTranscriptTruncation::goalMessageSplitsTurn()
     QCOMPARE(p.gaps.at(0).hiddenCount, 2);
     QCOMPARE(p.gaps.at(1).beforeIndex, 6);
     QCOMPARE(p.gaps.at(1).hiddenCount, 1);
+}
+
+void TestAcpTranscriptTruncation::judgingMarkerSplitsTurn()
+{
+    AcpMessage judging;
+    judging.role = QStringLiteral("system");
+    judging.marker = QLatin1String(kAcpMarkerGoalJudging);
+    QVector<AcpMessage> msgs{
+        makeMsg("user"),
+        makeMsg("assistant"),
+        judging,
+    };
+    QVector<AcpTimelineEntry> tl{
+        msgEntry(0),
+        msgEntry(1),
+        msgEntry(2),
+        toolEntry(QStringLiteral("goal-judge:t1")),
+    };
+    // Cap 3. If the judging marker did not start a turn, the Goal tool would
+    // become the coding turn's last-agent pin and the assistant summary
+    // would be hideable.
+    const Plan p = AcpTranscriptTruncation::compute(tl, msgs, 3);
+    QVERIFY(p.visible.at(0));
+    QVERIFY(p.visible.at(1));
+    QVERIFY(p.visible.at(2));
+    QVERIFY(p.visible.at(3));
 }
 
 void TestAcpTranscriptTruncation::lastAgentMayBeToolCall()

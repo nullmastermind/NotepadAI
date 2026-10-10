@@ -797,6 +797,8 @@ void AcpSessionView::wireSignals()
                 this, &AcpSessionView::onIsProcessingChanged);
         connect(m_model, &AcpSessionModel::turnEnded,
                 this, &AcpSessionView::onTurnEnded);
+        connect(m_model, &AcpSessionModel::goalJudgeTurnRemoved,
+                this, &AcpSessionView::onGoalJudgeTurnRemoved);
     }
 
     if (m_connection) {
@@ -856,8 +858,11 @@ void AcpSessionView::hydrateFromModel()
                 continue;
             auto *w = new AcpMessageWidget(msg.role, m_transcriptHost);
             w->setChatFont(chatFont()); // styled widget: must set font explicitly
-            if (msg.fromGoalAgent) {
+            if (msg.fromGoalAgent
+                || msg.marker == QLatin1String(kAcpMarkerGoalAchieved)) {
                 w->setFromGoalAgent(true);
+            } else if (msg.fromGoalJudge) {
+                w->setGoalTint(true);
             }
             w->setContent(msg.content);
             insertTimelineWidget(w, false);
@@ -867,6 +872,8 @@ void AcpSessionView::hydrateFromModel()
             if (it != toolCalls.end()) {
                 auto *card = new AcpToolCallCard(it.value(), m_transcriptHost);
                 card->setChatFont(chatFont()); // styled widget: must set font explicitly
+                if (isGoalJudgeToolId(it.key()))
+                    card->setGoalTint(true);
                 insertTimelineWidget(card, false);
                 m_toolCallCards.insert(entry.toolCallId, card);
             }
@@ -1205,8 +1212,11 @@ void AcpSessionView::appendMessageWidget(int idx)
 
     auto *w = new AcpMessageWidget(msg.role, m_transcriptHost);
     w->setChatFont(chatFont()); // styled widget: must set font explicitly
-    if (msg.fromGoalAgent) {
+    if (msg.fromGoalAgent
+        || msg.marker == QLatin1String(kAcpMarkerGoalAchieved)) {
         w->setFromGoalAgent(true);
+    } else if (msg.fromGoalJudge) {
+        w->setGoalTint(true);
     }
     w->setContent(msg.content);
     insertTimelineWidget(w);
@@ -1309,6 +1319,8 @@ void AcpSessionView::onToolCallAddedOrUpdated(const QString &toolCallId)
         if (m_truncatedToolCallIds.contains(toolCallId)) return;
         card = new AcpToolCallCard(tc, m_transcriptHost);
         card->setChatFont(chatFont()); // styled widget: must set font explicitly
+        if (isGoalJudgeToolId(toolCallId))
+            card->setGoalTint(true);
         insertTimelineWidget(card);
         m_toolCallCards.insert(toolCallId, card);
         m_currentGroupCards.append(card);
@@ -1551,6 +1563,24 @@ void AcpSessionView::onTurnEnded(int groupId)
         }
     }
     m_currentGroupCards.clear();
+}
+
+void AcpSessionView::onGoalJudgeTurnRemoved(const QVector<int> &messageIndices,
+                                           const QStringList &toolCallIds)
+{
+    for (int idx : messageIndices) {
+        if (AcpMessageWidget *w = m_messageWidgets.take(idx)) {
+            if (m_activeThought == w)
+                m_activeThought.clear();
+            removeTranscriptWidget(w);
+        }
+    }
+    for (const QString &id : toolCallIds) {
+        if (AcpToolCallCard *c = m_toolCallCards.take(id)) {
+            m_currentGroupCards.removeAll(c);
+            removeTranscriptWidget(c);
+        }
+    }
 }
 
 void AcpSessionView::onPermissionRequested(const AcpProtocol::AcpPermissionRequest &req)

@@ -35,8 +35,11 @@ bool isTurnAnchor(const AcpTimelineEntry &entry, const QVector<AcpMessage> &mess
         return false;
     if (entry.messageIndex < 0 || entry.messageIndex >= messages.size())
         return false;
-    // User-role covers both the human prompt and fromGoalAgent handoff/compact.
-    return messages.at(entry.messageIndex).role == QLatin1String("user");
+    const AcpMessage &msg = messages.at(entry.messageIndex);
+    if (msg.role == QLatin1String("user"))
+        return true;
+    return msg.role == QLatin1String("system")
+        && msg.marker == QLatin1String(kAcpMarkerGoalJudging);
 }
 
 Plan compute(const QVector<AcpTimelineEntry> &timeline,

@@ -9,12 +9,14 @@
  */
 
 #include <QtTest>
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
 
+#include "AcpAgentDefinition.h"
 #include "AcpConnection.h"
 #include "AcpSessionModel.h"
 #include "ApplicationSettings.h"
@@ -22,6 +24,9 @@
 #include "GoalAgent.h"
 #include "GoalAgentSettings.h"
 #include "GoalHttpJudge.h"
+#include "AcpProtocol.h"
+#include "PiAcpJudgeConfig.h"
+#include "GoalVerdictMcp.h"
 #include "IAcpProcessChannel.h"
 #include "AcpPromptQueue.h"
 
@@ -131,6 +136,19 @@ private slots:
     void completeAction_maxIterationsReached_advancesToNextCriterion();
     void completeAction_maxIterationsReached_onLastCriterion_cancels();
     void builtinPrompt_matchesGoalAgentSpec();
+    void parseToolCall_readsStatusAndText();
+    void verdictToolCall_appliesContinueWithoutXml();
+    void verdictToolCall_cancelsLeftoverJudgePrompt();
+    void verdictToolCall_completeCancelsBeforeAuthoringPrompt();
+    void verdictToolCallUpdate_appliesWhenNameOnlyOnCreate();
+    void verdictMcp_listsSubmitTool();
+    void verdictMcp_callResult_tellsJudgeToStop();
+    void verdictMcp_newlineDiscoverAndInitialize();
+    void verdictMcp_sessionNewIncludesEnvArray();
+    void piAcp_isDetectedFromCommandOrNpxArg();
+    void piAcp_sourceAgentDir_prefersAcpEnvOverHome();
+    void piAcp_stageJudgeDir_mergesVerdictAndSkipsSessions();
+    void piAcp_stageJudgeDir_restoresLastSessionModel();
     void stop_withAutoCompact_doesNotSendCompact();
     void start_attachToExistingConversation_whenIdle_evaluatesImmediately();
     void start_attachToExistingConversation_whenProcessing_waitsForPromptEnded();
@@ -164,6 +182,12 @@ private slots:
     void streamingChunk_whileIdle_startsTurn();
     void sessionBusy_doesNotFail_retriesPrompt();
     void sessionBusy_followUpAfterRpc_doesNotFireUntilIdle();
+
+    void judgeConnection_permissionRequest_isAutoApproved();
+    void judgePrompt_neverEnds_failsClosed();
+    void judgeMessageChunk_mirrorsOntoTargetModel();
+    void actionDisplayText_stripsActionTags();
+    void continueAction_dropsJudgeBubblesKeepsResult();
 };
 
 void TestGoalAgent::stop_doesNotCancelTargetAcpPrompt()
@@ -1280,7 +1304,392 @@ void TestGoalAgent::builtinPrompt_matchesGoalAgentSpec()
     QVERIFY(prompt.contains(QStringLiteral("{{iteration}}")));
     QVERIFY(prompt.contains(QStringLiteral("{{maxIterations}}")));
     QVERIFY(prompt.contains(QStringLiteral("{{conversation}}")));
+    QVERIFY(prompt.contains(QStringLiteral("submit_goal_verdict")));
+    QVERIFY(!prompt.contains(QStringLiteral("<action type=")));
     QCOMPARE(GoalAgentSettings().defaultTemplate().content, prompt);
+}
+
+void TestGoalAgent::parseToolCall_readsStatusAndText()
+{
+    GoalAction action;
+    QJsonObject input;
+    input.insert(QStringLiteral("status"), QStringLiteral("continue"));
+    input.insert(QStringLiteral("text"), QStringLiteral("do the thing"));
+    QVERIFY(GoalActionParser::parseToolCall(
+        QStringLiteral("mcp__goal-verdict__submit_goal_verdict"), {}, input, &action));
+    QCOMPARE(action.type, GoalAction::Continue);
+    QCOMPARE(action.text, QStringLiteral("do the thing"));
+
+    input.insert(QStringLiteral("status"), QStringLiteral("complete"));
+    QVERIFY(GoalActionParser::parseToolCall(
+        QStringLiteral("submit_goal_verdict"), QStringLiteral("Submit"), input, &action));
+    QCOMPARE(action.type, GoalAction::Complete);
+
+    QVERIFY(!GoalActionParser::parseToolCall(QStringLiteral("Read"), QStringLiteral("Read"), input, &action));
+}
+
+void TestGoalAgent::verdictToolCall_appliesContinueWithoutXml()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *targetChannel = new RecordingChannel(&target);
+    target.attachChannelForTest(targetChannel);
+    targetChannel->start();
+    target.setSessionIdForTest(QStringLiteral("s1"));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    QVERIFY(goal.start(req));
+
+    goal.m_awaitingJudgeResponse = true;
+    goal.m_judgeVerdictApplied = false;
+    QJsonObject input;
+    input.insert(QStringLiteral("status"), QStringLiteral("continue"));
+    input.insert(QStringLiteral("text"), QStringLiteral("Please run the tests."));
+    goal.considerJudgeVerdict(QStringLiteral("submit_goal_verdict"), {}, input);
+
+    int judgeRows = 0;
+    for (const auto &m : model.messages()) {
+        if (m.fromGoalJudge || m.marker == QLatin1String(kAcpMarkerGoalJudging))
+            ++judgeRows;
+    }
+    QCOMPARE(judgeRows, 0);
+    QCOMPARE(model.messages().last().role, QStringLiteral("user"));
+    QVERIFY(model.messages().last().fromGoalAgent);
+    QCOMPARE(model.messages().last().content.first().text, QStringLiteral("Please run the tests."));
+}
+
+void TestGoalAgent::verdictToolCall_cancelsLeftoverJudgePrompt()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *targetChannel = new RecordingChannel(&target);
+    target.attachChannelForTest(targetChannel);
+    targetChannel->start();
+    target.setSessionIdForTest(QStringLiteral("s1"));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    QVERIFY(goal.start(req));
+
+    auto *judge = new AcpConnection(&goal);
+    auto *judgeChannel = new RecordingChannel(judge);
+    judge->attachChannelForTest(judgeChannel);
+    judgeChannel->start();
+    judge->setSessionIdForTest(QStringLiteral("j1"));
+    goal.configureHeadlessJudge(judge);
+    goal.m_judgeConnection = judge;
+    goal.m_awaitingJudgeResponse = true;
+    goal.m_judgeVerdictApplied = false;
+
+    QJsonObject input;
+    input.insert(QStringLiteral("status"), QStringLiteral("continue"));
+    input.insert(QStringLiteral("text"), QStringLiteral("Please run the tests."));
+    goal.considerJudgeVerdict(QStringLiteral("submit_goal_verdict"), {}, input);
+
+    QVERIFY(judgeChannel->wroteSessionCancel());
+    QVERIFY(targetChannel->written.contains("\"method\":\"session/prompt\""));
+    QCOMPARE(judgeChannel->sessionPromptCount(), 0);
+}
+
+void TestGoalAgent::verdictToolCall_completeCancelsBeforeAuthoringPrompt()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *targetChannel = new RecordingChannel(&target);
+    target.attachChannelForTest(targetChannel);
+    targetChannel->start();
+    target.setSessionIdForTest(QStringLiteral("s1"));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("first"), QStringLiteral("second")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    QVERIFY(goal.start(req));
+
+    auto *judge = new AcpConnection(&goal);
+    auto *judgeChannel = new RecordingChannel(judge);
+    judge->attachChannelForTest(judgeChannel);
+    judgeChannel->start();
+    judge->setSessionIdForTest(QStringLiteral("j1"));
+    goal.configureHeadlessJudge(judge);
+    goal.m_judgeConnection = judge;
+    goal.m_awaitingJudgeResponse = true;
+    goal.m_judgeVerdictApplied = false;
+
+    QJsonObject input;
+    input.insert(QStringLiteral("status"), QStringLiteral("complete"));
+    input.insert(QStringLiteral("text"), QStringLiteral("first is met"));
+    goal.considerJudgeVerdict(QStringLiteral("submit_goal_verdict"), {}, input);
+
+    QVERIFY(judgeChannel->wroteSessionCancel());
+    QCOMPARE(judgeChannel->sessionPromptCount(), 1);
+    const qsizetype cancelAt = judgeChannel->written.indexOf("session/cancel");
+    const qsizetype promptAt = judgeChannel->written.indexOf("\"method\":\"session/prompt\"");
+    QVERIFY(cancelAt >= 0);
+    QVERIFY(promptAt > cancelAt);
+}
+
+void TestGoalAgent::verdictToolCallUpdate_appliesWhenNameOnlyOnCreate()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *targetChannel = new RecordingChannel(&target);
+    target.attachChannelForTest(targetChannel);
+    targetChannel->start();
+    target.setSessionIdForTest(QStringLiteral("s1"));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    QVERIFY(goal.start(req));
+
+    goal.m_awaitingJudgeResponse = true;
+    goal.m_judgeVerdictApplied = false;
+
+    AcpProtocol::AcpToolCall created;
+    created.id = QStringLiteral("call-1");
+    created.name = QStringLiteral("mcp__goal-verdict__submit_goal_verdict");
+    goal.handleJudgeToolCall(created);
+    QVERIFY(!goal.m_judgeVerdictApplied);
+
+    AcpProtocol::AcpToolCallUpdate update;
+    update.id = QStringLiteral("call-1");
+    update.rawInput = QJsonObject{
+        {QStringLiteral("status"), QStringLiteral("continue")},
+        {QStringLiteral("text"), QStringLiteral("Please run the tests.")},
+    };
+    goal.handleJudgeToolCallUpdate(update);
+
+    QVERIFY(goal.m_judgeVerdictApplied);
+    QCOMPARE(model.messages().last().role, QStringLiteral("user"));
+    QVERIFY(model.messages().last().fromGoalAgent);
+    QCOMPARE(model.messages().last().content.first().text, QStringLiteral("Please run the tests."));
+}
+
+void TestGoalAgent::verdictMcp_listsSubmitTool()
+{
+    QJsonObject req;
+    req.insert(QStringLiteral("jsonrpc"), QStringLiteral("2.0"));
+    req.insert(QStringLiteral("id"), 2);
+    req.insert(QStringLiteral("method"), QStringLiteral("tools/list"));
+    const QJsonObject reply = GoalVerdictMcp::handle(req);
+    const QJsonArray tools = reply.value(QStringLiteral("result")).toObject()
+                                 .value(QStringLiteral("tools")).toArray();
+    QCOMPARE(tools.size(), 1);
+    QCOMPARE(tools.at(0).toObject().value(QStringLiteral("name")).toString(),
+             QStringLiteral("submit_goal_verdict"));
+    QVERIFY(tools.at(0).toObject().value(QStringLiteral("description")).toString()
+                .contains(QStringLiteral("stop"), Qt::CaseInsensitive));
+}
+
+void TestGoalAgent::verdictMcp_callResult_tellsJudgeToStop()
+{
+    QJsonObject req;
+    req.insert(QStringLiteral("jsonrpc"), QStringLiteral("2.0"));
+    req.insert(QStringLiteral("id"), 3);
+    req.insert(QStringLiteral("method"), QStringLiteral("tools/call"));
+    QJsonObject args;
+    args.insert(QStringLiteral("status"), QStringLiteral("continue"));
+    args.insert(QStringLiteral("text"), QStringLiteral("Say hi in Japanese."));
+    QJsonObject params;
+    params.insert(QStringLiteral("name"), QStringLiteral("submit_goal_verdict"));
+    params.insert(QStringLiteral("arguments"), args);
+    req.insert(QStringLiteral("params"), params);
+    const QJsonObject reply = GoalVerdictMcp::handle(req);
+    const QJsonObject result = reply.value(QStringLiteral("result")).toObject();
+    QCOMPARE(result.value(QStringLiteral("isError")).toBool(), false);
+    const QString text = result.value(QStringLiteral("content")).toArray()
+                             .at(0).toObject().value(QStringLiteral("text")).toString();
+    QCOMPARE(text, QString::fromLatin1(GoalVerdictMcp::kStopGuide));
+    QVERIFY(text.contains(QStringLiteral("Stop immediately")));
+    QVERIFY(text.contains(QStringLiteral("do not carry out the follow-up yourself")));
+}
+
+void TestGoalAgent::verdictMcp_newlineDiscoverAndInitialize()
+{
+    const QByteArray discover = QByteArrayLiteral(
+        R"({"jsonrpc":"2.0","id":"server-discover-probe-1","method":"server/discover","params":{}})");
+    const QByteArray discReply = GoalVerdictMcp::encodeReply(discover, true);
+    QVERIFY(discReply.endsWith('\n'));
+    QVERIFY(!discReply.startsWith("Content-Length"));
+    const QJsonObject disc = QJsonDocument::fromJson(discReply).object();
+    QCOMPARE(disc.value(QStringLiteral("id")).toString(),
+             QStringLiteral("server-discover-probe-1"));
+    QCOMPARE(disc.value(QStringLiteral("result")).toObject()
+                 .value(QStringLiteral("resultType")).toString(),
+             QStringLiteral("complete"));
+
+    const QByteArray init = QByteArrayLiteral(
+        R"({"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25"}})");
+    const QByteArray initReply = GoalVerdictMcp::encodeReply(init, true);
+    const QJsonObject ir = QJsonDocument::fromJson(initReply).object();
+    QCOMPARE(ir.value(QStringLiteral("result")).toObject()
+                 .value(QStringLiteral("protocolVersion")).toString(),
+             QStringLiteral("2025-11-25"));
+
+    const QByteArray framed = GoalVerdictMcp::encodeReply(init, false);
+    QVERIFY(framed.startsWith("Content-Length:"));
+}
+
+void TestGoalAgent::verdictMcp_sessionNewIncludesEnvArray()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+    AcpConnection conn;
+    goal.attachVerdictMcp(&conn);
+    const QJsonArray servers = conn.mcpServersForTest();
+    QCOMPARE(servers.size(), 1);
+    const QJsonObject server = servers.at(0).toObject();
+    QCOMPARE(server.value(QStringLiteral("name")).toString(),
+             QStringLiteral("goal-verdict"));
+    QVERIFY(server.contains(QStringLiteral("env")));
+    QCOMPARE(server.value(QStringLiteral("env")).toArray().size(), 0);
+    QVERIFY(!server.contains(QStringLiteral("type")));
+    QVERIFY(server.value(QStringLiteral("args")).toArray()
+                .contains(QJsonValue(QStringLiteral("--goal-verdict-mcp"))));
+}
+
+void TestGoalAgent::piAcp_isDetectedFromCommandOrNpxArg()
+{
+    AcpAgentDefinition npx;
+    npx.command = QStringLiteral("npx");
+    npx.args = QStringList{QStringLiteral("-y"), QStringLiteral("pi-acp")};
+    QVERIFY(PiAcpJudgeConfig::isPiAcpAgent(npx));
+
+    AcpAgentDefinition cmd;
+    cmd.command = QStringLiteral("pi-acp");
+    QVERIFY(PiAcpJudgeConfig::isPiAcpAgent(cmd));
+
+    AcpAgentDefinition bunx;
+    bunx.command = QStringLiteral("bunx");
+    bunx.args = QStringList{QStringLiteral("pi-acp")};
+    QVERIFY(PiAcpJudgeConfig::isPiAcpAgent(bunx));
+
+    AcpAgentDefinition bunX;
+    bunX.command = QStringLiteral("bun");
+    bunX.args = QStringList{QStringLiteral("x"), QStringLiteral("pi-acp")};
+    QVERIFY(PiAcpJudgeConfig::isPiAcpAgent(bunX));
+
+    AcpAgentDefinition bunLine;
+    bunLine.command = QStringLiteral("bun x pi-acp");
+    QVERIFY(PiAcpJudgeConfig::isPiAcpAgent(bunLine));
+
+    AcpAgentDefinition claude;
+    claude.command = QStringLiteral("npx");
+    claude.args = QStringList{QStringLiteral("-y"),
+                              QStringLiteral("@agentclientprotocol/claude-agent-acp@latest")};
+    QVERIFY(!PiAcpJudgeConfig::isPiAcpAgent(claude));
+}
+
+void TestGoalAgent::piAcp_sourceAgentDir_prefersAcpEnvOverHome()
+{
+    AcpAgentDefinition agent;
+    agent.env.insert(QStringLiteral("PI_CODING_AGENT_DIR"),
+                     QStringLiteral("D:/custom/pi-agent"));
+    QCOMPARE(PiAcpJudgeConfig::sourceAgentDir(agent),
+             QDir::cleanPath(QStringLiteral("D:/custom/pi-agent")));
+}
+
+void TestGoalAgent::piAcp_stageJudgeDir_mergesVerdictAndSkipsSessions()
+{
+    QTemporaryDir src;
+    QVERIFY(src.isValid());
+    QVERIFY(QDir(src.path()).mkpath(QStringLiteral("sessions")));
+    QFile sessionFile(src.path() + QStringLiteral("/sessions/old.json"));
+    QVERIFY(sessionFile.open(QIODevice::WriteOnly));
+    sessionFile.write("{}");
+    sessionFile.close();
+    QFile existing(src.path() + QStringLiteral("/mcp.json"));
+    QVERIFY(existing.open(QIODevice::WriteOnly));
+    existing.write(R"({"mcpServers":{"docs":{"command":"echo"}}})");
+    existing.close();
+
+    QTemporaryDir dst;
+    QVERIFY(dst.isValid());
+    QVERIFY(PiAcpJudgeConfig::stageJudgeAgentDir(
+        src.path(), dst.path(), QStringLiteral("C:/NotepadAI.exe")));
+    QVERIFY(!QFile::exists(dst.path() + QStringLiteral("/sessions/old.json")));
+    QFile out(dst.path() + QStringLiteral("/mcp.json"));
+    QVERIFY(out.open(QIODevice::ReadOnly));
+    const QJsonObject servers = QJsonDocument::fromJson(out.readAll()).object()
+                                    .value(QStringLiteral("mcpServers")).toObject();
+    QVERIFY(servers.contains(QStringLiteral("docs")));
+    const QJsonObject verdict = servers.value(QStringLiteral("goal-verdict")).toObject();
+    QCOMPARE(verdict.value(QStringLiteral("command")).toString(),
+             QStringLiteral("C:/NotepadAI.exe"));
+    QCOMPARE(verdict.value(QStringLiteral("args")).toArray().at(0).toString(),
+             QStringLiteral("--goal-verdict-mcp"));
+    QCOMPARE(verdict.value(QStringLiteral("exposure")).toString(),
+             QStringLiteral("direct"));
+}
+
+void TestGoalAgent::piAcp_stageJudgeDir_restoresLastSessionModel()
+{
+    QTemporaryDir src;
+    QVERIFY(src.isValid());
+    QVERIFY(QDir(src.path()).mkpath(QStringLiteral("sessions/proj")));
+    QFile session(src.path() + QStringLiteral("/sessions/proj/run.jsonl"));
+    QVERIFY(session.open(QIODevice::WriteOnly));
+    session.write("{\"type\":\"session\"}\n");
+    session.write("{\"type\":\"model_change\",\"provider\":\"6api-sonnet\",\"modelId\":\"6api/sonnet\"}\n");
+    session.write("{\"type\":\"thinking_level_change\",\"thinkingLevel\":\"medium\"}\n");
+    session.close();
+
+    QFile settings(src.path() + QStringLiteral("/settings.json"));
+    QVERIFY(settings.open(QIODevice::WriteOnly));
+    settings.write("{\"theme\":\"dark\"}");
+    settings.close();
+
+    QTemporaryDir dst;
+    QVERIFY(dst.isValid());
+    QVERIFY(PiAcpJudgeConfig::stageJudgeAgentDir(
+        src.path(), dst.path(), QStringLiteral("C:/NotepadAI.exe")));
+    QVERIFY(!QFile::exists(dst.path() + QStringLiteral("/sessions/proj/run.jsonl")));
+
+    QFile out(dst.path() + QStringLiteral("/settings.json"));
+    QVERIFY(out.open(QIODevice::ReadOnly));
+    const QJsonObject obj = QJsonDocument::fromJson(out.readAll()).object();
+    QCOMPARE(obj.value(QStringLiteral("defaultProvider")).toString(),
+             QStringLiteral("6api-sonnet"));
+    QCOMPARE(obj.value(QStringLiteral("defaultModel")).toString(),
+             QStringLiteral("6api/sonnet"));
+    QCOMPARE(obj.value(QStringLiteral("defaultThinkingLevel")).toString(),
+             QStringLiteral("medium"));
+    QCOMPARE(obj.value(QStringLiteral("theme")).toString(), QStringLiteral("dark"));
 }
 
 void TestGoalAgent::stop_withAutoCompact_doesNotSendCompact()
@@ -1809,6 +2218,203 @@ void TestGoalAgent::sessionBusy_followUpAfterRpc_doesNotFireUntilIdle()
 
     QTRY_COMPARE(followUps, 1);
     QCOMPARE(channel->sessionPromptCount(), 2);
+}
+
+void TestGoalAgent::judgeConnection_permissionRequest_isAutoApproved()
+{
+    // A headless judge has no permission UI. Allow-all must answer
+    // session/request_permission or the judge turn never ends and Goal
+    // never sends the next prompt to the coding agent.
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection judge;
+    auto *channel = new RecordingChannel(&judge);
+    judge.attachChannelForTest(channel);
+    channel->start();
+
+    goal.configureHeadlessJudge(&judge);
+
+    QJsonObject allowOnce;
+    allowOnce.insert(QStringLiteral("optionId"), QStringLiteral("allow-once"));
+    allowOnce.insert(QStringLiteral("name"), QStringLiteral("Allow once"));
+    allowOnce.insert(QStringLiteral("kind"), QStringLiteral("allow_once"));
+    QJsonObject deny;
+    deny.insert(QStringLiteral("optionId"), QStringLiteral("deny"));
+    deny.insert(QStringLiteral("name"), QStringLiteral("Deny"));
+    deny.insert(QStringLiteral("kind"), QStringLiteral("deny"));
+    QJsonObject params;
+    params.insert(QStringLiteral("title"), QStringLiteral("Read file"));
+    params.insert(QStringLiteral("options"), QJsonArray{allowOnce, deny});
+    QJsonObject req;
+    req.insert(QStringLiteral("jsonrpc"), QStringLiteral("2.0"));
+    req.insert(QStringLiteral("id"), 42);
+    req.insert(QStringLiteral("method"), QStringLiteral("session/request_permission"));
+    req.insert(QStringLiteral("params"), params);
+
+    channel->pushStdout(QJsonDocument(req).toJson(QJsonDocument::Compact) + '\n');
+
+    QVERIFY(channel->written.contains("\"id\":42"));
+    QVERIFY(channel->written.contains("\"optionId\":\"allow-once\""));
+}
+
+void TestGoalAgent::judgePrompt_neverEnds_failsClosed()
+{
+    // After the coding agent turn ends, Goal waits on the ACP judge. If
+    // session/prompt never returns, Goal must fail-closed instead of staying
+    // Active forever (no continue is sent to the coding agent).
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *targetChannel = new RecordingChannel(&target);
+    target.attachChannelForTest(targetChannel);
+    targetChannel->start();
+    target.setSessionIdForTest(QStringLiteral("s1"));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    QVERIFY(goal.start(req));
+    QCOMPARE(goal.status(), GoalAgent::Active);
+
+    auto *judge = new AcpConnection(&goal);
+    auto *judgeChannel = new RecordingChannel(judge);
+    judge->attachChannelForTest(judgeChannel);
+    judgeChannel->start();
+    judge->setSessionIdForTest(QStringLiteral("j1"));
+    goal.configureHeadlessJudge(judge);
+
+    goal.m_agentId = QStringLiteral("claude");
+    goal.m_judgeConnection = judge;
+    goal.m_judgePromptTimeoutMs = 50;
+    goal.evaluateCurrentCriterion();
+
+    QCOMPARE(goal.status(), GoalAgent::Active);
+    QVERIFY(model.messages().size() >= 1);
+    QCOMPARE(model.messages().first().marker, QLatin1String(kAcpMarkerGoalJudging));
+    QTRY_COMPARE(goal.status(), GoalAgent::Failed);
+    int goalUser = 0;
+    for (const auto &m : model.messages()) {
+        if (m.fromGoalAgent)
+            ++goalUser;
+    }
+    QCOMPARE(goalUser, 0);
+}
+
+void TestGoalAgent::judgeMessageChunk_mirrorsOntoTargetModel()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *targetChannel = new RecordingChannel(&target);
+    target.attachChannelForTest(targetChannel);
+    targetChannel->start();
+    target.setSessionIdForTest(QStringLiteral("s1"));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    QVERIFY(goal.start(req));
+
+    auto *judge = new AcpConnection(&goal);
+    auto *judgeChannel = new RecordingChannel(judge);
+    judge->attachChannelForTest(judgeChannel);
+    judgeChannel->start();
+    judge->setSessionIdForTest(QStringLiteral("j1"));
+    goal.configureHeadlessJudge(judge);
+    goal.m_agentId = QStringLiteral("claude");
+    goal.m_judgeConnection = judge;
+    goal.evaluateCurrentCriterion();
+
+    QCOMPARE(model.messages().first().marker, QLatin1String(kAcpMarkerGoalJudging));
+    goal.onJudgeMessageChunk(QStringLiteral("hello "));
+    goal.onJudgeMessageChunk(QStringLiteral("judge"));
+    QCOMPARE(model.messages().size(), 2);
+    QVERIFY(model.messages().last().fromGoalJudge);
+    QCOMPARE(model.messages().last().role, QStringLiteral("assistant"));
+    QCOMPARE(model.messages().last().content.first().text, QStringLiteral("hello judge"));
+}
+
+void TestGoalAgent::actionDisplayText_stripsActionTags()
+{
+    QCOMPARE(GoalActionParser::displayText(
+                 QStringLiteral("<action type=\"continue\">Say hi in Japanese.</action>")),
+             QStringLiteral("Say hi in Japanese."));
+    QCOMPARE(GoalActionParser::displayText(QStringLiteral("<action type=\"complete\">")),
+             QString());
+    QCOMPARE(GoalActionParser::displayText(QStringLiteral("<action type=\"continue\">partial")),
+             QStringLiteral("partial"));
+    QCOMPARE(GoalActionParser::displayText(QStringLiteral("no tags")),
+             QStringLiteral("no tags"));
+    QCOMPARE(GoalActionParser::displayText(QStringLiteral("<act")),
+             QString());
+}
+
+void TestGoalAgent::continueAction_dropsJudgeBubblesKeepsResult()
+{
+    ApplicationSettings settings;
+    GoalAgent goal(nullptr, &settings);
+
+    AcpConnection target;
+    auto *targetChannel = new RecordingChannel(&target);
+    target.attachChannelForTest(targetChannel);
+    targetChannel->start();
+    target.setSessionIdForTest(QStringLiteral("s1"));
+
+    QTemporaryDir historyDir;
+    QVERIFY(historyDir.isValid());
+    AcpSessionModel model(QStringLiteral("s1"), QStringLiteral("p1"), historyDir.path());
+    goal.setTargetSession(&target, &model);
+
+    GoalAgent::StartRequest req;
+    req.targetSessionId = QStringLiteral("s1");
+    req.successCriteriaList = QStringList{QStringLiteral("done")};
+    req.agentId = QLatin1String(GoalHttpJudge::kAgentId);
+    QVERIFY(goal.start(req));
+
+    auto *judge = new AcpConnection(&goal);
+    auto *judgeChannel = new RecordingChannel(judge);
+    judge->attachChannelForTest(judgeChannel);
+    judgeChannel->start();
+    judge->setSessionIdForTest(QStringLiteral("j1"));
+    goal.configureHeadlessJudge(judge);
+    goal.m_agentId = QStringLiteral("claude");
+    goal.m_judgeConnection = judge;
+    goal.evaluateCurrentCriterion();
+    goal.m_awaitingJudgeResponse = true;
+    goal.onJudgeMessageChunk(QStringLiteral("<action type=\"continue\">Please run the tests.</action>"));
+
+    QCOMPARE(model.messages().last().content.first().text, QStringLiteral("Please run the tests."));
+    QVERIFY(!model.messages().last().content.first().text.contains(QLatin1String("<action")));
+
+    GoalAction action;
+    action.type = GoalAction::Continue;
+    action.text = QStringLiteral("Please run the tests.");
+    goal.applyJudgeAction(action);
+
+    int judgeRows = 0;
+    for (const auto &m : model.messages()) {
+        if (m.fromGoalJudge || m.marker == QLatin1String(kAcpMarkerGoalJudging))
+            ++judgeRows;
+    }
+    QCOMPARE(judgeRows, 0);
+    QCOMPARE(model.messages().last().role, QStringLiteral("user"));
+    QVERIFY(model.messages().last().fromGoalAgent);
+    QCOMPARE(model.messages().last().content.first().text, QStringLiteral("Please run the tests."));
 }
 
 QTEST_MAIN(TestGoalAgent)

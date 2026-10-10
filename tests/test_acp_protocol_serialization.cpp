@@ -47,6 +47,7 @@ private slots:
     void rpcErrorIsSessionBusy_alreadyProcessingMessage();
     void rpcErrorIsSessionBusy_typedReason();
     void rpcErrorIsSessionBusy_otherErrors();
+    void stripPiAcpQueueNotices_dropsStatusKeepsBody();
 
 
 
@@ -479,6 +480,25 @@ void TestAcpProtocolSerialization::rpcErrorIsSessionBusy_otherErrors()
     err.insert(QStringLiteral("message"), QStringLiteral("Session not found"));
     QVERIFY(!AcpProtocol::rpcErrorIsSessionBusy(err));
     QVERIFY(!AcpProtocol::rpcErrorIsSessionBusy(QJsonValue()));
+}
+
+void TestAcpProtocolSerialization::stripPiAcpQueueNotices_dropsStatusKeepsBody()
+{
+    QCOMPARE(AcpProtocol::stripPiAcpQueueNotices(
+                 QStringLiteral("Queued message (position 1).")),
+             QString());
+    QCOMPARE(AcpProtocol::stripPiAcpQueueNotices(
+                 QStringLiteral("Starting queued message. (0 remaining)")),
+             QString());
+    QCOMPARE(AcpProtocol::stripPiAcpQueueNotices(
+                 QStringLiteral("Cleared queued prompts.")),
+             QString());
+    QCOMPARE(AcpProtocol::stripPiAcpQueueNotices(
+                 QStringLiteral("Queued message (position 1). 你好!(ní hǎo) How can I help you "
+                                "with the Bevy sandbox-2d project?Starting queued message. (0 remaining)")),
+             QStringLiteral("你好!(ní hǎo) How can I help you with the Bevy sandbox-2d project?"));
+    QCOMPARE(AcpProtocol::stripPiAcpQueueNotices(QStringLiteral("Hello")),
+             QStringLiteral("Hello"));
 }
 
 

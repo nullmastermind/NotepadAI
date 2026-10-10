@@ -10,6 +10,7 @@
 
 #include <QtTest>
 #include <QByteArray>
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -23,12 +24,14 @@
 #include "AcpHistoryStore.h"
 #include "AcpProtocol.h"
 #include "AcpSessionModel.h"
+#include "DataPaths.h"
 
 class TestAcpSessionModel : public QObject
 {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
     void emptySessionDoesNotPersist();
     void streamingConcatenation();
     void messageIdChange_startsNewBubble();
@@ -57,7 +60,22 @@ private slots:
     void usageReplace_zeroUsedDifferentSizeDuringTurnReplacesOccupancy();
     void usageUpdate_promptTurnTotalDoesNotClobberContextOccupancy();
     void usageUpdate_promptTurnTotalAppliesWhenNoContextWindow();
+
+    void goalJudgeChunk_taggedAndConcatenated();
+    void goalJudgeThought_independentOfCodingAgentStream();
+    void goalJudgeToolCall_namespacesId();
+    void goalJudge_survivesHistoryRoundTrip();
+    void codingAgentPromptEnded_doesNotCloseGoalJudgeStream();
+    void goalJudgeBeginTurn_appendsJudgingMarker();
+    void replaceGoalJudgeText_rewritesBusyRow();
+    void blankGoalJudgeChunk_doesNotOpenRow();
+    void removeGoalJudgeTurn_dropsSuffixKeepsPrior();
 };
+
+void TestAcpSessionModel::initTestCase()
+{
+    DataPaths::init(QDir::tempPath(), DataPaths::Source::Default);
+}
 
 void TestAcpSessionModel::emptySessionDoesNotPersist()
 {
@@ -586,6 +604,166 @@ void TestAcpSessionModel::agentAdvertisedGoalSurvivesHostInject()
     QVERIFY(model.agentAdvertisesGoalCommand());
 }
 
+
+void TestAcpSessionModel::goalJudgeChunk_taggedAndConcatenated()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("gj1"), QStringLiteral("proj"), tmp.path());
+
+    model.appendGoalJudgeChunk(QStringLiteral("Hello "));
+    model.appendGoalJudgeChunk(QStringLiteral("judge"));
+
+    QCOMPARE(model.messages().size(), 1);
+    QCOMPARE(model.messages().first().role, QStringLiteral("assistant"));
+    QVERIFY(model.messages().first().fromGoalJudge);
+    QVERIFY(!model.messages().first().fromGoalAgent);
+    QCOMPARE(model.messages().first().content.first().text, QStringLiteral("Hello judge"));
+}
+
+void TestAcpSessionModel::goalJudgeThought_independentOfCodingAgentStream()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("gj2"), QStringLiteral("proj"), tmp.path());
+
+    model.onMessageChunk(QStringLiteral("coding"));
+    model.appendGoalJudgeThoughtChunk(QStringLiteral("weighing"));
+    model.onMessageChunk(QStringLiteral(" still"));
+
+    QCOMPARE(model.messages().size(), 2);
+    QCOMPARE(model.messages().at(0).role, QStringLiteral("assistant"));
+    QVERIFY(!model.messages().at(0).fromGoalJudge);
+    QCOMPARE(model.messages().at(0).content.first().text, QStringLiteral("coding still"));
+    QCOMPARE(model.messages().at(1).role, QStringLiteral("thought"));
+    QVERIFY(model.messages().at(1).fromGoalJudge);
+    QCOMPARE(model.messages().at(1).content.first().text, QStringLiteral("weighing"));
+}
+
+void TestAcpSessionModel::goalJudgeToolCall_namespacesId()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("gj3"), QStringLiteral("proj"), tmp.path());
+
+    model.onMessageChunk(QStringLiteral("coding"));
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("read-1");
+    tc.title = QStringLiteral("Read");
+    tc.status = QStringLiteral("pending");
+    model.upsertGoalJudgeToolCall(tc);
+    model.onMessageChunk(QStringLiteral(" still"));
+
+    QVERIFY(model.toolCalls().contains(QStringLiteral("goal-judge:read-1")));
+    QVERIFY(!model.toolCalls().contains(QStringLiteral("read-1")));
+    QCOMPARE(model.messages().first().content.first().text, QStringLiteral("coding still"));
+
+    AcpProtocol::AcpToolCallUpdate upd;
+    upd.id = QStringLiteral("read-1");
+    upd.status = QStringLiteral("completed");
+    model.applyGoalJudgeToolCallUpdate(upd);
+    QCOMPARE(model.toolCalls().value(QStringLiteral("goal-judge:read-1")).status,
+             QStringLiteral("completed"));
+}
+
+void TestAcpSessionModel::goalJudge_survivesHistoryRoundTrip()
+{
+    QTemporaryDir tmp;
+    AcpHistoryStore store;
+    store.setHistoryDir(tmp.path());
+
+    {
+        AcpSessionModel a(QStringLiteral("gj-rt"), QStringLiteral("projA"), tmp.path());
+        a.setHistoryStore(&store);
+        a.beginGoalJudgeTurn(QStringLiteral("Goal · judging 1/1"));
+        a.appendGoalJudgeChunk(QStringLiteral("verdict"));
+        QSignalSpy spy(&store, &AcpHistoryStore::flushed);
+        QVERIFY(spy.wait(2000));
+    }
+
+    AcpSessionModel b(QStringLiteral("gj-rt"), QStringLiteral("ignored"), tmp.path());
+    QCOMPARE(b.messages().size(), 2);
+    QCOMPARE(b.messages().at(0).role, QStringLiteral("system"));
+    QCOMPARE(b.messages().at(0).marker, QLatin1String(kAcpMarkerGoalJudging));
+    QVERIFY(b.messages().at(1).fromGoalJudge);
+    QCOMPARE(b.messages().at(1).content.first().text, QStringLiteral("verdict"));
+}
+
+void TestAcpSessionModel::codingAgentPromptEnded_doesNotCloseGoalJudgeStream()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("gj4"), QStringLiteral("proj"), tmp.path());
+
+    model.appendGoalJudgeChunk(QStringLiteral("busy"));
+    model.onPromptStarted();
+    model.onPromptEnded();
+    model.appendGoalJudgeChunk(QStringLiteral(" more"));
+
+    QCOMPARE(model.messages().size(), 1);
+    QCOMPARE(model.messages().first().content.first().text, QStringLiteral("busy more"));
+}
+
+void TestAcpSessionModel::goalJudgeBeginTurn_appendsJudgingMarker()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("gj5"), QStringLiteral("proj"), tmp.path());
+
+    model.beginGoalJudgeTurn(QStringLiteral("Goal · judging 2/6"));
+
+    QCOMPARE(model.messages().size(), 1);
+    QCOMPARE(model.messages().first().role, QStringLiteral("system"));
+    QCOMPARE(model.messages().first().marker, QLatin1String(kAcpMarkerGoalJudging));
+    QCOMPARE(model.messages().first().content.first().text, QStringLiteral("Goal · judging 2/6"));
+}
+
+void TestAcpSessionModel::replaceGoalJudgeText_rewritesBusyRow()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("gj6"), QStringLiteral("proj"), tmp.path());
+
+    model.appendGoalJudgeChunk(QStringLiteral("Goal is judging…"));
+    model.replaceGoalJudgeText(QStringLiteral("continue: try again"));
+
+    QCOMPARE(model.messages().size(), 1);
+    QVERIFY(model.messages().first().fromGoalJudge);
+    QCOMPARE(model.messages().first().content.first().text, QStringLiteral("continue: try again"));
+}
+
+void TestAcpSessionModel::blankGoalJudgeChunk_doesNotOpenRow()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("gj7"), QStringLiteral("proj"), tmp.path());
+
+    model.appendGoalJudgeChunk(QStringLiteral(" \n"));
+    model.appendGoalJudgeThoughtChunk(QString());
+    QCOMPARE(model.messages().size(), 0);
+}
+
+void TestAcpSessionModel::removeGoalJudgeTurn_dropsSuffixKeepsPrior()
+{
+    QTemporaryDir tmp;
+    AcpSessionModel model(QStringLiteral("gj8"), QStringLiteral("proj"), tmp.path());
+
+    model.appendUserMessage(QStringLiteral("hi"), {});
+    model.onMessageChunk(QStringLiteral("hello"));
+    model.beginGoalJudgeTurn(QStringLiteral("Goal · judging 1/1"));
+    model.appendGoalJudgeChunk(QStringLiteral("verdict body"));
+    AcpProtocol::AcpToolCall tc;
+    tc.id = QStringLiteral("read-1");
+    tc.title = QStringLiteral("Read");
+    model.upsertGoalJudgeToolCall(tc);
+    model.beginGoalJudgeTurn(QStringLiteral("Goal · judging 1/1"));
+
+    QCOMPARE(model.messages().size(), 4); // user, coding, judging, verdict — no second marker
+    QVERIFY(model.toolCalls().contains(QStringLiteral("goal-judge:read-1")));
+
+    QSignalSpy spy(&model, &AcpSessionModel::goalJudgeTurnRemoved);
+    model.removeGoalJudgeTurn();
+
+    QCOMPARE(model.messages().size(), 2);
+    QCOMPARE(model.messages().at(0).role, QStringLiteral("user"));
+    QCOMPARE(model.messages().at(1).role, QStringLiteral("assistant"));
+    QVERIFY(!model.messages().at(1).fromGoalJudge);
+    QVERIFY(model.toolCalls().isEmpty());
+    QCOMPARE(spy.count(), 1);
+}
 
 QTEST_GUILESS_MAIN(TestAcpSessionModel)
 #include "test_acp_session_model.moc"

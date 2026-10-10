@@ -32,6 +32,7 @@
 #include <QShowEvent>
 #include <QStringList>
 #include <QStringView>
+#include <QStyle>
 #include <QTextBlock>
 #include <QVector>
 
@@ -884,7 +885,10 @@ AcpToolCallCard::AcpToolCallCard(const AcpProtocol::AcpToolCall &initial, QWidge
     , m_rawOutput(initial.rawOutput)
 {
     setFrameShape(QFrame::NoFrame);
-    setStyleSheet(QStringLiteral("AcpToolCallCard { background: palette(base); border-radius: 4px; }"));
+    setStyleSheet(QStringLiteral(
+        "AcpToolCallCard { background: palette(base); border-radius: 4px; }"
+        "AcpToolCallCard[goalAgent=\"true\"] { background: rgba(212, 175, 55, 48); "
+        "border: 1px solid rgba(212, 175, 55, 80); border-radius: 4px; }"));
 
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(6, 4, 6, 4);
@@ -941,6 +945,34 @@ AcpToolCallCard::AcpToolCallCard(const AcpProtocol::AcpToolCall &initial, QWidge
     // at terminal status with diff content — auto-expand it here too, not just
     // on a later apply().
     maybeAutoExpandForDiff();
+}
+
+void AcpToolCallCard::setGoalTint(bool on)
+{
+    if (m_fromGoalAgent == on)
+        return;
+    m_fromGoalAgent = on;
+    style()->unpolish(this);
+    style()->polish(this);
+}
+
+void AcpToolCallCard::setFromGoalAgent(bool goal)
+{
+    if (m_fromGoalAgent == goal)
+        return;
+    m_fromGoalAgent = goal;
+    if (goal && m_outer) {
+        auto *badge = new QLabel(tr("Goal"), this);
+        badge->setStyleSheet(QStringLiteral(
+            "QLabel { font-size: 9px; font-weight: 600; letter-spacing: 0.04em; "
+            "text-transform: uppercase; color: rgb(212, 175, 55); "
+            "background: palette(window); border: 1px solid rgba(212, 175, 55, 80); "
+            "border-radius: 3px; padding: 0px 5px; }"));
+        badge->setFixedHeight(badge->fontMetrics().height() + 4);
+        m_outer->insertWidget(0, badge);
+    }
+    style()->unpolish(this);
+    style()->polish(this);
 }
 
 void AcpToolCallCard::apply(const AcpProtocol::AcpToolCallUpdate &update)

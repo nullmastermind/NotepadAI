@@ -20,6 +20,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QStringView>
 #include <QtGlobal>
 #include <QStringList>
@@ -269,6 +270,19 @@ QString contentBlockToChunkText(const QJsonObject &content)
         return QLatin1Char('[') + label + QLatin1String("](") + uri + QLatin1Char(')');
     }
     return content.value(QStringLiteral("text")).toString();
+}
+
+QString stripPiAcpQueueNotices(QString text)
+{
+    // Fast path: pi-acp's queue notices always contain "queued".
+    if (!text.contains(QLatin1String("queued"), Qt::CaseInsensitive))
+        return text;
+    static const QRegularExpression re(
+        QStringLiteral(
+            R"((?:Queued message \(position \d+\)\.)|(?:Starting queued message\. \(\d+ remaining\))|(?:Cleared queued prompts\.))"));
+    const int before = text.size();
+    text.remove(re);
+    return text.size() == before ? text : text.trimmed();
 }
 
 QString terminalOutputDeltaFromMeta(const QJsonObject &meta)

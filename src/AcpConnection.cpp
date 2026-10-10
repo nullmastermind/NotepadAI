@@ -205,6 +205,11 @@ void AcpConnection::setAutoApprovePolicyProvider(std::function<QString()> provid
     m_autoApproveProvider = std::move(provider);
 }
 
+void AcpConnection::setMcpServers(const QJsonArray &servers)
+{
+    m_mcpServers = servers;
+}
+
 void AcpConnection::spawn(const AcpAgentDefinition &agent, const QString &workingDirectory)
 {
     m_agent = agent;
@@ -417,8 +422,7 @@ void AcpConnection::sendNewSession()
     params.insert(QStringLiteral("cwd"), m_workingDir);
     // ACP requires `mcpServers` as an array — strict (Zod) agents reject the
     // request with "expected array, received undefined" if the key is absent.
-    // We don't configure any MCP servers ourselves; send an empty array.
-    params.insert(QStringLiteral("mcpServers"), QJsonArray{});
+    params.insert(QStringLiteral("mcpServers"), m_mcpServers);
 
     sendRequest(AcpProtocol::kMethodSessionNew, params,
                 [this](const QJsonValue &result, const QJsonValue &error) {
@@ -887,10 +891,13 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
     const QString kind = update.value(QStringLiteral("sessionUpdate")).toString();
 
     if (kind == QLatin1String("agent_message_chunk")) {
+        const QString text = AcpProtocol::stripPiAcpQueueNotices(
+            AcpProtocol::contentBlockToChunkText(
+                update.value(QStringLiteral("content")).toObject()));
+        if (text.isEmpty())
+            return;
         m_promptProducedOutput = true;
         noteStreamingActivity();
-        const QString text = AcpProtocol::contentBlockToChunkText(
-            update.value(QStringLiteral("content")).toObject());
         emit messageChunk(text, update.value(QStringLiteral("messageId")).toString());
     } else if (kind == QLatin1String("agent_thought_chunk")) {
         m_promptProducedOutput = true;

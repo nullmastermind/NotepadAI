@@ -74,15 +74,18 @@ QIcon tintedCodeIcon(const QString &svgPath, const QColor &color)
     return dst;
 }
 
+// King gold #D4AF37 — Goal identity (user inject, judge, Goal set, system).
 constexpr const char *kFrameStyleUser =
     "AcpMessageWidget[role=\"user\"] { background: rgba(128, 128, 128, 38); border-radius: 6px; margin-left: 12px; }";
 constexpr const char *kFrameStyleUserGoal =
-    "AcpMessageWidget[role=\"user\"][goalAgent=\"true\"] { background: rgba(180, 140, 50, 48); border: 1px solid rgba(180, 140, 50, 80); border-radius: 6px; margin-left: 12px; }";
+    "AcpMessageWidget[role=\"user\"][goalAgent=\"true\"] { background: rgba(212, 175, 55, 48); border: 1px solid rgba(212, 175, 55, 80); border-radius: 6px; margin-left: 12px; }";
 constexpr const char *kFrameStyleAssistant =
     "AcpMessageWidget[role=\"assistant\"] { background: palette(base); border-radius: 6px; }"
-    "AcpMessageWidget[role=\"assistant\"][goalSet=\"true\"] { background: rgba(180, 140, 50, 48); border: 1px solid rgba(180, 140, 50, 80); border-radius: 6px; }";
+    "AcpMessageWidget[role=\"assistant\"][goalSet=\"true\"] { background: rgba(212, 175, 55, 48); border: 1px solid rgba(212, 175, 55, 80); border-radius: 6px; }"
+    "AcpMessageWidget[role=\"assistant\"][goalAgent=\"true\"] { background: rgba(212, 175, 55, 48); border: 1px solid rgba(212, 175, 55, 80); border-radius: 6px; }";
 constexpr const char *kFrameStyleThought =
-    "AcpMessageWidget[role=\"thought\"] { background: palette(base); border-radius: 6px; }";
+    "AcpMessageWidget[role=\"thought\"] { background: palette(base); border-radius: 6px; }"
+    "AcpMessageWidget[role=\"thought\"][goalAgent=\"true\"] { background: rgba(212, 175, 55, 48); border: 1px solid rgba(212, 175, 55, 80); border-radius: 6px; }";
 // Extra left inset under "Thinking…". Not in the layout margins — those wrap
 // the header too. Italic glyphs also overhang their advance by a few px, so
 // wrap width must leave that slack inside the viewport or the last letters
@@ -90,7 +93,7 @@ constexpr const char *kFrameStyleThought =
 constexpr int kThoughtBrowserPadLeft = 4;
 constexpr int kThoughtItalicRightSlack = 4;
 constexpr const char *kFrameStyleSystem =
-    "AcpMessageWidget[role=\"system\"] { background: rgba(180, 140, 50, 32); border: 1px solid rgba(180, 140, 50, 60); border-radius: 6px; }";
+    "AcpMessageWidget[role=\"system\"] { background: rgba(212, 175, 55, 32); border: 1px solid rgba(212, 175, 55, 60); border-radius: 6px; }";
 
 // Inline message bubbles size to content — they must never show a scrollbar
 // (it would reserve viewport width and create a feedback loop where the height
@@ -268,6 +271,16 @@ AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
     connect(m_rerenderTimer, &QTimer::timeout, this, &AcpMessageWidget::rerender);
 }
 
+void AcpMessageWidget::setGoalTint(bool on)
+{
+    if (m_fromGoalAgent == on)
+        return;
+    m_fromGoalAgent = on;
+    setProperty("goalAgent", on);
+    style()->unpolish(this);
+    style()->polish(this);
+}
+
 void AcpMessageWidget::setFromGoalAgent(bool goal)
 {
     if (m_fromGoalAgent == goal) return;
@@ -277,10 +290,11 @@ void AcpMessageWidget::setFromGoalAgent(bool goal)
         auto *badge = new QLabel(tr("Goal"), this);
         badge->setStyleSheet(QStringLiteral(
             "QLabel { font-size: 9px; font-weight: 600; letter-spacing: 0.04em; "
-            "text-transform: uppercase; color: rgb(180, 140, 50); "
-            "background: palette(window); border: 1px solid rgba(180, 140, 50, 80); "
+            "text-transform: uppercase; color: rgb(212, 175, 55); "
+            "background: palette(window); border: 1px solid rgba(212, 175, 55, 80); "
             "border-radius: 3px; padding: 0px 5px; }"));
         badge->setFixedHeight(badge->fontMetrics().height() + 4);
+        m_goalBadge = badge;
         m_layout->insertWidget(0, badge);
     }
     style()->unpolish(this);
@@ -519,6 +533,16 @@ void AcpMessageWidget::refitBrowserHeight()
     // and QAbstractScrollArea's font-derived default still inflates the
     // bubble. Computing the bubble height here directly is authoritative.
     int bubbleH = marginT + marginB;
+    if (m_goalBadge) {
+        // Stylesheet font/border make the badge taller than fontMetrics+4.
+        // Using the short value eats the 6px bottom margin so the last line
+        // sits on the frame. Prefer live size, then sizeHint, then metrics.
+        const int badgeH = qMax(m_goalBadge->height(),
+                                qMax(m_goalBadge->sizeHint().height(),
+                                     m_goalBadge->fontMetrics().height() + 4));
+        bubbleH += badgeH;
+        bubbleH += m_layout->spacing();
+    }
     if (m_thoughtHeader) {
         // Use font metrics for the header height; QToolButton::sizeHint()
         // adds style-derived button margins even with stylesheet padding:0,
@@ -556,6 +580,10 @@ void AcpMessageWidget::refitBrowserHeight()
     const int browserH = qMax(0, static_cast<int>(std::ceil(layoutDocumentHeight(doc, textW))));
     m_browser->setFixedHeight(browserH);
     bubbleH += browserH;
+    // Stylesheet border is inside the widget and shrinks the layout box.
+    // Without this, marginB is consumed and the last line sits on the frame.
+    if (height() > contentsRect().height())
+        bubbleH += height() - contentsRect().height();
     setFixedHeight(bubbleH);
 }
 
