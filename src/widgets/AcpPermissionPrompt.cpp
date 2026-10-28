@@ -21,6 +21,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QSet>
 #include <QVBoxLayout>
 
 AcpPermissionPrompt::AcpPermissionPrompt(const AcpProtocol::AcpPermissionRequest &request,
@@ -28,6 +29,8 @@ AcpPermissionPrompt::AcpPermissionPrompt(const AcpProtocol::AcpPermissionRequest
     : QFrame(parent)
     , m_requestId(request.requestId)
 {
+    // Control API: chat:<session>/permissionPrompt/<option kind>.
+    setObjectName(QStringLiteral("permissionPrompt"));
     setFrameShape(QFrame::StyledPanel);
     setStyleSheet(QStringLiteral(
         "AcpPermissionPrompt { background: palette(alternate-base); "
@@ -59,8 +62,14 @@ AcpPermissionPrompt::AcpPermissionPrompt(const AcpProtocol::AcpPermissionRequest
     btnRow->setSpacing(6);
     btnRow->addStretch();
 
+    QSet<QString> names;
     for (const auto &opt : request.options) {
         auto *btn = new QPushButton(opt.label.isEmpty() ? opt.id : opt.label, this);
+        // The ACP kind (allow_once, allow_always, reject_once...) reads the same
+        // for every agent; the option id when two options share a kind.
+        const QString name = !opt.kind.isEmpty() && !names.contains(opt.kind) ? opt.kind : opt.id;
+        names.insert(name);
+        btn->setObjectName(name);
         if (opt.kind == QLatin1String("allow_always")) {
             btn->setStyleSheet(QStringLiteral(
                 "QPushButton { background: palette(highlight); "

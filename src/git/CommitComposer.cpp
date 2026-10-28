@@ -73,26 +73,33 @@ void CommitMessageEdit::keyPressEvent(QKeyEvent *event)
 CommitComposer::CommitComposer(QWidget *parent) : QWidget(parent)
 {
     m_edit = new CommitMessageEdit(this);
+    m_edit->setObjectName(QStringLiteral("editCommitMessage"));
     m_edit->setPlaceholderText(tr("Commit message…"));
     m_edit->setAccessibleName(tr("Commit message"));
 
     m_charCount = new QLabel(QStringLiteral("0 / 50"), this);
+    m_charCount->setObjectName(QStringLiteral("labelCommitMessageLength"));
     m_charCount->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     m_charCount->setStyleSheet(QStringLiteral("QLabel { color: palette(mid); font-size: 11px; }"));
 
     m_amend = new QCheckBox(tr("Amend"), this);
+    m_amend->setObjectName(QStringLiteral("checkAmend"));
     m_amend->setToolTip(tr("Amend the last commit"));
     m_signoff = new QCheckBox(tr("Sign off"), this);
+    m_signoff->setObjectName(QStringLiteral("checkSignOff"));
     m_signoff->setToolTip(tr("Add Signed-off-by trailer"));
     m_tracked = new QCheckBox(tr("Commit Tracked"), this);
+    m_tracked->setObjectName(QStringLiteral("checkCommitTracked"));
     m_tracked->setToolTip(tr("Commit only modifications to tracked files (skip untracked, equivalent to git commit -a)"));
 
     m_commitBtn = new QPushButton(tr("Commit (Ctrl+Enter)"), this);
+    m_commitBtn->setObjectName(QStringLiteral("buttonCommit"));
     m_commitBtn->setAccessibleName(tr("Commit"));
     m_commitBtn->setDefault(false);
     m_commitBtn->setAutoDefault(false);
 
     m_aiBtn = new QToolButton(this);
+    m_aiBtn->setObjectName(QStringLiteral("buttonGenerateCommitMessage"));
     m_aiBtn->setText(QString::fromUtf8("\xE2\x9C\xA8"));   // U+2728 ✨ sparkles
     m_aiBtn->setAccessibleName(tr("Generate commit message with AI"));
     m_aiBtn->setToolTip(tr("Generate commit message with AI"));

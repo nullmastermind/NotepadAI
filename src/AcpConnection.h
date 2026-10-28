@@ -169,6 +169,8 @@ public:
     // that wake-up turn starts a moment after the task's final state update.
     // Supervisors (goal judge, auto-compact) must not act before it settles.
     bool hasPendingBackgroundWork() const;
+    // Prompts sent before session/new returned; they go out once it does.
+    int pendingPromptCount() const { return int(m_pendingPrompts.size()); }
     // Background work that will wake the agent again: tasks (and the grace
     // after the last one) or a live Monitor watch. Scheduled wake-ups and cron
     // jobs are not counted.

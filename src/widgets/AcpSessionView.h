@@ -110,6 +110,9 @@ public:
     // session/prompt now — that write stops agents that do not support /goal.
     void enqueueFollowUp(const QString &text, bool fromGoalAgent = false);
     int queuedPromptCount() const;
+    // A prompt sent but not yet out to the agent: parked until a restored
+    // session's agent connects, or held until its session is created.
+    bool hasUnsentPrompt() const;
 
     // Detach from the current model + connection and re-attach to a new pair
     // (typically after AcpAgentManager::restartSession). Clears the
@@ -134,6 +137,8 @@ public:
     // permission request is unanswered. A form cancelled because nobody is
     // there to answer (unattended session) does not count.
     bool isWaitingForUser() const;
+    // The session shown (the Control API reads the transcript from it).
+    const AcpSessionModel *sessionModel() const { return m_model; }
 
     // A draft session is one where the user has sent nothing yet. Only its
     // model / mode / effort choices become the agent's defaults for new

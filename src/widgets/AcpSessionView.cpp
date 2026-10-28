@@ -17,6 +17,9 @@
  */
 
 #include "AcpSessionView.h"
+#include "control/ControlEvents.h"
+#include "control/ControlIds.h"
+#include "control/ControlPicker.h"
 
 #include "AcpAgentRegistry.h"
 #include "AcpConnection.h"
@@ -456,6 +459,7 @@ void AcpSessionView::buildUi()
     m_bannerLabel = new QLabel(m_banner);
     m_bannerLabel->setWordWrap(true);
     m_bannerClose = new QToolButton(m_banner);
+    m_bannerClose->setObjectName(QStringLiteral("chatBannerClose"));
     m_bannerClose->setText(QStringLiteral("×"));
     m_bannerClose->setAutoRaise(true);
     m_bannerClose->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -464,6 +468,7 @@ void AcpSessionView::buildUi()
     connect(m_bannerClose, &QToolButton::clicked, this, &AcpSessionView::clearBanner);
     // Optional action ("Restart") offered by some banners; hidden otherwise.
     m_bannerAction = new QToolButton(m_banner);
+    m_bannerAction->setObjectName(QStringLiteral("chatBannerAction"));
     m_bannerAction->setAutoRaise(true);
     m_bannerAction->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_bannerAction->hide();
@@ -527,6 +532,7 @@ void AcpSessionView::buildUi()
     // transcript host) so the button stays pinned to the bottom-right of the
     // visible region instead of scrolling away with the content.
     m_jumpToBottom = new QToolButton(m_scroll->viewport());
+    m_jumpToBottom->setObjectName(QStringLiteral("chatJumpToBottom"));
     m_jumpToBottom->setText(QStringLiteral("↓"));
     m_jumpToBottom->setToolTip(tr("Jump to bottom"));
     m_jumpToBottom->setAutoRaise(false);
@@ -569,6 +575,7 @@ void AcpSessionView::buildUi()
         "QComboBox { padding: 1px 4px; border: 1px solid palette(mid); border-radius: 3px; }"
         "QComboBox::drop-down { width: 14px; }");
     auto *modelCombo = new MenuComboBox(this);
+    modelCombo->setObjectName(QStringLiteral("chatModel"));
     modelCombo->addLeadingEntries = [this](QMenu *menu) { addPrewalkMenu(menu); };
     m_modelCombo = modelCombo;
     m_modelCombo->setToolTip(tr("Model"));
@@ -576,11 +583,13 @@ void AcpSessionView::buildUi()
     m_modelCombo->setStyleSheet(kCompactComboCss);
     m_modelCombo->hide();
     m_modeCombo = new QComboBox(this);
+    m_modeCombo->setObjectName(QStringLiteral("chatMode"));
     m_modeCombo->setToolTip(tr("Mode"));
     m_modeCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     m_modeCombo->setStyleSheet(kCompactComboCss);
     m_modeCombo->hide();
     m_effortCombo = new QComboBox(this);
+    m_effortCombo->setObjectName(QStringLiteral("chatEffort"));
     m_effortCombo->setToolTip(tr("Effort"));
     m_effortCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     m_effortCombo->setStyleSheet(kCompactComboCss);
@@ -589,6 +598,7 @@ void AcpSessionView::buildUi()
     // 4. Session options row: New worktree, Advisor, the "More options" menu
     // (Auto-approve), then usage at the right end.
     m_moreBtn = new QToolButton(this);
+    m_moreBtn->setObjectName(QStringLiteral("chatMore"));
     m_moreBtn->setAutoRaise(true);
     m_moreBtn->setToolButtonStyle(Qt::ToolButtonIconOnly);
     m_moreBtn->setIconSize(QSize(16, 16));
@@ -604,8 +614,10 @@ void AcpSessionView::buildUi()
     m_autoApproveAction->setToolTip(tr("Automatically allow all tool calls this agent requests"));
     m_moreBtn->setMenu(moreMenu);
     m_newWorktreeCheck = new QCheckBox(tr("New worktree"), this);
+    m_newWorktreeCheck->setObjectName(QStringLiteral("chatNewWorktree"));
     m_newWorktreeCheck->setToolTip(tr("Do this conversation in a new git worktree, then merge and clean up"));
     m_advisorBtn = new QCheckBox(tr("Advisor"), this);
+    m_advisorBtn->setObjectName(QStringLiteral("chatAdvisor"));
     m_advisorBtn->setToolTip(tr("Let the agent consult a stronger model (sends /advisor)"));
     // King gold when on, matching the advisor tool-call card.
     m_advisorBtn->setStyleSheet(QStringLiteral(
@@ -674,6 +686,7 @@ void AcpSessionView::buildUi()
 
     // 6. Input.
     auto *cb = new ChatInputEditCb(m_attachmentList, this);
+    cb->setObjectName(QStringLiteral("chatInput"));
     cb->onSubmit = [this]() { onSendClicked(); };
     cb->onRestart = [this]() { emit restartSessionRequested(); };
     cb->onKeyFilter = [this](QKeyEvent *ke) -> bool {
@@ -746,6 +759,7 @@ void AcpSessionView::buildUi()
     // 6b. Floating improve-prompt button (child of m_input frame, bottom-right).
     // Parent is m_input (not viewport) so it stays fixed when content scrolls.
     m_improveBtn = new QToolButton(m_input);
+    m_improveBtn->setObjectName(QStringLiteral("chatImprove"));
     m_improveBtn->setAutoRaise(true);
     m_improveBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_improveBtn->setText(QStringLiteral("✨"));
@@ -772,6 +786,7 @@ void AcpSessionView::buildUi()
     btnRow->setContentsMargins(0, 0, 0, 0);
     btnRow->setSpacing(4);
     m_attachBtn = new QToolButton(this);
+    m_attachBtn->setObjectName(QStringLiteral("chatAttach"));
     m_attachBtn->setAutoRaise(true);
     m_attachBtn->setToolButtonStyle(Qt::ToolButtonIconOnly);
     m_attachBtn->setToolTip(tr("Attach an image (or paste from clipboard)"));
@@ -780,7 +795,9 @@ void AcpSessionView::buildUi()
         "QToolButton:hover { color: palette(text); border: 1px solid palette(mid); }"));
     rebuildTintedIcons();
     m_cancelBtn = new QPushButton(tr("Cancel"), this);
+    m_cancelBtn->setObjectName(QStringLiteral("chatCancel"));
     m_sendBtn = new QPushButton(tr("Send"), this);
+    m_sendBtn->setObjectName(QStringLiteral("chatSend"));
     m_cancelBtn->setEnabled(false);
     m_cancelBtn->hide();
     btnRow->addWidget(m_attachBtn);
@@ -825,6 +842,7 @@ void AcpSessionView::buildUi()
     btnRow->addWidget(m_sendBtn);
 
     m_sendWithGoalBtn = new QToolButton(this);
+    m_sendWithGoalBtn->setObjectName(QStringLiteral("chatSendWithGoal"));
     m_sendWithGoalBtn->setText(tr("Goal"));
     m_sendWithGoalBtn->setAutoRaise(true);
     m_sendWithGoalBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -2731,6 +2749,9 @@ void AcpSessionView::onCurrentModeChanged(const QString &modeId)
 
 void AcpSessionView::onIsProcessingChanged(bool processing)
 {
+    if (control::events::wanted())
+        control::events::publish(processing ? QStringLiteral("chat.turnStarted") : QStringLiteral("chat.turnEnded"),
+                                 {{QStringLiteral("id"), control::ids::nodeId(this).id}});
     if (m_sendBtn)
         updateSendButton();
     if (m_cancelBtn) {
@@ -2941,6 +2962,10 @@ void AcpSessionView::refreshWaiting()
     if (waiting == m_lastWaiting)
         return;
     m_lastWaiting = waiting;
+    if (control::events::wanted())
+        control::events::publish(QStringLiteral("chat.waitingForUser"),
+                                 {{QStringLiteral("id"), control::ids::nodeId(this).id},
+                                  {QStringLiteral("waiting"), waiting}});
     emit waitingChanged(waiting);
 }
 
@@ -3378,6 +3403,11 @@ int AcpSessionView::queuedPromptCount() const
     return m_promptQueue.size();
 }
 
+bool AcpSessionView::hasUnsentPrompt() const
+{
+    return m_parked.active || (m_connection && m_connection->pendingPromptCount() > 0);
+}
+
 void AcpSessionView::dispatchPrompt(const QString &text,
                                     const QVector<QPair<QByteArray, QString>> &images,
                                     bool fromGoalAgent,
@@ -3504,7 +3534,7 @@ void AcpSessionView::onCancelClicked()
 
 void AcpSessionView::onAttachClicked()
 {
-    const QStringList files = QFileDialog::getOpenFileNames(
+    const QStringList files = control::picker::getOpenFileNames(
         this,
         tr("Attach images"),
         QString(),

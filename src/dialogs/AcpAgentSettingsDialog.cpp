@@ -17,6 +17,7 @@
  */
 
 #include "AcpAgentSettingsDialog.h"
+#include "control/ControlPicker.h"
 #include "ui_AcpAgentSettingsDialog.h"
 
 #include <QApplication>
@@ -424,7 +425,7 @@ private:
     {
         const QString current = m_iconPathEdit->text().trimmed();
         const QString startDir = current.isEmpty() ? QString() : QFileInfo(current).absolutePath();
-        const QString path = QFileDialog::getOpenFileName(this, tr("Choose agent icon"), startDir,
+        const QString path = control::picker::getOpenFileName(this, tr("Choose agent icon"), startDir,
             tr("Images (*.svg *.png *.ico *.jpg *.jpeg *.bmp)"));
         if (!path.isEmpty()) {
             m_iconPathEdit->setText(path);

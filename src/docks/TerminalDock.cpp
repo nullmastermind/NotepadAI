@@ -23,6 +23,8 @@
 #include "NotepadNextApplication.h"
 #include "ApplicationSettings.h"
 
+#include "control/ControlEvents.h"
+#include "control/ControlIds.h"
 #include "remote/ExecutionContext.h"
 #include "remote/RemoteExecutionContext.h"
 
@@ -101,13 +103,15 @@ TerminalDock::~TerminalDock() = default;
 
 void TerminalDock::init(const QString &shell, const QString &cwd)
 {
-    setObjectName(QStringLiteral("TerminalDock_%1").arg(reinterpret_cast<qulonglong>(this), 0, 16));
+    // Each terminal sits under its own dock (`dock:<uuid>/terminalDock/terminal`).
+    setObjectName(QStringLiteral("terminalDock"));
 
     auto *lay = new QVBoxLayout(this);
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);
 
     m_terminal = new TerminalWidget(this);
+    m_terminal->setObjectName(QStringLiteral("terminal"));
     lay->addWidget(m_terminal);
 
     if (auto *rctx = qobject_cast<remote::RemoteExecutionContext *>(m_context.data())) {
@@ -152,6 +156,10 @@ void TerminalDock::connectTerminal()
         if (isTask() && m_taskReportsExit) {
             setTaskState(code == 0 ? TaskState::Succeeded : TaskState::Failed);
         }
+        if (control::events::wanted())
+            control::events::publish(QStringLiteral("terminal.taskExited"),
+                                     {{QStringLiteral("id"), control::ids::nodeId(m_terminal).id},
+                                      {QStringLiteral("exitCode"), code}});
     });
     connect(m_terminal, &TerminalWidget::bellRung, this, [this]() {
         // Only a tab the user is not looking at needs the reminder.
@@ -162,6 +170,10 @@ void TerminalDock::connectTerminal()
     });
     connect(m_terminal, &TerminalWidget::processExited, this, [this](int code) {
         setProcessStats({});
+        if (control::events::wanted())
+            control::events::publish(QStringLiteral("terminal.exited"),
+                                     {{QStringLiteral("id"), control::ids::nodeId(m_terminal).id},
+                                      {QStringLiteral("exitCode"), code}});
         if (m_taskState == TaskState::Running) {
             setTaskState(code == 0 ? TaskState::Succeeded : TaskState::Failed);
         }
@@ -332,6 +344,7 @@ void TerminalDock::restartTask()
     delete m_terminal;
 
     m_terminal = new TerminalWidget(this);
+    m_terminal->setObjectName(QStringLiteral("terminal"));
     lay->addWidget(m_terminal);
     m_programTitle.clear();
     emit terminalRecreated();

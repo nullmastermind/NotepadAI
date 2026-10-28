@@ -128,6 +128,13 @@ public:
     bool hasExited() const { return m_exited; }
     bool hasSelection() const { return m_hasSelection; }
     QString selectedText() const;
+    // Rows [from, from + count) of the scrollback followed by the live screen,
+    // trailing blanks trimmed (the Control API's read). `total`: every row;
+    // `history`: scrollback rows, so the live screen starts there.
+    QStringList textRows(int from, int count, int *total = nullptr, int *history = nullptr) const;
+    // Cursor cell on the live screen (x = column, y = row).
+    QPoint cursorCell() const { return m_cursor; }
+    int screenRows() const { return m_rows; }
 
 signals:
     void titleChanged(const QString &title);

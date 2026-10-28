@@ -67,15 +67,19 @@ TabsQuickActionsBar::TabsQuickActionsBar(const Buttons &visibileButtons, QWidget
     : QToolBar(parent)
 {
     createNewTabAction = addAction(QIcon(), "");
+    createNewTabAction->setObjectName(QStringLiteral("actionQuickNewTab"));
     createNewTabAction->setToolTip(tr("Create a new file"));
 
     showTabsMenuAction = addAction(QIcon(), "");
+    showTabsMenuAction->setObjectName(QStringLiteral("actionQuickTabsMenu"));
     showTabsMenuAction->setToolTip(tr("Show opened files list"));
 
     const auto tabsMenu = new QMenu(this);
+    tabsMenu->setObjectName(QStringLiteral("menuQuickTabs"));
     showTabsMenuAction->setMenu(tabsMenu);
 
     closeCurrentTabAction = addAction(QIcon(), "");
+    closeCurrentTabAction->setObjectName(QStringLiteral("actionQuickCloseTab"));
     closeCurrentTabAction->setToolTip(tr("Close the current file"));
 
     rebuildIcons();

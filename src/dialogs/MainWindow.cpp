@@ -18,6 +18,7 @@
 
 
 #include "MainWindow.h"
+#include "control/ControlPicker.h"
 #include "BookMarkDecorator.h"
 #include "DefaultDirectoryManager.h"
 #include "MarkerAppDecorator.h"
@@ -154,6 +155,7 @@
 #include "UsageButton.h"
 #include "ai/ClaudeUsageAccounts.h"
 #include "ai/ClaudeUsageService.h"
+#include "ai/CredentialStore.h"
 
 #include "QuickFindWidget.h"
 #include "QuickFileOpenDialog.h"
@@ -178,6 +180,13 @@
 #include "CrashContext.h"
 #include "CrashHandler.h"
 #include "ProfileScope.h"
+#include "control/ControlApi.h"
+#include "control/ControlApiDialog.h"
+#include "control/ControlAppAdapters.h"
+#include "control/ControlAudit.h"
+#include "control/ControlEffects.h"
+#include "control/ControlIds.h"
+#include "control/ControlStatusIndicator.h"
 
 #include <QApplication>
 #include <QEvent>
@@ -221,6 +230,7 @@ void appendMiniAppMenuNode(QMenu *menu, QAction *before, const MiniAppMenuNode &
         return;
     for (const MiniAppMenuNode &child : node.children) {
         auto *sub = new QMenu(child.name, menu);
+        control::ids::setKey(sub, QStringLiteral("group:") + child.name);
         appendMiniAppMenuNode(sub, nullptr, child, manager);
         if (before)
             menu->insertMenu(before, sub);
@@ -229,6 +239,7 @@ void appendMiniAppMenuNode(QMenu *menu, QAction *before, const MiniAppMenuNode &
     }
     for (const MiniAppDefinition &def : node.apps) {
         QAction *a = before ? new QAction(def.name, menu) : menu->addAction(def.name);
+        control::ids::setKey(a, QStringLiteral("app:") + def.id);
         QObject::connect(a, &QAction::triggered, manager, [manager, def]() {
             manager->launchApp(def);
         });
@@ -582,6 +593,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
             QAction *action = new QAction(label, ui->menuOpenFolderAsWorkspace);
             if (!e.icon.isNull()) action->setIcon(e.icon);
             const QString uri = e.openUri;
+            control::ids::setKey(action, QStringLiteral("recent:") + uri);
             connect(action, &QAction::triggered, this, [this, uri]() {
                 openFolderAsWorkspacePath(uri);
             });
@@ -608,6 +620,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         if (allPaths.size() > 10) {
             ui->menuOpenFolderAsWorkspace->addSeparator();
             QAction *more = new QAction(tr("Show more..."), ui->menuOpenFolderAsWorkspace);
+            more->setObjectName(QStringLiteral("actionRecentWorkspacesMore"));
             connect(more, &QAction::triggered, this, [this]() {
                 openRecentWorkspacePopup();
             });
@@ -1562,9 +1575,10 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         }
 
         for (const Macro *m : macroManager.availableMacros()) {
-            ui->menuMacro->addAction(m->getName(), [=, this]() {
+            QAction *macroAction = ui->menuMacro->addAction(m->getName(), [=, this]() {
                 if (auto *e = currentEditor()) m->replay(e);
             });
+            control::ids::setKey(macroAction, QStringLiteral("macro:") + m->getName());
         }
     });
 
@@ -1603,6 +1617,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
     connect(app->getSettings(), &ApplicationSettings::usageClaudeConfigDirsChanged, usageAccounts,
             &ai::ClaudeUsageAccounts::setConfigDirs);
     auto *usageButton = new UsageButton(usageAccounts, cornerHost);
+    usageButton->setObjectName(QStringLiteral("usageButton"));
     usageButton->setPercentMode(app->getSettings()->usagePercentRemaining()
                                     ? ai::claudeusage::PercentMode::Remaining
                                     : ai::claudeusage::PercentMode::Used);
@@ -1612,6 +1627,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
     cornerLayout->addWidget(usageButton);
 
     tabsQuickActionsBar = new TabsQuickActionsBar(cornerHost);
+    tabsQuickActionsBar->setObjectName(QStringLiteral("tabsQuickActionsBar"));
     cornerLayout->addWidget(tabsQuickActionsBar);
     ui->menuBar->setCornerWidget(cornerHost, Qt::TopRightCorner);
     usageAccounts->startPolling();
@@ -1629,6 +1645,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         for (const auto editor : editorsList) {
             const auto iconPath = editor->isSavedToDisk() ? ":/icons/saved.png" : ":/icons/unsaved.png";
             const auto action = editorsMenu->addAction(QIcon(iconPath), editor->getName());
+            control::ids::setKey(action, QStringLiteral("tab:") + (editor->isFile() ? editor->getFilePath() : editor->getName()));
 
             if (editor->isActiveWindow()) {
                 auto font = action->font();
@@ -1720,6 +1737,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         // (see updatePreviewActionForEditor). Ctrl+Shift+M is kept for muscle
         // memory even though it now previews any supported type.
         m_actionPreview = new QAction(icon, tr("Preview"), this);
+        m_actionPreview->setObjectName(QStringLiteral("actionPreview"));
     }
     m_actionPreview->setCheckable(true);
     m_actionPreview->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_M));
@@ -1884,6 +1902,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
 
         for (const TerminalTask &task : tasks) {
             QAction *action = ui->menuTasks->addAction(task.name);
+            control::ids::setKey(action, QStringLiteral("task:") + task.name);
             connect(action, &QAction::triggered, this, [this, workspaceRoot, task]() {
                 const QString cwd = TerminalCwdResolver::resolveWorkspace(workspaceRoot);
                 if (cwd.isEmpty()) return;
@@ -1916,6 +1935,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
             m_embeddedWindowManager->enumerateEmbeddableWindows();
         if (windows.isEmpty()) {
             QAction *emptyAction = ui->menuEmbed->addAction(tr("No embeddable windows"));
+            control::ids::setKey(emptyAction, QStringLiteral("none"));
             emptyAction->setEnabled(false);
             return;
         }
@@ -1924,6 +1944,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
             QString label = window.title;
             label.replace(QLatin1Char('&'), QStringLiteral("&&"));
             QAction *action = ui->menuEmbed->addAction(label);
+            control::ids::setKey(action, QStringLiteral("window:") + QString::number(window.handle, 16));
             connect(action, &QAction::triggered, this, [this, window]() {
                 m_embeddedWindowManager->embedWindow(window.handle, window.title);
             });
@@ -1961,18 +1982,24 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
 
         QDialog dlg(this);
         dlg.setWindowTitle(tr("Quick Browse"));
+        dlg.setObjectName(QStringLiteral("QuickBrowseDialog"));
         auto *layout = new QVBoxLayout(&dlg);
 
-        layout->addWidget(new QLabel(tr("Enter URL:"), &dlg));
+        auto *urlLabel = new QLabel(tr("Enter URL:"), &dlg);
+        layout->addWidget(urlLabel);
         auto *urlEdit = new QLineEdit(&dlg);
+        urlLabel->setBuddy(urlEdit);
+        urlEdit->setObjectName(QStringLiteral("editUrl"));
         urlEdit->setPlaceholderText(QStringLiteral("https://example.com"));
         layout->addWidget(urlEdit);
 
         auto *cdpCheck = new QCheckBox(tr("Enable CDP debugging"), &dlg);
+        cdpCheck->setObjectName(QStringLiteral("checkCdp"));
         cdpCheck->setChecked(true);
         layout->addWidget(cdpCheck);
 
         auto *crossOriginCheck = new QCheckBox(tr("Allow cross-origin iframe access (better automation, less security)"), &dlg);
+        crossOriginCheck->setObjectName(QStringLiteral("checkCrossOrigin"));
         crossOriginCheck->setChecked(false);
         crossOriginCheck->setToolTip(
             tr("Enables page-agent to read content inside cross-origin iframes.\n"
@@ -1981,28 +2008,40 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
 
         // Proxy row
         auto *proxyLayout = new QHBoxLayout;
-        proxyLayout->addWidget(new QLabel(tr("Proxy:"), &dlg));
+        auto *proxyLabel = new QLabel(tr("Proxy:"), &dlg);
+        proxyLayout->addWidget(proxyLabel);
         auto *proxyCombo = new QComboBox(&dlg);
+        proxyLabel->setBuddy(proxyCombo);
+        proxyCombo->setObjectName(QStringLiteral("comboProxyType"));
         proxyCombo->addItem(tr("None"), 0);
         proxyCombo->addItem(QStringLiteral("HTTP"), 1);
         proxyCombo->addItem(QStringLiteral("HTTPS"), 2);
         proxyCombo->addItem(QStringLiteral("SOCKS4"), 3);
         proxyCombo->addItem(QStringLiteral("SOCKS5"), 4);
         proxyLayout->addWidget(proxyCombo);
-        proxyLayout->addWidget(new QLabel(tr("Host:"), &dlg));
+        auto *proxyHostLabel = new QLabel(tr("Host:"), &dlg);
+        proxyLayout->addWidget(proxyHostLabel);
         auto *proxyHostEdit = new QLineEdit(&dlg);
+        proxyHostLabel->setBuddy(proxyHostEdit);
+        proxyHostEdit->setObjectName(QStringLiteral("editProxyHost"));
         proxyHostEdit->setPlaceholderText(QStringLiteral("proxy.example.com"));
         proxyLayout->addWidget(proxyHostEdit, 1);
-        proxyLayout->addWidget(new QLabel(tr("Port:"), &dlg));
+        auto *proxyPortLabel = new QLabel(tr("Port:"), &dlg);
+        proxyLayout->addWidget(proxyPortLabel);
         auto *proxyPortSpin = new QSpinBox(&dlg);
+        proxyPortLabel->setBuddy(proxyPortSpin);
+        proxyPortSpin->setObjectName(QStringLiteral("spinProxyPort"));
         proxyPortSpin->setRange(0, 65535);
         proxyPortSpin->setSpecialValueText(tr("Default"));
         proxyLayout->addWidget(proxyPortSpin);
         layout->addLayout(proxyLayout);
 
         auto *bypassLayout = new QHBoxLayout;
-        bypassLayout->addWidget(new QLabel(tr("Bypass:"), &dlg));
+        auto *bypassLabel = new QLabel(tr("Bypass:"), &dlg);
+        bypassLayout->addWidget(bypassLabel);
         auto *proxyBypassEdit = new QLineEdit(&dlg);
+        bypassLabel->setBuddy(proxyBypassEdit);
+        proxyBypassEdit->setObjectName(QStringLiteral("editProxyBypass"));
         proxyBypassEdit->setPlaceholderText(QStringLiteral("localhost;127.0.0.1;[::1];<local>"));
         bypassLayout->addWidget(proxyBypassEdit, 1);
         layout->addLayout(bypassLayout);
@@ -2027,6 +2066,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         updateProxyFields();
 
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        buttons->setObjectName(QStringLiteral("buttonBox"));
         connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
         layout->addWidget(buttons);
@@ -2160,6 +2200,8 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
 
     } // MainWindow::ctor.terminalManager
 
+    setupControlApi();
+
     // Sweep every QAction that setupUi (and constructor-time code above) has
     // already created. The ActionAddedFilter installed right after setupUi
     // handles anything added from this point onward (recent files, languages).
@@ -2176,7 +2218,9 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         // documented in CrashHandler::triggerCrashForTest so testers can
         // exercise each fault path interactively. Never compiled into Release.
         QMenu *debugMenu = ui->menuHelp->addMenu(tr("Debug"));
+        debugMenu->setObjectName(QStringLiteral("menuDebug"));
         QMenu *crashMenu = debugMenu->addMenu(tr("Trigger Crash"));
+        crashMenu->setObjectName(QStringLiteral("menuTriggerCrash"));
         const struct { const char *kind; const char *label; } kinds[] = {
             {"segv",      "Null pointer write (SEGV)"},
             {"abrt",      "std::abort (SIGABRT)"},
@@ -2187,6 +2231,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         };
         for (const auto &k : kinds) {
             QAction *a = crashMenu->addAction(QString::fromLatin1(k.label));
+            control::ids::setKey(a, QStringLiteral("crash:") + QLatin1String(k.kind));
             const QByteArray kindBytes(k.kind);
             connect(a, &QAction::triggered, this, [kindBytes]() {
                 CrashHandler::triggerCrashForTest(kindBytes.constData());
@@ -2196,6 +2241,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         // Shutdown diagnostics toggle. Writes shutdown_report.txt on clean exit.
         ApplicationSettings *settings = app->getSettings();
         QAction *diagAction = debugMenu->addAction(tr("Shutdown Diagnostics"));
+        diagAction->setObjectName(QStringLiteral("actionShutdownDiagnostics"));
         diagAction->setCheckable(true);
         diagAction->setChecked(settings->shutdownDiagnosticsEnabled());
         connect(diagAction, &QAction::toggled, this, [settings](bool checked) {
@@ -2213,6 +2259,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         // commands, and git timeouts for the currently active SSH workspace.
         // Disabled when no SSH workspace is active.
         QAction *sshDebugAction = debugMenu->addAction(tr("SSH Debug Log"));
+        sshDebugAction->setObjectName(QStringLiteral("actionSshDebugLog"));
         sshDebugAction->setEnabled(remote::isSshUri(currentWorkspaceRoot()));
         connect(this, &MainWindow::activeWorkspaceChanged, this,
                 [this, sshDebugAction](FolderAsWorkspaceDock *, FolderAsWorkspaceDock *) {
@@ -2230,6 +2277,7 @@ MainWindow::MainWindow(NotepadNextApplication *app) :
         });
 
         QAction *sentryTestAction = debugMenu->addAction(tr("Test Sentry"));
+        sentryTestAction->setObjectName(QStringLiteral("actionTestSentry"));
         connect(sentryTestAction, &QAction::triggered, this, []() {
             sentry_capture_event(sentry_value_new_message_event(
                 SENTRY_LEVEL_INFO, "custom", "It works!"));
@@ -2283,6 +2331,87 @@ void MainWindow::showPm2Processes()
         return cwd.isEmpty() || remote::isSshUri(cwd) ? QDir::homePath() : cwd;
     }, this);
     m_pm2Dialog->show();
+}
+
+void MainWindow::setupControlApi()
+{
+    control::registerAppAdapters();
+
+    control::ControlApi::Host host;
+    host.settings = app->getSettings();
+    if (ai::CredentialStore *store = app->getCredentialStore()) {
+        const QString key = QString::fromLatin1(control::ControlApi::kTokenSecretKey);
+        host.loadToken = [store, key]() -> std::optional<QString> {
+            if (!store->isBackendAvailable())
+                return std::nullopt;
+            QString error;
+            const QString token = store->retrieveSecret(key, &error);
+            if (!error.isEmpty())
+                return std::nullopt;
+            return token;
+        };
+        host.saveToken = [store, key](const QString &token) {
+            return store->isBackendAvailable() && store->storeSecret(key, token);
+        };
+    }
+    host.instanceInfo = [this]() {
+        QJsonObject info{
+            {QStringLiteral("windowTitle"), control::rootTitle(this)},
+            {QStringLiteral("workspaces"), QJsonArray::fromStringList(openWorkspaceRoots())},
+            {QStringLiteral("activeWorkspace"), currentWorkspaceRoot()},
+            {QStringLiteral("editorCount"), editorCount()},
+        };
+        if (ScintillaNext *editor = currentEditor()) {
+            info.insert(QStringLiteral("activeEditor"),
+                        editor->isFile() ? QDir::fromNativeSeparators(editor->getFilePath()) : editor->getName());
+            info.insert(QStringLiteral("activeEditorModified"), editor->modify());
+        }
+        return info;
+    };
+    // A dock behind another tab is hidden but open; ADS says whether it is closed.
+    host.presence = [](const QWidget *w) {
+        if (const auto *dock = qobject_cast<const ads::CDockWidget *>(w))
+            return !dock->isClosed();
+        return w->isVisible();
+    };
+    m_controlApi = new control::ControlApi(host, this, this);
+    // Actions whose picker an external agent fills with `value` (control::picker).
+    const QString files = tr("one or more file paths (an array, or one per line)");
+    const QString file = tr("a file path");
+    const QString folder = tr("a folder path");
+    m_controlApi->notePicker(QStringLiteral("actionOpen"), files);
+    m_controlApi->notePicker(QStringLiteral("actionOpenFolderasWorkspace"), folder);
+    m_controlApi->notePicker(QStringLiteral("actionOpenFolderAsWorkspaceNew"), folder);
+    m_controlApi->notePicker(QStringLiteral("actionSaveAs"), file);
+    m_controlApi->notePicker(QStringLiteral("actionSaveCopyAs"), file);
+    m_controlApi->notePicker(QStringLiteral("actionRename"), tr("the new file path"));
+    m_controlApi->notePicker(QStringLiteral("actionExportHtml"), file);
+    m_controlApi->notePicker(QStringLiteral("actionExportRtf"), file);
+
+    auto *indicator = new control::ControlStatusIndicator(m_controlApi, ui->statusBar);
+    ui->statusBar->addPermanentWidget(indicator);
+    connect(indicator, &control::ControlStatusIndicator::openRequested, this, &MainWindow::showControlApiDialog);
+    connect(ui->actionConnectExternalAgent, &QAction::triggered, this, &MainWindow::showControlApiDialog);
+
+    m_controlApi->startFromSettings();
+}
+
+void MainWindow::showControlApiDialog()
+{
+    auto *dlg = findChild<control::ControlApiDialog *>(QString(), Qt::FindDirectChildrenOnly);
+    if (!dlg)
+        dlg = new control::ControlApiDialog(m_controlApi, this);
+    dlg->show();
+    dlg->raise();
+    dlg->activateWindow();
+}
+
+int MainWindow::runControlApiAudit()
+{
+    // A modeless dialog is a child of this window once opened: open it so its
+    // controls are audited too (modal ones would block the audit).
+    ui->actionPreferences->trigger();
+    return control::runAudit(this);
 }
 
 MainWindow::~MainWindow()
@@ -2366,6 +2495,7 @@ void MainWindow::setupLanguageMenu()
             QAction *action = new QAction(key);
             action->setCheckable(true);
             action->setData(key);
+            control::ids::setKey(action, QStringLiteral("lang:") + key);
             connect(action, &QAction::triggered, this, &MainWindow::languageMenuTriggered);
             languageActionGroup->addAction(action);
             actions.append(action);
@@ -2379,6 +2509,7 @@ void MainWindow::setupLanguageMenu()
         else {
             // Create a sub menu with the actions
             QMenu *compactMenu = new QMenu(actions[0]->text().at(0).toUpper());
+            control::ids::setKey(compactMenu, QStringLiteral("group:") + compactMenu->title());
             compactMenu->addActions(actions);
             ui->menuLanguage->addMenu(compactMenu);
         }
@@ -2683,7 +2814,7 @@ void MainWindow::previewFileAsText(const QString &filePath)
 
 void MainWindow::openFolderAsWorkspaceDialog()
 {
-    const QString dir = QFileDialog::getExistingDirectory(this, tr("Open Folder as Workspace"), defaultDirectoryManager->getDefaultDirectory(), QFileDialog::ShowDirsOnly);
+    const QString dir = control::picker::getExistingDirectory(this, tr("Open Folder as Workspace"), defaultDirectoryManager->getDefaultDirectory(), QFileDialog::ShowDirsOnly);
     openFolderAsWorkspacePath(dir);
 }
 
@@ -2918,6 +3049,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 QFileInfo fi(isSshWorkspace ? QString() : absPath);
                 if (isSshWorkspace || mgr->previewWantsFilePath(absPath) || fi.size() <= 10 * 1024 * 1024) {
                     auto *previewAction = new QAction(tr("Preview"), menu);
+                    previewAction->setObjectName(QStringLiteral("actionTreePreview"));
                     if (isSshWorkspace) {
                         connect(previewAction, &QAction::triggered, this, [this, absPath]() {
                             previewFile(absPath);
@@ -2934,12 +3066,14 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             }
             if (!assetPreviewTypeFor(absPath).isEmpty()) {
                 auto *asText = new QAction(tr("Open as Text"), menu);
+                asText->setObjectName(QStringLiteral("actionTreeOpenAsText"));
                 connect(asText, &QAction::triggered, this, [this, absPath]() { openFileAsText(absPath); });
                 menu->addAction(asText);
                 addedOpenAction = true;
             }
             if (!remote::isSshUri(absPath) && isHtmlFilePath(absPath) && m_miniAppManager) {
                 auto *openInBrowser = new QAction(tr("Open in Browser"), menu);
+                openInBrowser->setObjectName(QStringLiteral("actionTreeOpenInBrowser"));
                 connect(openInBrowser, &QAction::triggered, this, [this, absPath]() {
                     const QUrl url(normalizeQuickBrowseInput(absPath), QUrl::TolerantMode);
                     if (url.isValid())
@@ -2959,6 +3093,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         const QString dockRoot = dock ? dock->rootPath() : wsRoot;
         const bool isSshDock = remote::isSshUri(dockRoot);
         auto *copyPath = new QAction(tr("Copy Path"), menu);
+        copyPath->setObjectName(QStringLiteral("actionTreeCopyPath"));
         connect(copyPath, &QAction::triggered, this, [absPath, isSshDock]() {
             // SSH: copy the POSIX remote path (strip the ssh://profileId prefix).
             // Local: convert to native separators.
@@ -2970,6 +3105,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         menu->addAction(copyPath);
 
         auto *copyRelPath = new QAction(tr("Copy Relative Path"), menu);
+        copyRelPath->setObjectName(QStringLiteral("actionTreeCopyRelativePath"));
         connect(copyRelPath, &QAction::triggered, this, [absPath, dockRoot, isSshDock]() {
             // For SSH workspaces: absPath and dockRoot are both ssh:// URIs.
             // Strip the remote workspace root path from the remote file path.
@@ -3012,6 +3148,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         }();
         if (!isDockRoot) {
             auto *renameAction = new QAction(tr("Rename..."), menu);
+            renameAction->setObjectName(QStringLiteral("actionTreeRename"));
             connect(renameAction, &QAction::triggered, this, [this, dock, absPath, isSshDock, isDir]() {
                 // For SSH workspaces absPath is "ssh://profileId/remote/path".
                 const QString displayPath = isSshDock ? remote::parseSshUri(absPath).remotePath : absPath;
@@ -3052,6 +3189,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         // --- New File / New Folder (directory only) ---
         if (isDir) {
             auto *newFile = new QAction(tr("New File..."), menu);
+            newFile->setObjectName(QStringLiteral("actionTreeNewFile"));
             connect(newFile, &QAction::triggered, this, [this, dock, absPath, isSshDock]() {
                 bool ok = false;
                 const QString name = QInputDialog::getText(this, tr("New File"),
@@ -3094,6 +3232,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             menu->addAction(newFile);
 
             auto *newFolder = new QAction(tr("New Folder..."), menu);
+            newFolder->setObjectName(QStringLiteral("actionTreeNewFolder"));
             connect(newFolder, &QAction::triggered, this, [this, dock, absPath, isSshDock]() {
                 bool ok = false;
                 const QString name = QInputDialog::getText(this, tr("New Folder"),
@@ -3138,6 +3277,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         // --- Show in Explorer ---
         // Not applicable for remote SSH workspaces — the path lives on the server.
         auto *showInExplorer = new QAction(tr("Show in Explorer"), menu);
+        showInExplorer->setObjectName(QStringLiteral("actionTreeShowInExplorer"));
         showInExplorer->setEnabled(!isSshDock);
         connect(showInExplorer, &QAction::triggered, this, [absPath, isDir]() {
 #ifdef Q_OS_WIN
@@ -3184,6 +3324,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             if (!multiSelect && !isDir) {
                 // Single file: simple "Download File" action.
                 auto *dlAction = new QAction(tr("Download File"), menu);
+                dlAction->setObjectName(QStringLiteral("actionTreeDownloadFile"));
                 if (!txMgr) dlAction->setEnabled(false);
                 connect(dlAction, &QAction::triggered, this,
                         [this, dock, absPath, txMgr]() {
@@ -3191,7 +3332,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                     const remote::SshUri uri = remote::parseSshUri(absPath);
                     if (!uri.valid) return;
                     const QString fileName = uri.remotePath.section(QLatin1Char('/'), -1);
-                    const QString destPath = QFileDialog::getSaveFileName(
+                    const QString destPath = control::picker::getSaveFileName(
                         this, tr("Download File"), QDir::homePath() + QLatin1Char('/') + fileName);
                     if (destPath.isEmpty()) return;
                     txMgr->downloadFile(uri.remotePath, destPath);
@@ -3200,13 +3341,15 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             } else {
                 // Folder or multi-select: Download submenu.
                 auto *dlMenu = new QMenu(tr("Download"), menu);
+                dlMenu->setObjectName(QStringLiteral("menuTreeDownload"));
 
                 auto *dlAllAction = new QAction(tr("Download All"), dlMenu);
+                dlAllAction->setObjectName(QStringLiteral("actionTreeDownloadAll"));
                 if (!txMgr) dlAllAction->setEnabled(false);
                 connect(dlAllAction, &QAction::triggered, this,
                         [this, dock, operationPaths, txMgr]() {
                     if (!txMgr) return;
-                    const QString destDir = QFileDialog::getExistingDirectory(
+                    const QString destDir = control::picker::getExistingDirectory(
                         this, tr("Download To"), QDir::homePath());
                     if (destDir.isEmpty()) return;
                     QStringList remotePaths;
@@ -3221,11 +3364,12 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 dlMenu->addAction(dlAllAction);
 
                 auto *dlGitignoreAction = new QAction(tr("Download (Skip .gitignore)"), dlMenu);
+                dlGitignoreAction->setObjectName(QStringLiteral("actionTreeDownloadSkipGitignore"));
                 if (!txMgr) dlGitignoreAction->setEnabled(false);
                 connect(dlGitignoreAction, &QAction::triggered, this,
                         [this, dock, operationPaths, txMgr]() {
                     if (!txMgr) return;
-                    const QString destDir = QFileDialog::getExistingDirectory(
+                    const QString destDir = control::picker::getExistingDirectory(
                         this, tr("Download To"), QDir::homePath());
                     if (destDir.isEmpty()) return;
                     QStringList remotePaths;
@@ -3247,11 +3391,12 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 const remote::SshUri targetUri = remote::parseSshUri(absPath);
 
                 auto *ulFilesAction = new QAction(tr("Upload Files..."), menu);
+                ulFilesAction->setObjectName(QStringLiteral("actionTreeUploadFiles"));
                 if (!txMgr || !targetUri.valid) ulFilesAction->setEnabled(false);
                 connect(ulFilesAction, &QAction::triggered, this,
                         [this, txMgr, targetUri]() {
                     if (!txMgr || !targetUri.valid) return;
-                    const QStringList localFiles = QFileDialog::getOpenFileNames(
+                    const QStringList localFiles = control::picker::getOpenFileNames(
                         this, tr("Upload Files"), QDir::homePath());
                     if (localFiles.isEmpty()) return;
 
@@ -3300,11 +3445,12 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 menu->addAction(ulFilesAction);
 
                 auto *ulFolderAction = new QAction(tr("Upload Folder..."), menu);
+                ulFolderAction->setObjectName(QStringLiteral("actionTreeUploadFolder"));
                 if (!txMgr || !targetUri.valid) ulFolderAction->setEnabled(false);
                 connect(ulFolderAction, &QAction::triggered, this,
                         [this, txMgr, targetUri]() {
                     if (!txMgr || !targetUri.valid) return;
-                    const QString localFolder = QFileDialog::getExistingDirectory(
+                    const QString localFolder = control::picker::getExistingDirectory(
                         this, tr("Select Folder to Upload"), QDir::homePath());
                     if (localFolder.isEmpty()) return;
 
@@ -3356,12 +3502,19 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             remote::RemoteTransferManager *zipTx = dock ? dock->transferManager() : nullptr;
             const bool zipBusy = (zip && zip->isBusy()) || (zipTx && zipTx->isTransferring());
             auto *zipMenu = new QMenu(tr("Zip"), menu);
+            zipMenu->setObjectName(QStringLiteral("menuTreeZip"));
             auto *dlMenu = new QMenu(tr("Download"), zipMenu);
+            dlMenu->setObjectName(QStringLiteral("menuTreeZipDownload"));
             auto *ulMenu = new QMenu(tr("Upload"), zipMenu);
+            ulMenu->setObjectName(QStringLiteral("menuTreeZipUpload"));
             auto *zipSave = dlMenu->addAction(tr("Save…"));
+            zipSave->setObjectName(QStringLiteral("actionTreeZipSave"));
             auto *zipShare = dlMenu->addAction(tr("Share…"));
+            zipShare->setObjectName(QStringLiteral("actionTreeZipShare"));
             auto *zipFromFile = ulMenu->addAction(tr("From file…"));
+            zipFromFile->setObjectName(QStringLiteral("actionTreeZipFromFile"));
             auto *zipFromPhrase = ulMenu->addAction(tr("From code-phrase…"));
+            zipFromPhrase->setObjectName(QStringLiteral("actionTreeZipFromPhrase"));
             zipSave->setEnabled(zip && !zipBusy);
             zipShare->setEnabled(zip && !zipBusy);
             zipFromFile->setEnabled(zip && !zipBusy);
@@ -3389,7 +3542,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                 }
                 if (folderName.isEmpty())
                     folderName = QStringLiteral("project");
-                const QString dest = QFileDialog::getSaveFileName(
+                const QString dest = control::picker::getSaveFileName(
                     this, tr("Save ZIP"),
                     QDir::homePath() + QLatin1Char('/') + folderName + QStringLiteral(".zip"),
                     tr("ZIP archives (*.zip)"));
@@ -3428,7 +3581,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
                     [this, dock = QPointer<FolderAsWorkspaceDock>(dock), absPath, isSshDock,
                      zip = QPointer<FolderZipTransfer>(zip)]() {
                 if (!zip || !dock) return;
-                const QString zipFile = QFileDialog::getOpenFileName(
+                const QString zipFile = control::picker::getOpenFileName(
                     this, tr("Open ZIP"), QDir::homePath(), tr("ZIP archives (*.zip)"));
                 if (zipFile.isEmpty() || !zip || !dock) return;
                 if (isSshDock) {
@@ -3459,6 +3612,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             menu->addSeparator();
 
             auto *openTerminal = new QAction(tr("Open Terminal Here"), menu);
+            openTerminal->setObjectName(QStringLiteral("actionTreeOpenTerminal"));
             if (remote::isSshUri(wsRoot)) {
                 remote::ExecutionContext *ctx = nullptr;
                 const remote::SshUri uri = remote::parseSshUri(wsRoot);
@@ -3508,6 +3662,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             const bool canOpenAi = !absPath.isEmpty() && remoteReady;
 
             auto *openAiMenu = new QMenu(tr("Open AI in Folder"), menu);
+            openAiMenu->setObjectName(QStringLiteral("menuTreeOpenAi"));
             fillAcpAgentPickerMenu(openAiMenu, agents, defaultId, canOpenAi, this,
                 [this, absPath, isSshDock, dockRoot](const QString &agentId) {
                     if (absPath.isEmpty())
@@ -3531,6 +3686,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         // --- Find in Folder (local directories only) ---
         if (isDir && !isSshDock) {
             auto *findInFolder = new QAction(tr("Find in Folder..."), menu);
+            findInFolder->setObjectName(QStringLiteral("actionTreeFindInFolder"));
             connect(findInFolder, &QAction::triggered, this, [this, absPath, wsRoot]() {
                 findInFolderDock->setFolder(absPath, wsRoot);
             });
@@ -3542,9 +3698,11 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
             const QString suffix = QFileInfo(absPath).suffix().toLower();
             if (suffix == QLatin1String("md") || suffix == QLatin1String("markdown")) {
                 auto *pandocMenu = new QMenu(tr("Export via Pandoc"), menu);
+                pandocMenu->setObjectName(QStringLiteral("menuTreePandoc"));
 
                 auto addExportAction = [&](const QString &label, PandocExporter::Format fmt, const QString &ext) {
                     auto *action = new QAction(label, pandocMenu);
+                    control::ids::setKey(action, QStringLiteral("pandoc:") + ext);
                     connect(action, &QAction::triggered, this, [this, absPath, fmt, ext]() {
                         if (!PandocExporter::isAvailable()) {
                             QMessageBox::warning(this, tr("Export via Pandoc"),
@@ -3603,7 +3761,9 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
 
         // --- Delete (submenu: Move to Trash / Delete Permanently) ---
         auto *deleteMenu = new QMenu(tr("Delete"), menu);
+        deleteMenu->setObjectName(QStringLiteral("menuTreeDelete"));
         auto *moveToTrash = new QAction(tr("Move to Trash"), deleteMenu);
+        moveToTrash->setObjectName(QStringLiteral("actionTreeMoveToTrash"));
         // Move to Trash is a local OS operation — not available for remote SSH paths.
         moveToTrash->setEnabled(!isSshDock);
         connect(moveToTrash, &QAction::triggered, this, [this, absPath, isDir]() {
@@ -3621,6 +3781,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         deleteMenu->addAction(moveToTrash);
 
         auto *deletePermanently = new QAction(tr("Delete Permanently"), deleteMenu);
+        deletePermanently->setObjectName(QStringLiteral("actionTreeDeletePermanently"));
         connect(deletePermanently, &QAction::triggered, this, [this, dock = QPointer<FolderAsWorkspaceDock>(dock), absPath, isSshDock, isDir]() {
             const QString displayPath = isSshDock ? remote::parseSshUri(absPath).remotePath : absPath;
             const QString name = QFileInfo(displayPath).fileName();
@@ -3676,6 +3837,7 @@ void MainWindow::registerWorkspaceDock(FolderAsWorkspaceDock *dock)
         AiAgentDock *targetDock = activeAiDock();
         if (targetDock) {
             auto *sendToAi = new QAction(tr("Send to AI"), menu);
+            sendToAi->setObjectName(QStringLiteral("actionTreeSendToAi"));
             connect(sendToAi, &QAction::triggered, this, [this, absPath, isSshDock, isDir, wsRoot]() {
                 AiAgentDock *dock = activeAiDock();
                 if (!dock) return;
@@ -3801,6 +3963,7 @@ void MainWindow::wireWorkspaceGitSignals(FolderAsWorkspaceDock *dock)
 
         const QString relPath = entry.relPath;
         auto *sendToAi = new QAction(tr("Send to AI"), menu);
+        sendToAi->setObjectName(QStringLiteral("actionGitChangeSendToAi"));
         connect(sendToAi, &QAction::triggered, this, [this, relPath]() {
             AiAgentDock *dock = activeAiDock();
             if (!dock) return;

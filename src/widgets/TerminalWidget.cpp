@@ -2136,6 +2136,26 @@ QString TerminalWidget::selectedText() const
     return selectionText();
 }
 
+QStringList TerminalWidget::textRows(int from, int count, int *total, int *history) const
+{
+    QStringList rows;
+    if (!m_screen) {
+        if (total) *total = 0;
+        if (history) *history = 0;
+        return rows;
+    }
+    WidgetCellSource src(m_scrollback, m_screen, vterm_obtain_state(m_vt), m_rows, m_cols);
+    const int rowCount = src.rowCount();
+    if (total) *total = rowCount;
+    if (history) *history = m_scrollback.size();
+    from = std::clamp(from, 0, rowCount);
+    const int end = static_cast<int>(std::min<qint64>(rowCount, qint64(from) + std::max(0, count)));
+    rows.reserve(end - from);
+    for (int row = from; row < end; ++row)
+        rows.append(extractSelectionText(src, QPoint(0, row), QPoint(m_cols - 1, row)));
+    return rows;
+}
+
 void TerminalWidget::copySelection()
 {
     if (!m_hasSelection) return;

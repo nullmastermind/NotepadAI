@@ -275,6 +275,9 @@ void DockedEditor::addEditor(ScintillaNext *editor)
     // We need a unique object name. Can't use the name or file path so use a uuid
     dockWidget->setObjectName(QUuid::createUuid().toString());
 
+    // The Control API addresses it as dock:<uuid>/editor.
+    if (editor->objectName().isEmpty())
+        editor->setObjectName(QStringLiteral("editor"));
     dockWidget->setWidget(editor);
     dockWidget->setFeature(ads::CDockWidget::DockWidgetFeature::DockWidgetDeleteOnClose, true);
     dockWidget->setFeature(ads::CDockWidget::DockWidgetFeature::CustomCloseHandling, true);

@@ -99,6 +99,7 @@ void GitHistoryView::buildUi()
 
     // Search box (hidden by default — '/' shows it).
     m_search = new QLineEdit(this);
+    m_search->setObjectName(QStringLiteral("editHistorySearch"));
     m_search->setPlaceholderText(tr("Filter commits…"));
     m_search->setClearButtonEnabled(true);
     m_search->setVisible(false);
@@ -109,6 +110,7 @@ void GitHistoryView::buildUi()
 
     // List view.
     m_list = new QListView(this);
+    m_list->setObjectName(QStringLiteral("listHistory"));
     m_list->setModel(m_proxy);
     m_list->setItemDelegate(m_delegate);
     m_list->setUniformItemSizes(true);
@@ -159,9 +161,11 @@ void GitHistoryView::buildUi()
     footer->setContentsMargins(6, 0, 6, 4);
     footer->setSpacing(6);
     m_statusLabel = new QLabel(this);
+    m_statusLabel->setObjectName(QStringLiteral("labelHistoryStatus"));
     m_statusLabel->setStyleSheet(QStringLiteral(
         "color: palette(placeholder-text); font-size: 11px;"));
     m_loadMoreBtn = new QPushButton(tr("Load more"), this);
+    m_loadMoreBtn->setObjectName(QStringLiteral("buttonLoadMore"));
     m_loadMoreBtn->setFlat(true);
     m_loadMoreBtn->setAutoDefault(false);
     m_loadMoreBtn->setDefault(false);
@@ -169,6 +173,7 @@ void GitHistoryView::buildUi()
     connect(m_loadMoreBtn, &QPushButton::clicked,
             this, &GitHistoryView::onLoadMoreClicked);
     m_allBranchesBox = new QCheckBox(tr("All branches"), this);
+    m_allBranchesBox->setObjectName(QStringLiteral("checkAllBranches"));
     connect(m_allBranchesBox, &QCheckBox::toggled,
             this, &GitHistoryView::onAllBranchesToggled);
     footer->addWidget(m_statusLabel, 1);

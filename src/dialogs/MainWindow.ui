@@ -385,6 +385,8 @@
     <addaction name="separator"/>
     <addaction name="actionScheduleTasks"/>
     <addaction name="actionAiAgents"/>
+    <addaction name="separator"/>
+    <addaction name="actionConnectExternalAgent"/>
    </widget>
    <widget class="QMenu" name="menuBrowser">
     <property name="title">
@@ -1093,6 +1095,14 @@
   <action name="actionAiAgents">
    <property name="text">
     <string>AI Agents…</string>
+   </property>
+  </action>
+  <action name="actionConnectExternalAgent">
+   <property name="text">
+    <string>Connect External Agent…</string>
+   </property>
+   <property name="toolTip">
+    <string>Let an AI agent outside NotepadAI operate it through the Control API</string>
    </property>
   </action>
   <action name="actionNewAiTab">

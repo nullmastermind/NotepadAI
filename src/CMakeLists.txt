@@ -595,6 +595,43 @@ qt_add_executable(NotepadAI
 	pm2/Pm2ProcessesDialog.h
 	pm2/Pm2ProcessesDialog.cpp
 	pm2/pm2.qrc
+	control/ControlActionIndex.h
+	control/ControlActionIndex.cpp
+	control/ControlActivityLog.h
+	control/ControlActivityLog.cpp
+	control/ControlApi.h
+	control/ControlApi.cpp
+	control/ControlAppAdapters.h
+	control/ControlAppAdapters.cpp
+	control/ControlApiDialog.h
+	control/ControlScreenshot.h
+	control/ControlScreenshot.cpp
+	control/ControlApiDialog.cpp
+	control/ControlAudit.h
+	control/ControlAudit.cpp
+	control/ControlAuth.h
+	control/ControlAuth.cpp
+	control/ControlEffects.h
+	control/ControlEffects.cpp
+	control/ControlEvents.h
+	control/ControlEvents.cpp
+	control/ControlFeedback.h
+	control/ControlFeedback.cpp
+	control/ControlHttp.h
+	control/ControlHttp.cpp
+	control/ControlIds.h
+	control/ControlIds.cpp
+	control/ControlServer.h
+	control/ControlServer.cpp
+	control/ControlStatusIndicator.h
+	control/ControlStatusIndicator.cpp
+	control/ControlAdapter.h
+	control/ControlStandardAdapters.cpp
+	control/ControlPicker.h
+	control/ControlPicker.cpp
+	control/ControlUiTree.h
+	control/ControlUiTree.cpp
+	control/control.qrc
 	MiniAppDefinition.h
 	MiniAppMenuLayout.h
 	MiniAppMenuLayout.cpp
@@ -915,6 +952,7 @@ target_include_directories(NotepadAI
         ${CMAKE_CURRENT_SOURCE_DIR}/preview/font
         ${CMAKE_CURRENT_SOURCE_DIR}/preview/hex
         ${CMAKE_CURRENT_SOURCE_DIR}/pm2
+        ${CMAKE_CURRENT_SOURCE_DIR}/control
         ${CMAKE_CURRENT_SOURCE_DIR}/remote
         ${CMAKE_CURRENT_SOURCE_DIR}/widgets
         ${CMAKE_CURRENT_SOURCE_DIR}

@@ -64,7 +64,12 @@ QString extractSelectionText(const TerminalCellSource &src,
             }
             for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell.chars[i]; ++i) {
                 const char32_t cp = cell.chars[i];
-                out.append(QString::fromUcs4(&cp, 1));
+                if (QChar::requiresSurrogates(cp)) {
+                    out.append(QChar(QChar::highSurrogate(cp)));
+                    out.append(QChar(QChar::lowSurrogate(cp)));
+                } else {
+                    out.append(QChar(char16_t(cp)));
+                }
             }
         }
         if (!wraps) {

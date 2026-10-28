@@ -94,6 +94,10 @@ void parseCommandLine(QCommandLineParser &parser, const QStringList &args)
         {"new-window", "Forces a fresh independent window instead of forwarding to an existing instance"},
         {"data-dir", "Use a custom data directory for settings, sessions, and history", "path"}
     });
+    // Hidden: ctest ControlApiAudit (docs/adr/0006).
+    QCommandLineOption audit(QStringLiteral("control-api-audit"));
+    audit.setFlags(QCommandLineOption::HiddenFromHelp);
+    parser.addOption(audit);
 
     parser.process(args);
 }
@@ -516,6 +520,14 @@ bool NotepadNextApplication::init()
     }
 
     DebugManager::resumeDebugOutput();
+
+    if (parser.isSet(QStringLiteral("control-api-audit"))) {
+        // After the first event-loop pass, so deferred UI setup has run.
+        QTimer::singleShot(0, this, [this]() {
+            const int problems = window->runControlApiAudit();
+            exit(problems == 0 ? 0 : 1);
+        });
+    }
 
     return true;
 }

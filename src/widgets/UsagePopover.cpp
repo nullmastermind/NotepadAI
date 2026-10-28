@@ -150,6 +150,7 @@ private:
 UsagePopover::UsagePopover(QWidget *parent)
     : QFrame(parent, Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint)
 {
+    setObjectName(QStringLiteral("usagePopover"));
     setAttribute(Qt::WA_TranslucentBackground);
     setFixedWidth(kWidth);
 
@@ -165,6 +166,7 @@ UsagePopover::UsagePopover(QWidget *parent)
     header->addStretch(1);
 
     m_modeButton = new QToolButton(this);
+    m_modeButton->setObjectName(QStringLiteral("buttonUsagePercentMode"));
     m_modeButton->setAutoRaise(true);
     m_modeButton->setFixedHeight(20);
     m_modeButton->setCursor(Qt::PointingHandCursor);
@@ -172,6 +174,7 @@ UsagePopover::UsagePopover(QWidget *parent)
     header->addWidget(m_modeButton);
 
     m_refreshButton = new QToolButton(this);
+    m_refreshButton->setObjectName(QStringLiteral("buttonUsageRefresh"));
     m_refreshButton->setAutoRaise(true);
     m_refreshButton->setFixedSize(kRefreshButton, kRefreshButton);
     m_refreshButton->setIconSize({kRefreshIcon, kRefreshIcon});

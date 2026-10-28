@@ -38,9 +38,10 @@ GitTabSegmentedBar::GitTabSegmentedBar(QWidget *parent)
     setAttribute(Qt::WA_StyledBackground, false);
 }
 
-void GitTabSegmentedBar::setSegments(const QStringList &labels)
+void GitTabSegmentedBar::setSegments(const QStringList &labels, const QStringList &names)
 {
     m_labels = labels;
+    m_names = names;
     rebuild();
     if (!m_buttons.isEmpty()) setCurrentIndex(0);
 }
@@ -66,6 +67,8 @@ void GitTabSegmentedBar::rebuild()
 
     for (int i = 0; i < m_labels.size(); ++i) {
         auto *b = new QToolButton(this);
+        if (i < m_names.size())
+            b->setObjectName(m_names.at(i));
         b->setText(m_labels.at(i));
         b->setCheckable(true);
         b->setAutoRaise(true);

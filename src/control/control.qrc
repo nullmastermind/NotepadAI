@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/control">
+        <file alias="SKILL.md">skill/SKILL.md</file>
+    </qresource>
+</RCC>

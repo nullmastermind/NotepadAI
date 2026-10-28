@@ -80,6 +80,15 @@ HRESULT ConPtyProcess::initializeStartupInfoAttachedToPseudoConsole(STARTUPINFOE
     const DWORD attrCount = jobCount > 0 ? 2u : 1u;
     SIZE_T attrListSize = 0;
     pStartupInfo->StartupInfo.cb = sizeof(STARTUPINFOEXW);
+    // NotepadAI patch: when our own std handles are redirected (launched from a
+    // pipe, a CI runner, an agent), a console child takes them over instead of
+    // the pseudo console and its output never reaches the terminal. Null std
+    // handles with STARTF_USESTDHANDLES make it use the pseudo console
+    // (microsoft/terminal#4380).
+    pStartupInfo->StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+    pStartupInfo->StartupInfo.hStdInput = nullptr;
+    pStartupInfo->StartupInfo.hStdOutput = nullptr;
+    pStartupInfo->StartupInfo.hStdError = nullptr;
 
     InitializeProcThreadAttributeList(nullptr, attrCount, 0, &attrListSize);
 

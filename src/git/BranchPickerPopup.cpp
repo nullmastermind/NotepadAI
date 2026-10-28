@@ -98,12 +98,14 @@ BranchPickerPopup::BranchPickerPopup(QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
 
     m_filter = new QLineEdit(this);
+    m_filter->setObjectName(QStringLiteral("editBranchFilter"));
     m_filter->setPlaceholderText(tr("Search branches…"));
     m_filter->setClearButtonEnabled(true);
     m_filter->installEventFilter(this);
 
     m_model = new QStandardItemModel(this);
     m_list = new QListView(this);
+    m_list->setObjectName(QStringLiteral("listBranches"));
     m_list->setModel(m_model);
     m_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_list->setSelectionMode(QAbstractItemView::SingleSelection);

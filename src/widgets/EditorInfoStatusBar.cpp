@@ -48,6 +48,13 @@ EditorInfoStatusBar::EditorInfoStatusBar(QMainWindow *window) :
     overType = new StatusLabel(25);
     addPermanentWidget(overType, 0);
 
+    docType->setObjectName(QStringLiteral("labelDocType"));
+    docSize->setObjectName(QStringLiteral("labelDocSize"));
+    docPos->setObjectName(QStringLiteral("labelDocPosition"));
+    eolFormat->setObjectName(QStringLiteral("labelEolFormat"));
+    unicodeType->setObjectName(QStringLiteral("labelEncoding"));
+    overType->setObjectName(QStringLiteral("labelOverType"));
+
     MainWindow *w = qobject_cast<MainWindow *>(window);
 
     connect(w, &MainWindow::editorActivated, this, &EditorInfoStatusBar::connectToEditor);

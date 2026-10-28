@@ -9,6 +9,7 @@
  */
 
 #include "Pm2ProcessEditDialog.h"
+#include "control/ControlPicker.h"
 
 #include "Pm2Protocol.h"
 
@@ -259,7 +260,7 @@ void Pm2ProcessEditDialog::updateState()
 
 void Pm2ProcessEditDialog::browseCwd()
 {
-    const QString dir = QFileDialog::getExistingDirectory(this, tr("Working Directory"), m_cwd->text());
+    const QString dir = control::picker::getExistingDirectory(this, tr("Working Directory"), m_cwd->text());
     if (!dir.isEmpty())
         m_cwd->setText(QDir::toNativeSeparators(dir));
 }

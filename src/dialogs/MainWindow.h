@@ -66,6 +66,7 @@ class EmbeddedWindowManager;
 class WorkspaceFileEnumerator;
 class QuickFileOpenDialog;
 namespace remote { class ExecutionContext; }
+namespace control { class ControlApi; }
 class SshDebugDialog;
 class Pm2ProcessesDialog;
 struct ConflictEntry;
@@ -221,6 +222,11 @@ public slots:
     // once the app's ExecutionContextRegistry exists).
     remote::ExecutionContext *activeExecutionContext() const;
 
+    control::ControlApi *controlApi() const { return m_controlApi; }
+    // --control-api-audit: prints every action and interactive widget of this
+    // window that has no stable Control API id; returns the count.
+    int runControlApiAudit();
+
 signals:
     void editorActivated(ScintillaNext *editor);
     void aboutToClose();
@@ -252,6 +258,9 @@ private:
     void editTasksForActiveWorkspace();
     // Terminal > PM2 Processes: the one modeless dialog, raised if open.
     void showPm2Processes();
+    // Control API (docs/adr/0006): server, indicator, dialog, direct commands.
+    void setupControlApi();
+    void showControlApiDialog();
 
     Ui::MainWindow *ui = Q_NULLPTR;
     NotepadNextApplication *app = Q_NULLPTR;
@@ -358,6 +367,7 @@ private:
     TerminalManager *terminalManager = Q_NULLPTR;
     FileWatcher *fileWatcher = Q_NULLPTR;
     MiniAppManager *m_miniAppManager = nullptr;
+    control::ControlApi *m_controlApi = nullptr;
     EmbeddedWindowManager *m_embeddedWindowManager = nullptr;
     PendingCloseState m_pendingClose;
     void queuePendingCloseRetry();

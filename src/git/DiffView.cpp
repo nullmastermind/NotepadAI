@@ -1487,6 +1487,7 @@ void DiffView::buildChrome()
         column->setContentsMargins(4, 4, 0, 0);
         column->setSpacing(4);
         m_filter = new QLineEdit(m_treeHost);
+        m_filter->setObjectName(QStringLiteral("editDiffFileFilter"));
         m_filter->setPlaceholderText(tr("Filter files…"));
         m_filter->setClearButtonEnabled(true);
         column->addWidget(m_filter);
@@ -1496,6 +1497,7 @@ void DiffView::buildChrome()
         m_treeProxy->setSourceModel(m_treeModel);
         m_treeDelegate = new GitStatusItemDelegate(this);
         m_treeView = new QTreeView(m_treeHost);
+        m_treeView->setObjectName(QStringLiteral("treeDiffFiles"));
         m_treeView->setModel(m_treeProxy);
         m_treeView->setItemDelegate(m_treeDelegate);
         m_treeView->setHeaderHidden(true);

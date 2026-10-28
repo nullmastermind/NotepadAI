@@ -206,6 +206,7 @@ void GitTabWidget::buildUi()
     topRow->setSpacing(4);
 
     m_repoCombo = new RepoComboBox(this);
+    m_repoCombo->setObjectName(QStringLiteral("comboRepository"));
     m_repoCombo->setToolTip(tr("Select repository"));
     m_repoCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_repoCombo->setMinimumContentsLength(kRepoComboMinChars);
@@ -213,6 +214,7 @@ void GitTabWidget::buildUi()
     m_repoCombo->setContextMenuPolicy(Qt::CustomContextMenu);
 
     m_branchBtn = new QToolButton(this);
+    m_branchBtn->setObjectName(QStringLiteral("buttonBranch"));
     m_branchBtn->setText(tr("(no repo)"));
     m_branchBtn->setToolTip(tr("Switch / create branch"));
     m_branchBtn->setPopupMode(QToolButton::InstantPopup);
@@ -234,10 +236,12 @@ void GitTabWidget::buildUi()
     m_pushBtn->setVisible(false);
 
     m_refreshBtn = new QToolButton(this);
+    m_refreshBtn->setObjectName(QStringLiteral("buttonRefresh"));
     m_refreshBtn->setText(tr("⟳"));
     m_refreshBtn->setToolTip(tr("Refresh"));
 
     m_menuBtn = new QToolButton(this);
+    m_menuBtn->setObjectName(QStringLiteral("buttonGitMenu"));
     m_menuBtn->setText(tr("⋯"));
     m_menuBtn->setToolTip(tr("More actions"));
     m_menuBtn->setPopupMode(QToolButton::InstantPopup);
@@ -262,13 +266,17 @@ void GitTabWidget::buildUi()
         opLay->setContentsMargins(8, 4, 4, 4);
         opLay->setSpacing(6);
         m_opLabel = new QLabel(m_opBanner);
+        m_opLabel->setObjectName(QStringLiteral("labelOperation"));
         m_opLabel->setWordWrap(false);
         opLay->addWidget(m_opLabel, 1);
         m_opContinueBtn = new QPushButton(tr("Continue"), m_opBanner);
+        m_opContinueBtn->setObjectName(QStringLiteral("buttonOperationContinue"));
         m_opContinueBtn->setFlat(true);
         m_opSkipBtn = new QPushButton(tr("Skip"), m_opBanner);
+        m_opSkipBtn->setObjectName(QStringLiteral("buttonOperationSkip"));
         m_opSkipBtn->setFlat(true);
         m_opAbortBtn = new QPushButton(tr("Abort"), m_opBanner);
+        m_opAbortBtn->setObjectName(QStringLiteral("buttonOperationAbort"));
         m_opAbortBtn->setFlat(true);
         opLay->addWidget(m_opContinueBtn);
         opLay->addWidget(m_opSkipBtn);
@@ -300,12 +308,15 @@ void GitTabWidget::buildUi()
 
     // Status label — created here, added to layout at the bottom.
     m_statusLabel = new QLabel(this);
+    m_statusLabel->setObjectName(QStringLiteral("labelGitStatus"));
     m_statusLabel->setWordWrap(true);
     showIdleStatus();
 
     // Segmented bar Changes / History.
     m_segmentedBar = new GitTabSegmentedBar(this);
-    m_segmentedBar->setSegments({tr("Changes"), tr("History")});
+    m_segmentedBar->setObjectName(QStringLiteral("gitViewSwitch"));
+    m_segmentedBar->setSegments({tr("Changes"), tr("History")},
+                                {QStringLiteral("buttonChanges"), QStringLiteral("buttonHistory")});
     connect(m_segmentedBar, &GitTabSegmentedBar::currentChanged,
             this, &GitTabWidget::onTabChanged);
     root->addWidget(m_segmentedBar);
@@ -327,12 +338,15 @@ void GitTabWidget::buildUi()
         topRow->setContentsMargins(0, 0, 0, 0);
         topRow->setSpacing(6);
         m_errorLabel = new QLabel(m_errorBanner);
+        m_errorLabel->setObjectName(QStringLiteral("labelGitError"));
         m_errorLabel->setWordWrap(true);
         m_errorCopyBtn = new QToolButton(m_errorBanner);
+        m_errorCopyBtn->setObjectName(QStringLiteral("buttonCopyError"));
         m_errorCopyBtn->setText(tr("Copy"));
         m_errorCopyBtn->setToolTip(tr("Copy error to clipboard"));
         m_errorCopyBtn->setAutoRaise(true);
         m_errorCloseBtn = new QToolButton(m_errorBanner);
+        m_errorCloseBtn->setObjectName(QStringLiteral("buttonCloseError"));
         m_errorCloseBtn->setText(QStringLiteral("×"));
         m_errorCloseBtn->setAutoRaise(true);
         topRow->addWidget(m_errorLabel, 1);

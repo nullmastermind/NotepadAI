@@ -34,6 +34,7 @@
 #include "widgets/AiDockSessionStrip.h"
 #include "widgets/AiDockTitleBar.h"
 #include "remote/ExecutionContext.h"
+#include "control/ControlIds.h"
 
 #include <QCloseEvent>
 #include <QCoreApplication>
@@ -172,6 +173,7 @@ void AiAgentDock::addSlot(QString sessionId,
     slot.model = model;
     slot.connection = connection;
     slot.view = new AcpSessionView(model, connection, m_registry, m_stack);
+    control::ids::setRoot(slot.view, QStringLiteral("chat:") + slot.sessionId);
     m_stack->addWidget(slot.view);
     wireSlotSignals(slot);
     m_slots.append(std::move(slot));
@@ -474,6 +476,7 @@ void AiAgentDock::rebind(const QString &oldSessionId,
     slot->agentExited = false;
 
     if (slot->view) {
+        control::ids::setRoot(slot->view, QStringLiteral("chat:") + slot->sessionId);
         slot->view->rebind(model, connection);
         // rebind() calls clearGoalStatus(). Goal-driven (and user) restart
         // keeps an Active GoalAgent on this slot — restore the banner.

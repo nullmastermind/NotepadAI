@@ -55,9 +55,13 @@ void ChangesPanel::buildUi()
     stageRow->setContentsMargins(0, 0, 0, 0);
     stageRow->setSpacing(4);
     m_stageBtn = new QPushButton(tr("Stage"), this);
+    m_stageBtn->setObjectName(QStringLiteral("buttonStage"));
     m_unstageBtn = new QPushButton(tr("Unstage"), this);
+    m_unstageBtn->setObjectName(QStringLiteral("buttonUnstage"));
     m_stageAllBtn = new QPushButton(tr("Stage All"), this);
+    m_stageAllBtn->setObjectName(QStringLiteral("buttonStageAll"));
     m_unstageAllBtn = new QPushButton(tr("Unstage All"), this);
+    m_unstageAllBtn->setObjectName(QStringLiteral("buttonUnstageAll"));
     for (auto *b : {m_stageBtn, m_unstageBtn, m_stageAllBtn, m_unstageAllBtn}) {
         b->setAutoDefault(false);
         b->setDefault(false);
@@ -71,6 +75,7 @@ void ChangesPanel::buildUi()
 
     // Tree view.
     m_tree = new QTreeView(this);
+    m_tree->setObjectName(QStringLiteral("treeChanges"));
     m_tree->setHeaderHidden(true);
     m_tree->setRootIsDecorated(true);
     m_tree->setSelectionMode(QAbstractItemView::ExtendedSelection);

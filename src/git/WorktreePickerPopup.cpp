@@ -46,12 +46,14 @@ WorktreePickerPopup::WorktreePickerPopup(QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
 
     m_filter = new QLineEdit(this);
+    m_filter->setObjectName(QStringLiteral("editWorktreeFilter"));
     m_filter->setPlaceholderText(tr("Search worktrees…"));
     m_filter->setClearButtonEnabled(true);
     m_filter->installEventFilter(this);
 
     m_model = new QStandardItemModel(this);
     m_list = new QListView(this);
+    m_list->setObjectName(QStringLiteral("listWorktrees"));
     m_list->setModel(m_model);
     m_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_list->setSelectionMode(QAbstractItemView::SingleSelection);

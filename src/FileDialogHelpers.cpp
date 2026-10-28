@@ -19,6 +19,8 @@
 
 #include "FileDialogHelpers.h"
 
+#include "control/ControlPicker.h"
+
 
 /*
  * NOTE: This code is nearly identical to the QFileDialog implementation of several static methods.
@@ -50,6 +52,10 @@ QList<QUrl> FileDialogHelpers::getOpenFileUrls(QWidget *parent, const QString &c
 
 QStringList FileDialogHelpers::getOpenFileNames(QWidget *parent, const QString &caption, const QString &dir, const QString &filter, QString *selectedFilter, QFileDialog::Options options)
 {
+    // A Control API direct command supplies the pick (docs/adr/0006).
+    if (control::picker::isArmed())
+        return control::picker::getOpenFileNames(parent, caption, dir, filter, selectedFilter, options);
+
     const QStringList schemes = QStringList(QStringLiteral("file"));
     const QList<QUrl> selectedUrls = getOpenFileUrls(parent, caption, dir, filter, selectedFilter, options, schemes);
     QStringList fileNames;
@@ -85,6 +91,9 @@ QUrl FileDialogHelpers::getSaveFileUrl(QWidget *parent, const QString &caption, 
 
 QString FileDialogHelpers::getSaveFileName(QWidget *parent, const QString &caption, const QString &dir, const QString &filter, QString *selectedFilter, QFileDialog::Options options)
 {
+    if (control::picker::isArmed())
+        return control::picker::getSaveFileName(parent, caption, dir, filter, selectedFilter, options);
+
     const QStringList schemes = QStringList(QStringLiteral("file"));
     const QUrl selectedUrl = getSaveFileUrl(parent, caption, dir, filter, selectedFilter, options, schemes);
     if (selectedUrl.isLocalFile() || selectedUrl.isEmpty())
