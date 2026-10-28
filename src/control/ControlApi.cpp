@@ -284,9 +284,9 @@ QString ControlApi::connectionPrompt()
                "NOTEPADAI_TOKEN=%2\n\n"
                "1. Fetch the skill:\n"
                "   curl -s -H \"Authorization: Bearer $NOTEPADAI_TOKEN\" \"$NOTEPADAI_URL/skill\"\n"
-               "2. Save it unchanged as a skill named notepadai-control (Claude Code: "
-               "~/.claude/skills/notepadai-control/SKILL.md). Never write the token into the skill or any "
-               "file in a repository; keep NOTEPADAI_URL and NOTEPADAI_TOKEN as environment values.\n"
+               "2. Save it unchanged as a skill named notepadai-control, wherever you keep your skills. "
+               "Never write the token into the skill or any file in a repository; keep NOTEPADAI_URL and "
+               "NOTEPADAI_TOKEN as environment values.\n"
                "3. Use the skill to operate NotepadAI. If a request returns 401, ask the user for a new "
                "prompt (the token was regenerated). Check GET $NOTEPADAI_URL/skill/version to know when "
                "to fetch the skill again.\n")
