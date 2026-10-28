@@ -17,6 +17,8 @@
 #include <QPair>
 #include <QString>
 
+#include <cstdint>
+
 // Minimal HTTP/1.1 for the Control API: Content-Length bodies only, keep-alive,
 // pipelining. Pure, no sockets.
 namespace control::http {
@@ -40,7 +42,7 @@ struct Request
 class RequestParser
 {
 public:
-    enum class State { NeedMore, Complete, Error };
+    enum class State : std::uint8_t { NeedMore, Complete, Error };
 
     static constexpr qsizetype kMaxHeadBytes = 16 * 1024;
     static constexpr qsizetype kMaxBodyBytes = 4 * 1024 * 1024;

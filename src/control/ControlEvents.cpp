@@ -73,7 +73,7 @@ void ControlEvents::setSubscribers(int count)
 quint64 ControlEvents::addWaiter(Waiter waiter)
 {
     const quint64 id = m_nextWaiter++;
-    m_waiters.insert(id, std::move(waiter));
+    m_waiters.emplace(id, std::move(waiter));
     updateActive();
     return id;
 }

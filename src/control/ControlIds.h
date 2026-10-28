@@ -27,6 +27,7 @@ namespace control::ids {
 inline constexpr const char *kKeyProperty = "nnControlKey";
 inline constexpr const char *kRootProperty = "nnControlRoot";
 inline constexpr const char *kIgnoreProperty = "nnControlIgnore";
+inline constexpr const char *kAlternativeProperty = "nnControlAlternative";
 // Name of the adapter that exposes a custom-painted widget's parts.
 inline constexpr const char *kAdapterProperty = "nnControlAdapter";
 
@@ -64,6 +65,15 @@ inline void setKey(QObject *object, const QString &key)
 inline QString key(const QObject *object)
 {
     return object ? object->property(kKeyProperty).toString() : QString();
+}
+
+// An action shown only in some states (File > Open Folder as Workspace has
+// no recent folders yet) names the action doing the same in the others, so
+// a refusal ("hidden") can point to it.
+inline void setAlternative(QObject *action, const QString &actionId)
+{
+    if (action)
+        action->setProperty(kAlternativeProperty, actionId);
 }
 
 // Marks a widget as an id root (its subtree is addressed from it, wherever it
@@ -119,6 +129,12 @@ const QWidget *anchorOf(const QWidget *widget);
 bool isRoot(const QWidget *widget);
 // True for widgets whose names never form a segment (Qt and ADS internals).
 bool isTransparentContainer(const QWidget *widget);
+
+// A docked QDockWidget that is not its tab group's current tab. Qt moves it
+// off-screen instead of hiding it, so isVisible() stays true.
+bool isBehindTab(const QWidget *widget);
+// What a user can see: visible and not inside a panel behind its tab. O(depth).
+bool isShownToUser(const QWidget *widget);
 
 } // namespace control::ids
 

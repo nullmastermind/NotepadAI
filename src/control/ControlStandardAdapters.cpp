@@ -12,11 +12,13 @@
 // (tabs). Custom NotepadAI widgets register theirs elsewhere.
 
 #include "ControlAdapter.h"
+#include "ControlIds.h"
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
 #include <QAbstractProxyModel>
 #include <QDir>
+#include <QDockWidget>
 #include <QFileSystemModel>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -396,6 +398,77 @@ private:
     }
 };
 
+// A QDockWidget (the workspace panels). Its title bar's Close and Float are
+// Qt's own buttons, which have no ids, so the panel takes their actions.
+class PanelAdapter : public ControlAdapter
+{
+public:
+    QString name() const override { return QStringLiteral("panel"); }
+    bool matches(const QWidget *w) const override { return qobject_cast<const QDockWidget *>(w) != nullptr; }
+    QString role(const QWidget *) const override { return QStringLiteral("dock"); }
+    bool walksChildren(const QWidget *) const override { return true; }
+
+    bool reachableWhileHidden(const QWidget *w, const QString &op) const override
+    {
+        // A panel tabbed behind another is out of view, yet its tab can be
+        // clicked and its group's edge dragged.
+        return isOpen(static_cast<const QDockWidget *>(w))
+               && (op == QLatin1String("select") || op == QLatin1String("show") || op == QLatin1String("close")
+                   || op == QLatin1String("float") || op == QLatin1String("resize"));
+    }
+
+    QJsonObject summary(QWidget *w) const override
+    {
+        auto *dock = static_cast<QDockWidget *>(w);
+        QJsonObject o{{QStringLiteral("title"), dock->windowTitle()},
+                      {QStringLiteral("kind"), QStringLiteral("panel")},
+                      {QStringLiteral("open"), isOpen(dock)}};
+        if (isOpen(dock))
+            o.insert(QStringLiteral("current"), dock->isVisible() && !ids::isBehindTab(dock));
+        if (dock->isFloating())
+            o.insert(QStringLiteral("floating"), true);
+        return o;
+    }
+
+    std::optional<QString> perform(QWidget *w, const QString &part, const QString &op,
+                                   const QJsonObject &) const override
+    {
+        if (!part.isEmpty())
+            return std::nullopt;
+        auto *dock = static_cast<QDockWidget *>(w);
+        if (op == QLatin1String("select") || op == QLatin1String("show")) {
+            // A click on its tab (raise() makes a tabbed panel current), or
+            // the View menu entry for a closed one.
+            if (!isOpen(dock))
+                dock->toggleViewAction()->trigger();
+            dock->raise();
+            if (QWidget *content = dock->widget(); content && content->focusPolicy() != Qt::NoFocus)
+                content->setFocus(Qt::MouseFocusReason);
+            return QString();
+        }
+        if (op == QLatin1String("close")) {
+            if (!isOpen(dock))
+                return QStringLiteral("it is already closed");
+            if (!dock->features().testFlag(QDockWidget::DockWidgetClosable))
+                return QStringLiteral("this panel cannot be closed");
+            dock->close(); // its title bar's close button
+            return QString();
+        }
+        if (op == QLatin1String("float")) {
+            if (!dock->features().testFlag(QDockWidget::DockWidgetFloatable))
+                return QStringLiteral("this panel cannot float");
+            dock->setFloating(!dock->isFloating()); // its title bar's float button
+            return QString();
+        }
+        return std::nullopt;
+    }
+
+private:
+    // Closed panels have their View menu entry unchecked; a panel tabbed
+    // behind another is out of view but still checked.
+    static bool isOpen(const QDockWidget *dock) { return dock->toggleViewAction()->isChecked(); }
+};
+
 } // namespace
 
 ControlAdapters &ControlAdapters::instance()
@@ -408,6 +481,7 @@ ControlAdapters::ControlAdapters()
 {
     m_adapters.push_back(std::make_unique<ItemViewAdapter>());
     m_adapters.push_back(std::make_unique<TabBarAdapter>());
+    m_adapters.push_back(std::make_unique<PanelAdapter>());
 }
 
 void ControlAdapters::add(std::unique_ptr<ControlAdapter> adapter)

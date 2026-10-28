@@ -18,6 +18,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <cstdint>
+
 class QAction;
 class QMainWindow;
 class QMenu;
@@ -31,7 +33,7 @@ namespace control {
 class ControlActionIndex
 {
 public:
-    enum class Location { MenuBar, ToolBar, Window, Popup };
+    enum class Location : std::uint8_t { MenuBar, ToolBar, Window, Popup };
 
     struct Entry
     {

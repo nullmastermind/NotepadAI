@@ -23,6 +23,8 @@ GoalCustomApiFields::GoalCustomApiFields(QWidget *parent)
     baseLabel->setStyleSheet(QStringLiteral("font-weight: 500; font-size: 12px;"));
     apiLayout->addWidget(baseLabel);
     m_baseUrlEdit = new QLineEdit(this);
+    m_baseUrlEdit->setObjectName(QStringLiteral("customApiBaseUrl"));
+    baseLabel->setBuddy(m_baseUrlEdit);
     m_baseUrlEdit->setPlaceholderText(QStringLiteral("https://api.anthropic.com"));
     connect(m_baseUrlEdit, &QLineEdit::editingFinished, this, &GoalCustomApiFields::persistConfig);
     apiLayout->addWidget(m_baseUrlEdit);
@@ -31,6 +33,8 @@ GoalCustomApiFields::GoalCustomApiFields(QWidget *parent)
     keyLabel->setStyleSheet(QStringLiteral("font-weight: 500; font-size: 12px;"));
     apiLayout->addWidget(keyLabel);
     m_apiKeyEdit = new QLineEdit(this);
+    m_apiKeyEdit->setObjectName(QStringLiteral("customApiKey"));
+    keyLabel->setBuddy(m_apiKeyEdit);
     m_apiKeyEdit->setEchoMode(QLineEdit::Password);
     m_apiKeyEdit->setPlaceholderText(GoalHttpJudge::apiKeyPlaceholder(false));
     connect(m_apiKeyEdit, &QLineEdit::editingFinished, this, &GoalCustomApiFields::persistKey);
@@ -40,6 +44,8 @@ GoalCustomApiFields::GoalCustomApiFields(QWidget *parent)
     modelLabel->setStyleSheet(QStringLiteral("font-weight: 500; font-size: 12px;"));
     apiLayout->addWidget(modelLabel);
     m_modelEdit = new QLineEdit(this);
+    m_modelEdit->setObjectName(QStringLiteral("customApiModel"));
+    modelLabel->setBuddy(m_modelEdit);
     m_modelEdit->setPlaceholderText(QStringLiteral("claude-opus-5"));
     connect(m_modelEdit, &QLineEdit::editingFinished, this, &GoalCustomApiFields::persistConfig);
     apiLayout->addWidget(m_modelEdit);

@@ -893,9 +893,11 @@ void AcpAgentSettingsDialog::buildGoalSection()
     goalLayout->setVerticalSpacing(6);
 
     m_goalAgentCombo = new QComboBox(m_goalPage);
+    m_goalAgentCombo->setObjectName(QStringLiteral("goalAgentCombo"));
     goalLayout->addRow(tr("Goal agent:"), m_goalAgentCombo);
 
     m_goalMaxIterSpin = new QSpinBox(m_goalPage);
+    m_goalMaxIterSpin->setObjectName(QStringLiteral("goalMaxIterationsSpin"));
     m_goalMaxIterSpin->setRange(GoalAgentSettings::kMaxIterationsMin,
                                 GoalAgentSettings::kMaxIterationsMax);
     goalLayout->addRow(tr("Default max iterations:"), m_goalMaxIterSpin);
@@ -903,15 +905,19 @@ void AcpAgentSettingsDialog::buildGoalSection()
     auto *tplRow = new QHBoxLayout();
     tplRow->setSpacing(4);
     m_goalTemplateCombo = new QComboBox(m_goalPage);
+    m_goalTemplateCombo->setObjectName(QStringLiteral("goalTemplateCombo"));
     m_goalTemplateCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     auto *tplNewBtn = new QPushButton(tr("New…"), m_goalPage);
+    tplNewBtn->setObjectName(QStringLiteral("goalTemplateNewButton"));
     auto *tplDelBtn = new QPushButton(tr("Delete"), m_goalPage);
+    tplDelBtn->setObjectName(QStringLiteral("goalTemplateDeleteButton"));
     tplRow->addWidget(m_goalTemplateCombo);
     tplRow->addWidget(tplNewBtn);
     tplRow->addWidget(tplDelBtn);
     goalLayout->addRow(tr("Prompt template:"), tplRow);
 
     m_goalTemplateEdit = new QPlainTextEdit(m_goalPage);
+    m_goalTemplateEdit->setObjectName(QStringLiteral("goalTemplateEdit"));
     m_goalTemplateEdit->setMinimumHeight(120);
     m_goalTemplateEdit->setPlaceholderText(
         tr("Prompt template content. Required placeholders: "

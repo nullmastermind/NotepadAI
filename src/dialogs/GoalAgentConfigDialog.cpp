@@ -29,6 +29,7 @@ GoalAgentConfigDialog::GoalAgentConfigDialog(const ScheduledTaskGoalConfig &conf
                                              QWidget *parent)
     : QDialog(parent)
 {
+    setObjectName(QStringLiteral("GoalAgentConfigDialog"));
     setWindowTitle(tr("Goal Configuration"));
     setMinimumWidth(480);
 
@@ -36,6 +37,7 @@ GoalAgentConfigDialog::GoalAgentConfigDialog(const ScheduledTaskGoalConfig &conf
     layout->setSpacing(8);
 
     m_goalConfig = new GoalConfigWidget(registry, settings, this);
+    m_goalConfig->setObjectName(QStringLiteral("goalConfig"));
     m_goalConfig->setRememberPromptTemplate(false);
     layout->addWidget(m_goalConfig);
 
@@ -48,6 +50,7 @@ GoalAgentConfigDialog::GoalAgentConfigDialog(const ScheduledTaskGoalConfig &conf
     m_goalConfig->setPromptTemplateId(config.promptTemplateId);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    buttons->setObjectName(QStringLiteral("buttonBox"));
     connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
         m_goalConfig->persistPendingCustomApi();
         accept();

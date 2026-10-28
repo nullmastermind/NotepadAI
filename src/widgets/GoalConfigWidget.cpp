@@ -25,6 +25,7 @@
 #include <functional>
 
 #include "AcpAgentRegistry.h"
+#include "control/ControlIds.h"
 #include "ApplicationSettings.h"
 #include "GoalAgentSettings.h"
 #include "GoalCustomApiFields.h"
@@ -108,6 +109,7 @@ void GoalConfigWidget::buildUi()
     m_loadPresetBtn = new QPushButton(tr("Load preset"), this);
     m_loadPresetBtn->setObjectName(QStringLiteral("loadPresetButton"));
     m_presetMenu = new QMenu(this);
+    m_presetMenu->setObjectName(QStringLiteral("presetMenu"));
     m_loadPresetBtn->setMenu(m_presetMenu);
     connect(m_presetMenu, &QMenu::aboutToShow, this, &GoalConfigWidget::populatePresets);
     presetLayout->addWidget(m_loadPresetBtn);
@@ -135,9 +137,11 @@ void GoalConfigWidget::buildUi()
 
     auto *addRemoveLayout = new QHBoxLayout;
     m_addBtn = new QPushButton(tr("+ Add criterion"), this);
+    m_addBtn->setObjectName(QStringLiteral("addCriterionButton"));
     connect(m_addBtn, &QPushButton::clicked, this, &GoalConfigWidget::onAddCriterion);
     addRemoveLayout->addWidget(m_addBtn);
     m_removeBtn = new QPushButton(tr("Remove"), this);
+    m_removeBtn->setObjectName(QStringLiteral("removeCriterionButton"));
     connect(m_removeBtn, &QPushButton::clicked, this, &GoalConfigWidget::onRemoveCriterion);
     addRemoveLayout->addWidget(m_removeBtn);
     addRemoveLayout->addStretch();
@@ -151,6 +155,8 @@ void GoalConfigWidget::buildUi()
     agentLabel->setStyleSheet(QStringLiteral("font-weight: 500; font-size: 12px;"));
     mainLayout->addWidget(agentLabel);
     m_agentCombo = new QComboBox(this);
+    m_agentCombo->setObjectName(QStringLiteral("goalAgentCombo"));
+    agentLabel->setBuddy(m_agentCombo);
     mainLayout->addWidget(m_agentCombo);
 
     m_customApi = new GoalCustomApiFields(this);
@@ -164,18 +170,24 @@ void GoalConfigWidget::buildUi()
     mainLayout->addWidget(tplLabel);
     auto *tplRow = new QHBoxLayout;
     m_templateCombo = new QComboBox(this);
+    m_templateCombo->setObjectName(QStringLiteral("promptTemplateCombo"));
+    tplLabel->setBuddy(m_templateCombo);
     m_templateCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     tplRow->addWidget(m_templateCombo);
     auto *tplNewBtn = new QPushButton(tr("New"), this);
+    tplNewBtn->setObjectName(QStringLiteral("templateNewButton"));
     connect(tplNewBtn, &QPushButton::clicked, this, &GoalConfigWidget::onTemplateNew);
     tplRow->addWidget(tplNewBtn);
     m_tplRenameBtn = new QPushButton(tr("Rename"), this);
+    m_tplRenameBtn->setObjectName(QStringLiteral("templateRenameButton"));
     connect(m_tplRenameBtn, &QPushButton::clicked, this, &GoalConfigWidget::onTemplateRename);
     tplRow->addWidget(m_tplRenameBtn);
     m_tplEditBtn = new QPushButton(tr("Edit"), this);
+    m_tplEditBtn->setObjectName(QStringLiteral("templateEditButton"));
     connect(m_tplEditBtn, &QPushButton::clicked, this, &GoalConfigWidget::onTemplateEdit);
     tplRow->addWidget(m_tplEditBtn);
     m_tplDeleteBtn = new QPushButton(tr("Delete"), this);
+    m_tplDeleteBtn->setObjectName(QStringLiteral("templateDeleteButton"));
     connect(m_tplDeleteBtn, &QPushButton::clicked, this, &GoalConfigWidget::onTemplateDelete);
     tplRow->addWidget(m_tplDeleteBtn);
     connect(m_templateCombo, qOverload<int>(&QComboBox::currentIndexChanged),
@@ -187,6 +199,8 @@ void GoalConfigWidget::buildUi()
     iterLabel->setStyleSheet(QStringLiteral("font-weight: 500; font-size: 12px;"));
     mainLayout->addWidget(iterLabel);
     m_maxIterSpin = new QSpinBox(this);
+    m_maxIterSpin->setObjectName(QStringLiteral("maxIterationsSpin"));
+    iterLabel->setBuddy(m_maxIterSpin);
     m_maxIterSpin->setRange(GoalAgentSettings::kMaxIterationsMin,
                             GoalAgentSettings::kMaxIterationsMax);
     m_maxIterSpin->setToolTip(
@@ -365,7 +379,7 @@ void GoalConfigWidget::populatePresets()
         updateRowCount();
     };
 
-    auto addRow = [this](const QString &label,
+    auto addRow = [this](const QString &key, const QString &label,
                          const std::function<void()> &onLoad,
                          const std::function<void()> &onDelete) {
         auto *wa = new QWidgetAction(m_presetMenu);
@@ -374,12 +388,14 @@ void GoalConfigWidget::populatePresets()
         hl->setContentsMargins(6, 2, 4, 2);
         hl->setSpacing(4);
         auto *loadBtn = new QPushButton(label, row);
+        control::ids::setKey(loadBtn, QStringLiteral("preset:") + key); // key: name, or project:name
         loadBtn->setFlat(true);
         loadBtn->setCursor(Qt::PointingHandCursor);
         loadBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         loadBtn->setStyleSheet(QStringLiteral("QPushButton { text-align: left; padding: 2px 4px; }"));
         hl->addWidget(loadBtn);
         auto *delBtn = new QToolButton(row);
+        control::ids::setKey(delBtn, QStringLiteral("deletePreset:") + key);
         delBtn->setIcon(QIcon(QStringLiteral(":/icons/bin_closed.png")));
         delBtn->setAutoRaise(true);
         delBtn->setIconSize(QSize(14, 14));
@@ -399,7 +415,7 @@ void GoalConfigWidget::populatePresets()
     };
 
     for (const auto &preset : goalSettings.criteriaPresets) {
-        addRow(QStringLiteral("%1 (%2)").arg(preset.name).arg(preset.criteria.size()),
+        addRow(preset.name, QStringLiteral("%1 (%2)").arg(preset.name).arg(preset.criteria.size()),
                [this, applyCriteria, criteria = preset.criteria]() { applyCriteria(criteria); },
                [this, id = preset.id, name = preset.name]() {
                    if (QMessageBox::question(this, tr("Delete preset"),
@@ -422,7 +438,7 @@ void GoalConfigWidget::populatePresets()
 
     for (const ProjectGoalPresets::Listed &preset : project) {
         const QString label = QStringLiteral("project/%1 (%2)").arg(preset.name).arg(preset.count);
-        addRow(label,
+        addRow(QStringLiteral("project:") + preset.name, label,
                [this, applyCriteria, name = preset.name]() {
                    QStringList criteria;
                    QString error;
@@ -453,6 +469,9 @@ void GoalConfigWidget::updateRowCount()
         QStringLiteral("%1 / %2 rows").arg(m_criteriaEdits.size()).arg(kMaxRows));
     m_addBtn->setEnabled(m_criteriaEdits.size() < kMaxRows);
     m_removeBtn->setEnabled(m_criteriaEdits.size() > 1);
+    // Rows are addressed by position, so they are renumbered after every change.
+    for (int i = 0; i < m_criteriaEdits.size(); ++i)
+        control::ids::setKey(m_criteriaEdits[i], QStringLiteral("criterion:%1").arg(i + 1));
 }
 
 void GoalConfigWidget::updateTemplateButtons()
@@ -516,10 +535,14 @@ void GoalConfigWidget::onSavePreset()
     if (criteria.isEmpty()) return;
 
     auto *dlg = new QDialog(this);
+    dlg->setObjectName(QStringLiteral("SavePresetDialog"));
     dlg->setWindowTitle(tr("Save criteria preset"));
     auto *layout = new QVBoxLayout(dlg);
-    layout->addWidget(new QLabel(tr("Preset name:"), dlg));
+    auto *nameLabel = new QLabel(tr("Preset name:"), dlg);
+    layout->addWidget(nameLabel);
     auto *nameEdit = new QLineEdit(dlg);
+    nameEdit->setObjectName(QStringLiteral("presetNameEdit"));
+    nameLabel->setBuddy(nameEdit);
     nameEdit->setMaxLength(100);
     layout->addWidget(nameEdit);
     layout->addWidget(new QLabel(tr("Scope:"), dlg));
@@ -539,6 +562,7 @@ void GoalConfigWidget::onSavePreset()
     layout->addWidget(scope);
     auto *btnBox = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dlg);
+    btnBox->setObjectName(QStringLiteral("buttonBox"));
     layout->addWidget(btnBox);
     connect(btnBox, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
     bool savedProject = false;
@@ -670,6 +694,7 @@ void GoalConfigWidget::onTemplateEdit()
     if (!current) return;
 
     QDialog dlg(this);
+    dlg.setObjectName(QStringLiteral("EditPromptTemplateDialog"));
     dlg.setWindowTitle(tr("Edit Prompt Template"));
     dlg.resize(640, 480);
     auto *layout = new QVBoxLayout(&dlg);
@@ -680,10 +705,12 @@ void GoalConfigWidget::onTemplateEdit()
     help->setStyleSheet(QStringLiteral("font-size: 11px; color: gray;"));
     layout->addWidget(help);
     auto *editor = new QPlainTextEdit(&dlg);
+    editor->setObjectName(QStringLiteral("templateEdit"));
     editor->setPlainText(current->content);
     layout->addWidget(editor, 1);
     auto *btnBox = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    btnBox->setObjectName(QStringLiteral("buttonBox"));
     layout->addWidget(btnBox);
     connect(btnBox, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(btnBox, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);

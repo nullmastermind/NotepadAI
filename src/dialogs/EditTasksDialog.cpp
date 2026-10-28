@@ -42,6 +42,7 @@ EditTasksDialog::EditTasksDialog(const QString &workspacePath,
     , m_workspacePath(workspacePath)
     , m_tasks(tasks)
 {
+    setObjectName(QStringLiteral("EditTasksDialog"));
     setWindowTitle(tr("Edit Tasks"));
     resize(700, 480);
 
@@ -56,6 +57,7 @@ EditTasksDialog::EditTasksDialog(const QString &workspacePath,
     leftLayout->setContentsMargins(0, 0, 0, 0);
 
     m_listWidget = new QListWidget(leftWidget);
+    m_listWidget->setObjectName(QStringLiteral("taskList"));
     m_listWidget->setMinimumWidth(160);
     leftLayout->addWidget(m_listWidget, 1);
 
@@ -64,6 +66,14 @@ EditTasksDialog::EditTasksDialog(const QString &workspacePath,
     m_removeBtn = new QPushButton(tr("-"), leftWidget);
     m_upBtn = new QPushButton(tr("\xe2\x96\xb2"), leftWidget);
     m_downBtn = new QPushButton(tr("\xe2\x96\xbc"), leftWidget);
+    m_addBtn->setObjectName(QStringLiteral("addTaskButton"));
+    m_addBtn->setToolTip(tr("Add task"));
+    m_removeBtn->setObjectName(QStringLiteral("removeTaskButton"));
+    m_removeBtn->setToolTip(tr("Remove task"));
+    m_upBtn->setObjectName(QStringLiteral("moveTaskUpButton"));
+    m_upBtn->setToolTip(tr("Move up"));
+    m_downBtn->setObjectName(QStringLiteral("moveTaskDownButton"));
+    m_downBtn->setToolTip(tr("Move down"));
     m_addBtn->setFixedWidth(32);
     m_removeBtn->setFixedWidth(32);
     m_upBtn->setFixedWidth(32);
@@ -82,30 +92,44 @@ EditTasksDialog::EditTasksDialog(const QString &workspacePath,
     auto *formLayout = new QVBoxLayout(rightWidget);
     formLayout->setContentsMargins(8, 0, 0, 0);
 
-    formLayout->addWidget(new QLabel(tr("Name:"), rightWidget));
+    auto *nameLabel = new QLabel(tr("Name:"), rightWidget);
+    formLayout->addWidget(nameLabel);
     m_nameEdit = new QLineEdit(rightWidget);
+    m_nameEdit->setObjectName(QStringLiteral("taskNameEdit"));
+    nameLabel->setBuddy(m_nameEdit);
     formLayout->addWidget(m_nameEdit);
 
-    formLayout->addWidget(new QLabel(tr("Command:"), rightWidget));
+    auto *commandLabel = new QLabel(tr("Command:"), rightWidget);
+    formLayout->addWidget(commandLabel);
     m_commandEdit = new QLineEdit(rightWidget);
+    m_commandEdit->setObjectName(QStringLiteral("taskCommandEdit"));
+    commandLabel->setBuddy(m_commandEdit);
     formLayout->addWidget(m_commandEdit);
 
-    formLayout->addWidget(new QLabel(tr("Working Directory:"), rightWidget));
+    auto *cwdLabel = new QLabel(tr("Working Directory:"), rightWidget);
+    formLayout->addWidget(cwdLabel);
     auto *cwdLayout = new QHBoxLayout;
     m_cwdEdit = new QLineEdit(rightWidget);
+    m_cwdEdit->setObjectName(QStringLiteral("taskCwdEdit"));
+    cwdLabel->setBuddy(m_cwdEdit);
     m_cwdEdit->setPlaceholderText(tr("(workspace root)"));
     m_browseCwdBtn = new QPushButton(tr("Browse..."), rightWidget);
+    m_browseCwdBtn->setObjectName(QStringLiteral("browseCwdButton"));
     cwdLayout->addWidget(m_cwdEdit, 1);
     cwdLayout->addWidget(m_browseCwdBtn);
     formLayout->addLayout(cwdLayout);
 
-    formLayout->addWidget(new QLabel(tr("Environment:"), rightWidget));
+    auto *envLabel = new QLabel(tr("Environment:"), rightWidget);
+    formLayout->addWidget(envLabel);
     m_envEdit = new QPlainTextEdit(rightWidget);
+    m_envEdit->setObjectName(QStringLiteral("taskEnvEdit"));
+    envLabel->setBuddy(m_envEdit);
     m_envEdit->setPlaceholderText(tr("KEY=VALUE (one per line, # for comments)"));
     m_envEdit->setTabChangesFocus(false);
     formLayout->addWidget(m_envEdit, 1);
 
     m_envWarningLabel = new QLabel(rightWidget);
+    m_envWarningLabel->setObjectName(QStringLiteral("envWarningLabel"));
     m_envWarningLabel->setStyleSheet(QStringLiteral("color: #b58900;"));
     m_envWarningLabel->hide();
     formLayout->addWidget(m_envWarningLabel);
@@ -116,6 +140,7 @@ EditTasksDialog::EditTasksDialog(const QString &workspacePath,
 
     // Button box
     m_buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    m_buttonBox->setObjectName(QStringLiteral("buttonBox"));
     mainLayout->addWidget(m_buttonBox);
 
     // Env validation timer (debounce 300ms)

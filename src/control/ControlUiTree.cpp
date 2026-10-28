@@ -37,6 +37,7 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRadioButton>
@@ -44,6 +45,7 @@
 #include <QScrollBar>
 #include <QSlider>
 #include <QSpinBox>
+#include <QSplitter>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QStyle>
@@ -172,8 +174,10 @@ QJsonObject valueOf(QWidget *w)
 // A dock area's tabs and its own buttons: every tab is listed as its dock.
 bool isUnlistedChrome(const QWidget *w)
 {
+    // QMainWindow's own bar over tabbed panels too: each tab is its panel.
     return w->inherits("ads::CDockAreaTabBar") || w->inherits("ads::CTitleBarButton")
-           || w->inherits("ads::CDockWidgetTab");
+           || w->inherits("ads::CDockWidgetTab")
+           || (qobject_cast<const QTabBar *>(w) && qobject_cast<const QMainWindow *>(w->parentWidget()));
 }
 
 // The same, or the API's own chrome, anywhere up to the window (a search
@@ -212,7 +216,8 @@ void emitNode(QWidget *w, QJsonArray &into, int depth, const QString &anchorId, 
     const ControlAdapter *adapter = ControlAdapters::instance().find(w);
     // A tab behind the current one is hidden but one click away: listed, not walked.
     bool hiddenTab = false;
-    if (!walk.options.includeHidden && !w->isVisible()) {
+    const bool shown = w->isVisible() && !ids::isBehindTab(w);
+    if (!walk.options.includeHidden && !shown) {
         if (!adapter || !adapter->reachableWhileHidden(w, QStringLiteral("select")))
             return;
         hiddenTab = true;
@@ -247,7 +252,7 @@ void emitNode(QWidget *w, QJsonArray &into, int depth, const QString &anchorId, 
         n.insert(QStringLiteral("stable"), false);
     if (!w->isEnabled())
         n.insert(QStringLiteral("enabled"), false);
-    if (!w->isVisible())
+    if (!shown)
         n.insert(QStringLiteral("visible"), false);
     if (w->hasFocus())
         n.insert(QStringLiteral("focus"), true);
@@ -397,11 +402,14 @@ void sendKey(QWidget *recv, int key, Qt::KeyboardModifiers mods, const QString &
         *consumed = true;
         return;
     }
+    const QPointer<QWidget> guard(recv);
     QKeyEvent press(QEvent::KeyPress, key, mods, text);
     QApplication::sendEvent(recv, &press);
+    *consumed = press.isAccepted();
+    if (!guard)
+        return; // the key closed its receiver
     QKeyEvent release(QEvent::KeyRelease, key, mods, text);
     QApplication::sendEvent(recv, &release);
-    *consumed = press.isAccepted();
 }
 
 QString unsupported(const QString &op, const QWidget *w)
@@ -484,10 +492,26 @@ QString buddyText(const QWidget *w)
 }
 
 // What the widget itself shows: a button's text, a group's title, a field's placeholder.
+// A button's text, else the labels laid out inside it (a row button that
+// shows a name and a muted detail), in order.
+QString buttonText(const QAbstractButton *b)
+{
+    QString text = withoutMnemonic(b->text());
+    if (!text.isEmpty())
+        return text;
+    QStringList parts;
+    for (const QLabel *l : b->findChildren<QLabel *>()) {
+        const QString t = plain(l->text()).simplified();
+        if (!t.isEmpty())
+            parts.append(t);
+    }
+    return parts.join(QStringLiteral(" · "));
+}
+
 QString ownText(const QWidget *w)
 {
     if (const auto *b = qobject_cast<const QAbstractButton *>(w))
-        return withoutMnemonic(b->text());
+        return buttonText(b);
     if (const auto *l = qobject_cast<const QLabel *>(w))
         return plain(l->text()).simplified();
     if (const auto *g = qobject_cast<const QGroupBox *>(w))
@@ -620,7 +644,7 @@ QJsonObject read(QWidget *w, const QString &part, const ReadOptions &options)
     } else if (auto *l = qobject_cast<QLabel *>(w)) {
         out.insert(QStringLiteral("text"), plain(l->text()));
     } else if (auto *b = qobject_cast<QAbstractButton *>(w)) {
-        out.insert(QStringLiteral("text"), withoutMnemonic(b->text()));
+        out.insert(QStringLiteral("text"), buttonText(b));
         if (b->isCheckable())
             out.insert(QStringLiteral("checked"), b->isChecked());
     } else if (auto *c = qobject_cast<QComboBox *>(w)) {
@@ -678,7 +702,7 @@ QJsonArray find(const QString &text, const QString &role, int limit)
         QList<QWidget *> widgets = root->findChildren<QWidget *>();
         widgets.prepend(root);
         for (QWidget *w : std::as_const(widgets)) {
-            if (!w->isVisible() || isInsideUnlistedChrome(w))
+            if (!ids::isShownToUser(w) || isInsideUnlistedChrome(w))
                 continue;
             const QString r = roleOf(w);
             if (!role.isEmpty() && r != role)
@@ -729,7 +753,7 @@ QString blockedReason(const Target &t, const QString &op)
         return t.error.isEmpty() ? QStringLiteral("not found") : t.error;
     if (ids::isInsideIgnored(t.widget))
         return QStringLiteral("the Control API's own settings are for the user only");
-    if (!t.widget->isVisible()) {
+    if (!ids::isShownToUser(t.widget)) {
         const ControlAdapter *a = ControlAdapters::instance().find(t.widget);
         if (!a || !a->reachableWhileHidden(t.widget, op))
             return QStringLiteral("it is hidden; a user could not reach it");
@@ -749,6 +773,13 @@ QString blockedReason(const Target &t, const QString &op)
         if (!insideModalChain)
             return QStringLiteral("the modal dialog '%1' is open; answer it first").arg(ids::nodeId(modal).id);
     }
+    // An open menu runs its own exec() loop: a command elsewhere could close
+    // the menu's owner under it (its code after exec() then touches freed
+    // memory). A user's click outside closes the menu first, and so does
+    // ui::click; anything else waits until the menu is answered.
+    if (QApplication::activePopupWidget() && op != QLatin1String("click")
+        && t.widget->window()->windowType() != Qt::Popup)
+        return QStringLiteral("a menu is open; pick from it, or close it with POST /ui/key {\"keys\": \"Escape\"}");
     return {};
 }
 
@@ -842,7 +873,10 @@ QString type(const Target &t, const QString &text, bool replace)
         QApplication::sendEvent(recv, &ev);
         return {};
     }
+    const QPointer<QWidget> guard(recv);
     for (const QChar c : text) {
+        if (!guard)
+            return QStringLiteral("it went away while typing");
         const int key = c == QLatin1Char('\n') ? int(Qt::Key_Return) : int(c.toUpper().unicode());
         bool consumed = false;
         sendKey(recv, key, Qt::NoModifier, c == QLatin1Char('\n') ? QStringLiteral("\r") : QString(c), &consumed);
@@ -1043,12 +1077,99 @@ QString focus(const Target &t)
     return {};
 }
 
+namespace {
+
+// What a user drags to give a pane `size` along `o`: the nearest edge that
+// sets it, from the widget up. A main window's panel moves its separator
+// (resizeDocks), a floating one its window edge, a splitter child its
+// handle (Qt's and ADS's CDockSplitter); the neighbour gives or takes the
+// difference, within the minimum sizes Qt enforces either way.
+QString resizeAlong(QWidget *w, Qt::Orientation o, int size)
+{
+    const bool horizontal = o == Qt::Horizontal;
+    for (QWidget *c = w; c && !c->isWindow(); c = c->parentWidget()) {
+        if (auto *dock = qobject_cast<QDockWidget *>(c)) {
+            if (dock->isFloating()) {
+                dock->resize(horizontal ? size : dock->width(), horizontal ? dock->height() : size);
+                return {};
+            }
+            if (auto *main = qobject_cast<QMainWindow *>(dock->parentWidget())) {
+                main->resizeDocks({dock}, {size}, o);
+                return {};
+            }
+        }
+        // The central area has no edge of its own: the separator of a shown
+        // panel beside it gives it room.
+        if (auto *main = qobject_cast<QMainWindow *>(c->parentWidget()); main && main->centralWidget() == c) {
+            const int delta = size - (horizontal ? c->width() : c->height());
+            const Qt::DockWidgetArea sides[2] = {horizontal ? Qt::LeftDockWidgetArea : Qt::TopDockWidgetArea,
+                                                 horizontal ? Qt::RightDockWidgetArea : Qt::BottomDockWidgetArea};
+            const QList<QDockWidget *> docks = main->findChildren<QDockWidget *>(Qt::FindDirectChildrenOnly);
+            for (Qt::DockWidgetArea side : sides) {
+                for (QDockWidget *dock : docks) {
+                    if (dock->isFloating() || !dock->isVisible() || ids::isBehindTab(dock)
+                        || main->dockWidgetArea(dock) != side)
+                        continue;
+                    main->resizeDocks({dock}, {std::max(0, (horizontal ? dock->width() : dock->height()) - delta)}, o);
+                    return {};
+                }
+            }
+        }
+        auto *splitter = qobject_cast<QSplitter *>(c->parentWidget());
+        if (!splitter || splitter->orientation() != o)
+            continue;
+        QList<int> sizes = splitter->sizes();
+        const int index = splitter->indexOf(c);
+        if (index < 0)
+            continue;
+        // The shown neighbour across a handle: after it, else before it.
+        int other = -1;
+        for (int i = index + 1; i < sizes.size() && other < 0; ++i) {
+            if (sizes[i] > 0)
+                other = i;
+        }
+        for (int i = index - 1; i >= 0 && other < 0; --i) {
+            if (sizes[i] > 0)
+                other = i;
+        }
+        if (other < 0)
+            continue; // alone in its splitter: the edge is further up
+        const int delta = size - sizes[index];
+        sizes[index] = size;
+        sizes[other] = std::max(0, sizes[other] - delta);
+        splitter->setSizes(sizes);
+        return {};
+    }
+    return horizontal ? QStringLiteral("no edge sets its width; resize the pane around it")
+                      : QStringLiteral("no edge sets its height; resize the pane around it");
+}
+
+QString resizePane(QWidget *w, const QJsonObject &args)
+{
+    const bool hasWidth = args.contains(QStringLiteral("width"));
+    const bool hasHeight = args.contains(QStringLiteral("height"));
+    if (!hasWidth && !hasHeight)
+        return QStringLiteral("resize takes args {\"width\"} and/or {\"height\"} in pixels");
+    if (hasWidth) {
+        if (QString e = resizeAlong(w, Qt::Horizontal, std::max(0, args.value(QStringLiteral("width")).toInt()));
+            !e.isEmpty())
+            return e;
+    }
+    if (hasHeight)
+        return resizeAlong(w, Qt::Vertical, std::max(0, args.value(QStringLiteral("height")).toInt()));
+    return {};
+}
+
+} // namespace
+
 QString perform(const Target &t, const QString &op, const QJsonObject &args)
 {
     if (const ControlAdapter *a = ControlAdapters::instance().find(t.widget)) {
         if (auto r = a->perform(t.widget, t.part, op, args))
             return *r;
     }
+    if (op == QLatin1String("resize") && t.part.isEmpty())
+        return resizePane(t.widget, args);
     return unsupported(op, t.widget);
 }
 

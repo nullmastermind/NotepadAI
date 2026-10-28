@@ -42,6 +42,9 @@ bool isPartOfAnotherControl(const QWidget *w)
 {
     if (qstrncmp(w->metaObject()->className(), "ads::", 5) == 0)
         return true;
+    // QMainWindow's own bar over tabbed panels: driven through the panels.
+    if (qobject_cast<const QTabBar *>(w) && qobject_cast<const QMainWindow *>(w->parentWidget()))
+        return true;
     for (const QWidget *p = w->parentWidget(); p; p = p->parentWidget()) {
         if (ids::isIgnored(p))
             return true;

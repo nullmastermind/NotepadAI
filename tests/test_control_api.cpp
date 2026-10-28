@@ -14,6 +14,7 @@
 #include <QtTest>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDockWidget>
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLineEdit>
@@ -23,6 +24,7 @@
 #include <QNetworkProxy>
 #include <QNetworkReply>
 #include <QPushButton>
+#include <QSplitter>
 #include <QTcpSocket>
 #include <QVBoxLayout>
 
@@ -57,6 +59,26 @@ public:
         connect(pick, &QAction::triggered, this,
                 [this] { picked = control::picker::getExistingDirectory(this, QStringLiteral("Pick")); });
 
+        // Hidden in this state; its visible twin does the same.
+        QAction *openOld = file->addAction(QStringLiteral("Open Project…"));
+        openOld->setObjectName(QStringLiteral("actionOpenProject"));
+        openOld->setVisible(false);
+        QAction *openNew = file->addAction(QStringLiteral("New Project Folder…"));
+        openNew->setObjectName(QStringLiteral("actionOpenProjectNew"));
+        control::ids::setAlternative(openOld, QStringLiteral("actionOpenProjectNew"));
+
+        // A context menu run with exec(), as the app's tree and tab menus are.
+        QAction *popup = file->addAction(QStringLiteral("Menu…"));
+        popup->setObjectName(QStringLiteral("actionPopup"));
+        connect(popup, &QAction::triggered, this, [this] {
+            QMenu menu(this);
+            menu.setObjectName(QStringLiteral("contextMenu"));
+            menu.addAction(QStringLiteral("Rename"))->setObjectName(QStringLiteral("actionRename"));
+            menuOpen = true;
+            menu.exec(mapToGlobal(QPoint(10, 10)));
+            menuOpen = false;
+        });
+
         QAction *settings = file->addAction(QStringLiteral("Settings…"));
         settings->setObjectName(QStringLiteral("actionSettings"));
         connect(settings, &QAction::triggered, this, [this] {
@@ -83,6 +105,9 @@ public:
         auto *layout = new QVBoxLayout(central);
         name = new QLineEdit(central);
         name->setObjectName(QStringLiteral("editName"));
+        password = new QLineEdit(central);
+        password->setObjectName(QStringLiteral("editPassword"));
+        password->setEchoMode(QLineEdit::Password);
         status = new QLabel(QStringLiteral("idle"), central);
         status->setObjectName(QStringLiteral("labelStatus"));
         // Stands in for the Control API's own settings and Stop chip.
@@ -94,18 +119,41 @@ public:
         connect(stop, &QPushButton::clicked, this, [this] { ++stops; });
         (new QVBoxLayout(chrome))->addWidget(stop);
         layout->addWidget(name);
+        layout->addWidget(password);
         layout->addWidget(status);
         layout->addWidget(chrome);
+        // Two panes with a handle between them.
+        auto *split = new QSplitter(Qt::Horizontal, central);
+        split->setObjectName(QStringLiteral("split"));
+        splitLeft = new QWidget(split);
+        splitLeft->setObjectName(QStringLiteral("splitLeft"));
+        auto *splitRight = new QWidget(split);
+        splitRight->setObjectName(QStringLiteral("splitRight"));
+        layout->addWidget(split, 1);
         setCentralWidget(central);
+
+        // Two tabbed panels, like workspace panels.
+        for (QDockWidget **panel : {&panelA, &panelB}) {
+            *panel = new QDockWidget(panel == &panelA ? QStringLiteral("alpha") : QStringLiteral("beta"), this);
+            (*panel)->setObjectName(panel == &panelA ? QStringLiteral("panelA") : QStringLiteral("panelB"));
+            (*panel)->setWidget(new QWidget(*panel));
+            addDockWidget(Qt::LeftDockWidgetArea, *panel);
+        }
+        tabifyDockWidget(panelA, panelB);
     }
 
     QAction *hello = nullptr;
     QLineEdit *name = nullptr;
+    QLineEdit *password = nullptr;
     QLabel *status = nullptr;
+    QDockWidget *panelA = nullptr;
+    QWidget *splitLeft = nullptr;
+    QDockWidget *panelB = nullptr;
     int hellos = 0;
     int stops = 0;
     QString picked;
     bool dialogOpen = false;
+    bool menuOpen = false;
     int dialogResult = -1;
 };
 
@@ -133,9 +181,14 @@ private slots:
     void triggerClicksTheActionAndReportsEffects();
     void aUserCouldNotClickItSoNeitherCanTheAgent();
     void theControlApisOwnControlsAreTheUsersAlone();
+    void aHiddenActionNamesItsVisibleTwin();
+    void aPanelIsSelectedAndClosedLikeItsTabAndTitleBar();
+    void aPaneIsResizedLikeDraggingItsEdge();
     void aModalDialogAnswersWhileOpenAndIsAnsweredThroughTheApi();
+    void nothingOutsideAnOpenMenuRunsUnderIt();
     void aDirectCommandFillsThePicker();
     void typeThenReadAField();
+    void theLogKeepsWhatEachStepWasGiven();
     void waitForTextAndTimeOut();
     void waitForAnEvent();
     void screenshotIsAPng();
@@ -271,6 +324,75 @@ void TestControlApi::theControlApisOwnControlsAreTheUsersAlone()
     QVERIFY(!tree.body.contains("buttonStop"));
 }
 
+void TestControlApi::aHiddenActionNamesItsVisibleTwin()
+{
+    const Response r = request("POST", QStringLiteral("/actions/trigger"),
+                               {{QStringLiteral("id"), QStringLiteral("actionOpenProject")}});
+    QCOMPARE(r.status, 409);
+    QVERIFY2(r.json.value(QStringLiteral("error")).toString().contains(QLatin1String("actionOpenProjectNew")),
+             r.body.constData());
+}
+
+void TestControlApi::aPanelIsSelectedAndClosedLikeItsTabAndTitleBar()
+{
+    m_window->panelA->raise(); // tabs switch only once the window is shown
+    using control::ids::isBehindTab;
+    QTRY_VERIFY(!isBehindTab(m_window->panelA) && isBehindTab(m_window->panelB));
+    // The panel behind is listed, out of view; the tab bar over the panels is not a control of its own.
+    const Response tree = request("GET", QStringLiteral("/ui?root=MainWindow&depth=1"));
+    QVERIFY2(!tree.body.contains("QTabBar"), tree.body.constData());
+    bool listedOutOfView = false;
+    for (const QJsonValue &v : tree.json.value(QStringLiteral("nodes")).toArray().at(0).toObject().value(QStringLiteral("children")).toArray()) {
+        const QJsonObject n = v.toObject();
+        if (n.value(QStringLiteral("id")).toString() == QLatin1String("MainWindow/panelB"))
+            listedOutOfView = !n.value(QStringLiteral("visible")).toBool(true) && !n.value(QStringLiteral("current")).toBool(true);
+    }
+    QVERIFY2(listedOutOfView, tree.body.constData());
+
+    const Response select = request("POST", QStringLiteral("/ui/select"), {{QStringLiteral("id"), QStringLiteral("MainWindow/panelB")}});
+    QCOMPARE(select.status, 200);
+    QTRY_VERIFY(isBehindTab(m_window->panelA) && !isBehindTab(m_window->panelB));
+
+    const Response close = request("POST", QStringLiteral("/ui/close"), {{QStringLiteral("id"), QStringLiteral("MainWindow/panelB")}});
+    QCOMPARE(close.status, 200);
+    QVERIFY(!m_window->panelB->toggleViewAction()->isChecked());
+    QCOMPARE(request("POST", QStringLiteral("/ui/close"), {{QStringLiteral("id"), QStringLiteral("MainWindow/panelB")}}).status,
+             409);
+}
+
+void TestControlApi::aPaneIsResizedLikeDraggingItsEdge()
+{
+    m_window->resize(1000, 700);
+    QTRY_VERIFY(m_window->splitLeft->width() > 0);
+    auto resize = [this](const QString &id, const QJsonObject &args) {
+        return request("POST", QStringLiteral("/ui/do"),
+                       {{QStringLiteral("id"), id}, {QStringLiteral("op"), QStringLiteral("resize")},
+                        {QStringLiteral("args"), args}});
+    };
+
+    // A splitter child: its handle moves, the neighbour takes the rest.
+    const QString left = control::ids::nodeId(m_window->splitLeft).id;
+    const Response pane = resize(left, {{QStringLiteral("width"), 150}});
+    QCOMPARE(pane.status, 200);
+    QTRY_COMPARE(m_window->splitLeft->width(), 150);
+
+    // A main window's panel, even one behind its tab: the group's separator moves.
+    QTRY_VERIFY(control::ids::isBehindTab(m_window->panelA));
+    const Response panel = resize(QStringLiteral("MainWindow/panelA"), {{QStringLiteral("width"), 300}});
+    QCOMPARE(panel.status, 200);
+    QTRY_VERIFY2(qAbs(m_window->panelB->width() - 300) <= 4, qPrintable(QString::number(m_window->panelB->width())));
+
+    // The central area has no edge of its own: the panel beside it gives way.
+    const Response central = resize(QStringLiteral("MainWindow/editName"), {{QStringLiteral("width"), 600}});
+    QCOMPARE(central.status, 200);
+    QTRY_VERIFY2(qAbs(m_window->centralWidget()->width() - 600) <= 4,
+                 qPrintable(QString::number(m_window->centralWidget()->width())));
+
+    // No edge sets the splitter child's height, and nothing up to the window does either.
+    QCOMPARE(resize(left, {{QStringLiteral("height"), 100}}).status, 422);
+    QCOMPARE(resize(left, {}).status, 422);
+}
+
 void TestControlApi::aModalDialogAnswersWhileOpenAndIsAnsweredThroughTheApi()
 {
     // The trigger is answered while exec() runs, so every next step is sent
@@ -314,6 +436,39 @@ void TestControlApi::aModalDialogAnswersWhileOpenAndIsAnsweredThroughTheApi()
     QVERIFY2(QJsonDocument(opened).toJson().contains("SettingsApplied"), QJsonDocument(click.json).toJson().constData());
 }
 
+void TestControlApi::nothingOutsideAnOpenMenuRunsUnderIt()
+{
+    // While the menu's exec() runs, a command elsewhere could close its owner
+    // under it; only the menu itself and Escape are answered.
+    Response open;
+    Response type;
+    Response trigger;
+    Response escape;
+    open.then = [&] {
+        send("POST", QStringLiteral("/ui/type"),
+             {{QStringLiteral("id"), QStringLiteral("MainWindow/editName")}, {QStringLiteral("text"), QStringLiteral("x")}},
+             &type);
+    };
+    type.then = [&] {
+        send("POST", QStringLiteral("/actions/trigger"), {{QStringLiteral("id"), QStringLiteral("actionHello")}}, &trigger);
+    };
+    trigger.then = [&] { send("POST", QStringLiteral("/ui/key"), {{QStringLiteral("keys"), QStringLiteral("Escape")}}, &escape); };
+    QTimer::singleShot(12000, this, [] {
+        if (QWidget *popup = QApplication::activePopupWidget())
+            popup->close();
+    });
+    send("POST", QStringLiteral("/actions/trigger"), {{QStringLiteral("id"), QStringLiteral("actionPopup")}}, &open);
+    QTRY_VERIFY_WITH_TIMEOUT(escape.done && !m_window->menuOpen, 15000);
+
+    QCOMPARE(open.json.value(QStringLiteral("effects")).toObject().value(QStringLiteral("popup")).toString(),
+             QStringLiteral("contextMenu"));
+    QCOMPARE(type.status, 409);
+    QCOMPARE(trigger.status, 409);
+    QCOMPARE(m_window->hellos, 0);
+    QVERIFY(m_window->name->text().isEmpty());
+    QCOMPARE(escape.status, 200);
+}
+
 void TestControlApi::aDirectCommandFillsThePicker()
 {
     const Response r = request("POST", QStringLiteral("/actions/trigger"),
@@ -334,6 +489,33 @@ void TestControlApi::typeThenReadAField()
     QCOMPARE(m_window->name->text(), QStringLiteral("hello"));
     const Response read = request("GET", QStringLiteral("/ui/read?id=MainWindow/editName"));
     QCOMPARE(read.json.value(QStringLiteral("text")).toString(), QStringLiteral("hello"));
+}
+
+void TestControlApi::theLogKeepsWhatEachStepWasGiven()
+{
+    QCOMPARE(request("POST", QStringLiteral("/ui/type"),
+                     {{QStringLiteral("id"), QStringLiteral("MainWindow/editName")}, {QStringLiteral("text"), QStringLiteral("hello")}})
+                 .status,
+             200);
+    QCOMPARE(request("POST", QStringLiteral("/ui/type"),
+                     {{QStringLiteral("id"), QStringLiteral("MainWindow/editPassword")}, {QStringLiteral("text"), QStringLiteral("hunter2")}})
+                 .status,
+             200);
+    QCOMPARE(m_window->password->text(), QStringLiteral("hunter2"));
+
+    const Response log = request("GET", QStringLiteral("/log"));
+    QVERIFY2(!log.body.contains("hunter2"), log.body.constData());
+    QJsonObject typedName;
+    QJsonObject typedPassword;
+    for (const QJsonValue &v : log.json.value(QStringLiteral("entries")).toArray()) {
+        const QJsonObject e = v.toObject();
+        if (e.value(QStringLiteral("target")).toString() == QLatin1String("MainWindow/editName"))
+            typedName = e.value(QStringLiteral("args")).toObject();
+        else if (e.value(QStringLiteral("target")).toString() == QLatin1String("MainWindow/editPassword"))
+            typedPassword = e.value(QStringLiteral("args")).toObject();
+    }
+    QCOMPARE(typedName.value(QStringLiteral("text")).toString(), QStringLiteral("hello"));
+    QCOMPARE(typedPassword.value(QStringLiteral("text")).toString(), QStringLiteral("••••"));
 }
 
 void TestControlApi::waitForTextAndTimeOut()

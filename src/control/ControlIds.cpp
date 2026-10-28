@@ -135,7 +135,7 @@ QString withoutBraces(const QString &name)
 
 QString baseRootId(const QWidget *root)
 {
-    const QString explicitId = root->property(kRootProperty).toString();
+    QString explicitId = root->property(kRootProperty).toString();
     if (!explicitId.isEmpty())
         return explicitId;
     if (root->inherits("ads::CDockWidget"))
@@ -281,6 +281,27 @@ bool isTransparentContainer(const QWidget *widget)
         return true;
     const char *cls = widget->metaObject()->className();
     return qstrncmp(cls, "ads::", 5) == 0 && !widget->inherits("ads::CDockWidget");
+}
+
+bool isBehindTab(const QWidget *widget)
+{
+    const auto *dock = qobject_cast<const QDockWidget *>(widget);
+    if (!dock || dock->isFloating() || !dock->isVisible())
+        return false;
+    // Qt's own test (QDockAreaLayoutInfo::apply) for a tab moved out of view.
+    const QRect g = dock->geometry();
+    return g.right() < 0 || g.bottom() < 0;
+}
+
+bool isShownToUser(const QWidget *widget)
+{
+    if (!widget->isVisible())
+        return false;
+    for (const QWidget *w = widget; w && !w->isWindow(); w = w->parentWidget()) {
+        if (isBehindTab(w))
+            return false;
+    }
+    return true;
 }
 
 namespace {

@@ -2345,7 +2345,7 @@ void MainWindow::setupControlApi()
             if (!store->isBackendAvailable())
                 return std::nullopt;
             QString error;
-            const QString token = store->retrieveSecret(key, &error);
+            QString token = store->retrieveSecret(key, &error);
             if (!error.isEmpty())
                 return std::nullopt;
             return token;
@@ -2361,6 +2361,29 @@ void MainWindow::setupControlApi()
             {QStringLiteral("activeWorkspace"), currentWorkspaceRoot()},
             {QStringLiteral("editorCount"), editorCount()},
         };
+        // Each workspace's panel: /ui/select it to make it the active one, /ui/close to close it.
+        QJsonArray panels;
+        const FolderAsWorkspaceDock *active = activeWorkspaceDock();
+        for (FolderAsWorkspaceDock *dock : findChildren<FolderAsWorkspaceDock *>(QString(), Qt::FindDirectChildrenOnly)) {
+            if (dock->rootPath().isEmpty())
+                continue;
+            panels.append(QJsonObject{{QStringLiteral("root"), dock->rootPath()},
+                                      {QStringLiteral("id"), control::ids::nodeId(dock).id},
+                                      {QStringLiteral("active"), dock == active}});
+        }
+        info.insert(QStringLiteral("workspacePanels"), panels);
+        // The active workspace's terminal tasks, as Terminal ▸ Tasks runs
+        // them (menuTasks/task:<name>). Env stays out: it may hold secrets.
+        if (const QString root = currentWorkspaceRoot(); !root.isEmpty() && !remote::isSshUri(root)) {
+            QJsonArray tasks;
+            for (const TerminalTask &task :
+                 terminalManager->tasksForWorkspace(TerminalTaskRegistry::normalizeWorkspacePath(root))) {
+                tasks.append(QJsonObject{{QStringLiteral("name"), task.name},
+                                         {QStringLiteral("command"), task.command},
+                                         {QStringLiteral("cwd"), task.cwd}});
+            }
+            info.insert(QStringLiteral("workspaceTasks"), tasks);
+        }
         if (ScintillaNext *editor = currentEditor()) {
             info.insert(QStringLiteral("activeEditor"),
                         editor->isFile() ? QDir::fromNativeSeparators(editor->getFilePath()) : editor->getName());
@@ -2382,6 +2405,9 @@ void MainWindow::setupControlApi()
     m_controlApi->notePicker(QStringLiteral("actionOpen"), files);
     m_controlApi->notePicker(QStringLiteral("actionOpenFolderasWorkspace"), folder);
     m_controlApi->notePicker(QStringLiteral("actionOpenFolderAsWorkspaceNew"), folder);
+    // The File menu shows one or the other (the submenu once there are recent folders).
+    control::ids::setAlternative(ui->actionOpenFolderasWorkspace, QStringLiteral("actionOpenFolderAsWorkspaceNew"));
+    control::ids::setAlternative(ui->actionOpenFolderAsWorkspaceNew, QStringLiteral("actionOpenFolderasWorkspace"));
     m_controlApi->notePicker(QStringLiteral("actionSaveAs"), file);
     m_controlApi->notePicker(QStringLiteral("actionSaveCopyAs"), file);
     m_controlApi->notePicker(QStringLiteral("actionRename"), tr("the new file path"));

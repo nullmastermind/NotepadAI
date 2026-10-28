@@ -65,7 +65,7 @@ class ControlApi : public QObject
 
 public:
     static constexpr int kApiVersion = 1;
-    static constexpr int kSkillVersion = 1;
+    static constexpr int kSkillVersion = 3;
     static constexpr quint16 kDefaultPort = 47821;
     // The keychain entry holding the token.
     static constexpr char kTokenSecretKey[] = "control-api-token";
@@ -126,7 +126,7 @@ public:
     QString pickerHint(const QString &id) const { return m_pickers.value(id); }
     // Logs the step, flashes nothing (callers flash what they touched).
     void logAction(const QString &op, const QString &target, const QString &label, bool ok = true,
-                   const QString &detail = QString());
+                   const QString &detail = QString(), const QJsonObject &args = {});
 
     // Runs `act` as a command: answers with {ok, completed, effects} once it
     // finished or a modal dialog / popup took over. With `pickerValues`, the

@@ -19,6 +19,7 @@
 #include "TerminalEmptyPanel.h"
 
 #include "TerminalIcons.h"
+#include "control/ControlIds.h"
 
 #include <QFont>
 #include <QFontMetrics>
@@ -166,6 +167,7 @@ QWidget *TerminalEmptyPanel::makeTaskRow(const QString &name, const QString &com
     row->setCursor(Qt::PointingHandCursor);
     row->setFocusPolicy(Qt::StrongFocus);
     row->setProperty("nnTaskRow", true);
+    control::ids::setKey(row, QStringLiteral("task:") + name); // as in Terminal ▸ Tasks
 
     auto *layout = new QHBoxLayout(row);
     layout->setContentsMargins(8, 4, 8, 4);

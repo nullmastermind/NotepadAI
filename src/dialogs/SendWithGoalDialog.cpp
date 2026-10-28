@@ -18,6 +18,7 @@ SendWithGoalDialog::SendWithGoalDialog(AcpAgentRegistry *registry,
     : QDialog(parent)
     , m_settings(settings)
 {
+    setObjectName(QStringLiteral("SendWithGoalDialog"));
     setWindowTitle(tr("Send with Goal"));
     setMinimumWidth(440);
 
@@ -25,10 +26,12 @@ SendWithGoalDialog::SendWithGoalDialog(AcpAgentRegistry *registry,
     mainLayout->setSpacing(12);
 
     m_goalConfig = new GoalConfigWidget(registry, settings, this);
+    m_goalConfig->setObjectName(QStringLiteral("goalConfig"));
     m_goalConfig->setRememberPromptTemplate(true);
     mainLayout->addWidget(m_goalConfig);
 
     m_errorLabel = new QLabel(this);
+    m_errorLabel->setObjectName(QStringLiteral("errorLabel"));
     m_errorLabel->setStyleSheet(QStringLiteral("color: red; font-size: 12px;"));
     m_errorLabel->hide();
     mainLayout->addWidget(m_errorLabel);
@@ -129,10 +132,12 @@ SendWithGoalDialog::SendWithGoalDialog(AcpAgentRegistry *registry,
     footerLayout->addWidget(m_prefixGoalCheck);
     footerLayout->addStretch();
     auto *cancelBtn = new QPushButton(tr("Cancel"), this);
+    cancelBtn->setObjectName(QStringLiteral("cancelButton"));
     connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
     footerLayout->addWidget(cancelBtn);
 
     m_startBtn = new QPushButton(tr("Start Goal"), this);
+    m_startBtn->setObjectName(QStringLiteral("startGoalButton"));
     m_startBtn->setDefault(true);
     m_startBtn->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Return));
     connect(m_startBtn, &QPushButton::clicked, this, &SendWithGoalDialog::onStart);

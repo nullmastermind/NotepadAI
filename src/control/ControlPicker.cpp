@@ -143,7 +143,7 @@ QString getSaveFileName(QWidget *parent, const QString &caption, const QString &
                         QString *selectedFilter, QFileDialog::Options options)
 {
     if (auto v = take()) {
-        const QString file = v->isEmpty() ? QString() : absolute(v->first(), dir);
+        QString file = v->isEmpty() ? QString() : absolute(v->first(), dir);
         if (file.isEmpty())
             return file;
         pickFilter(file, filter, selectedFilter);

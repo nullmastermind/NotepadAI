@@ -14,6 +14,7 @@
 #include <QAbstractListModel>
 #include <QDateTime>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QString>
 #include <QVector>
 
@@ -35,7 +36,8 @@ public:
         QString target; // id
         QString label;  // what the user sees ("AI ▸ AI Agents…")
         bool ok = true;
-        QString detail; // error or extra
+        QString detail;   // error or extra
+        QJsonObject args; // the request minus its id: value, text, op + args, ...
     };
 
     explicit ControlActivityLog(QObject *parent = nullptr);
@@ -47,6 +49,8 @@ public:
     // Newest `limit` entries, oldest first.
     QJsonArray toJson(int limit = kCapacity) const;
     static QString displayText(const Entry &entry);
+    // The arguments as one short line: a lone text/value/keys as itself, else compact JSON.
+    static QString argsText(const QJsonObject &args);
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;

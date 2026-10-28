@@ -12,6 +12,7 @@
 
 #include <QBrush>
 #include <QGuiApplication>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QPalette>
 
@@ -59,9 +60,21 @@ QString ControlActivityLog::displayText(const Entry &e)
 {
     QString text = e.time.toString(QStringLiteral("HH:mm:ss")) + QStringLiteral("  ") + e.op
                    + QStringLiteral("  ") + (e.label.isEmpty() ? e.target : e.label);
+    if (!e.args.isEmpty())
+        text += QStringLiteral(" ← ") + argsText(e.args);
     if (!e.ok)
         text += QStringLiteral("  — ") + e.detail;
     return text;
+}
+
+QString ControlActivityLog::argsText(const QJsonObject &args)
+{
+    if (args.size() == 1) {
+        const QJsonValue v = *args.constBegin();
+        if (v.isString())
+            return v.toString();
+    }
+    return QString::fromUtf8(QJsonDocument(args).toJson(QJsonDocument::Compact));
 }
 
 QJsonArray ControlActivityLog::toJson(int limit) const
@@ -78,6 +91,8 @@ QJsonArray ControlActivityLog::toJson(int limit) const
             o.insert(QStringLiteral("label"), e.label);
         if (!e.detail.isEmpty())
             o.insert(QStringLiteral("detail"), e.detail);
+        if (!e.args.isEmpty())
+            o.insert(QStringLiteral("args"), e.args);
         out.append(o);
     }
     return out;

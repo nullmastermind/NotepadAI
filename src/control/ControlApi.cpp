@@ -45,10 +45,12 @@ namespace control {
 
 namespace {
 
+// NOLINTBEGIN(bugprone-throwing-static-initialization): ApplicationSetting stores std::function (file-scope idiom).
 const ApplicationSetting<bool> kEnabled{"ControlApi/Enabled", false};
 const ApplicationSetting<int> kPort{"ControlApi/Port", int(ControlApi::kDefaultPort)};
 const ApplicationSetting<bool> kAllowLan{"ControlApi/AllowLan", false};
 const ApplicationSetting<QString> kLanAddress{"ControlApi/LanAddress", QString()};
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 // Object name of a pending /wait (a child of the API, deleted on Stop).
 constexpr char kPendingWait[] = "controlPendingWait";
@@ -198,7 +200,7 @@ void ControlApi::setAllowLan(bool on)
 
 QString ControlApi::lanAddress() const
 {
-    const QString saved = m_host.settings ? m_host.settings->get(kLanAddress) : QString();
+    QString saved = m_host.settings ? m_host.settings->get(kLanAddress) : QString();
     const QStringList available = lanAddresses();
     if (available.contains(saved))
         return saved;
@@ -353,7 +355,7 @@ void ControlApi::stopServer()
 
 void ControlApi::route(const QByteArray &method, const QByteArray &path, Handler handler)
 {
-    m_routes.insert(routeKey(method, path), std::move(handler));
+    m_routes.emplace(routeKey(method, path), std::move(handler));
 }
 
 void ControlApi::notePicker(const QString &id, const QString &valueHint)
@@ -366,7 +368,7 @@ QStringList ControlApi::pickerValues(const QJsonValue &value)
     QStringList out;
     if (value.isArray()) {
         const QJsonArray array = value.toArray();
-        for (const QJsonValue &v : array)
+        for (const auto &v : array)
             out.append(v.toVariant().toString());
     } else {
         out = value.toVariant().toString().split(QLatin1Char('\n'));
@@ -375,7 +377,7 @@ QStringList ControlApi::pickerValues(const QJsonValue &value)
 }
 
 void ControlApi::logAction(const QString &op, const QString &target, const QString &label, bool ok,
-                           const QString &detail)
+                           const QString &detail, const QJsonObject &args)
 {
     ControlActivityLog::Entry e;
     e.time = QDateTime::currentDateTime();
@@ -384,12 +386,15 @@ void ControlApi::logAction(const QString &op, const QString &target, const QStri
     e.label = label;
     e.ok = ok;
     e.detail = detail;
+    e.args = args;
     if (events::wanted()) {
         QJsonObject data{{QStringLiteral("op"), op}, {QStringLiteral("label"), label}, {QStringLiteral("ok"), ok}};
         if (!target.isEmpty())
             data.insert(QStringLiteral("id"), target);
         if (!detail.isEmpty())
             data.insert(QStringLiteral("detail"), detail);
+        if (!args.isEmpty())
+            data.insert(QStringLiteral("args"), args);
         events::publish(QStringLiteral("action"), data);
     }
     m_log->append(std::move(e));
@@ -530,7 +535,16 @@ void ControlApi::handleTrigger(const QJsonObject &body, const Reply &reply)
     const QString label = menuLabel(r.menuPath, ControlActionIndex::plainText(r.action->text()));
     if (!r.visible) {
         logAction(QStringLiteral("trigger"), id, label, false, QStringLiteral("not visible"));
-        reply.error(409, QStringLiteral("'%1' is hidden; a user could not click it").arg(label));
+        QString message = QStringLiteral("'%1' is hidden; a user could not click it").arg(label);
+        const QString alternative = r.action->property(ids::kAlternativeProperty).toString();
+        if (!alternative.isEmpty()) {
+            const ControlActionIndex::Resolved alt = index.resolve(alternative);
+            if (alt.action && alt.visible && alt.enabled)
+                message += QStringLiteral(". '%1' (id %2) does the same")
+                               .arg(menuLabel(alt.menuPath, ControlActionIndex::plainText(alt.action->text())),
+                                    alternative);
+        }
+        reply.error(409, message);
         return;
     }
     if (!r.enabled) {
@@ -543,6 +557,12 @@ void ControlApi::handleTrigger(const QJsonObject &body, const Reply &reply)
     if (QWidget *modal = QApplication::activeModalWidget(); modal && !r.inPopup && modal != m_window) {
         logAction(QStringLiteral("trigger"), id, label, false, QStringLiteral("behind a modal dialog"));
         reply.error(409, QStringLiteral("the modal dialog '%1' is open; answer it first").arg(ids::nodeId(modal).id));
+        return;
+    }
+    // Nor while a menu is open (its exec() loop is on the stack): only its own items.
+    if (QApplication::activePopupWidget() && !r.inPopup) {
+        logAction(QStringLiteral("trigger"), id, label, false, QStringLiteral("a menu is open"));
+        reply.error(409, QStringLiteral("a menu is open; pick from it, or close it with POST /ui/key {\"keys\": \"Escape\"}"));
         return;
     }
 
@@ -573,13 +593,58 @@ void ControlApi::handleTrigger(const QJsonObject &body, const Reply &reply)
 
     if (!r.inPopup)
         m_feedback->flashAction(r.action);
-    logAction(QStringLiteral("trigger"), id,
-              hasValue ? label + QStringLiteral(" ← ") + values.join(QStringLiteral(", ")) : label);
+    logAction(QStringLiteral("trigger"), id, label, true, QString(),
+              hasValue ? QJsonObject{{QStringLiteral("value"), QJsonArray::fromStringList(values)}} : QJsonObject());
     runCommand(reply, std::move(act), {{QStringLiteral("action"), id}, {QStringLiteral("label"), label}},
                hasValue ? &values : nullptr);
 }
 
 // --- /ui ---------------------------------------------------------------------
+
+namespace {
+
+// A log line's copy of a string: bounded, so a pasted file cannot fill the log.
+QJsonValue loggedValue(const QJsonValue &v)
+{
+    constexpr qsizetype kMaxChars = 120;
+    if (v.isString()) {
+        const QString s = v.toString();
+        return s.size() > kMaxChars ? QJsonValue(s.left(kMaxChars) + QStringLiteral("…")) : v;
+    }
+    if (v.isArray()) {
+        QJsonArray out;
+        const QJsonArray array = v.toArray();
+        for (const auto &item : array)
+            out.append(loggedValue(item));
+        return out;
+    }
+    if (v.isObject()) {
+        QJsonObject out;
+        const QJsonObject o = v.toObject();
+        for (auto it = o.constBegin(); it != o.constEnd(); ++it)
+            out.insert(it.key(), loggedValue(it.value()));
+        return out;
+    }
+    return v;
+}
+
+// What the step was given (the body minus its id), as the log keeps it.
+// Never what goes into a password field.
+QJsonObject loggedArgs(const QJsonObject &body, const QWidget *target)
+{
+    QJsonObject args;
+    const auto *edit = qobject_cast<const QLineEdit *>(target);
+    const bool secret = edit && edit->echoMode() != QLineEdit::Normal;
+    for (auto it = body.constBegin(); it != body.constEnd(); ++it) {
+        if (it.key() == QLatin1String("id"))
+            continue;
+        const bool typed = it.key() == QLatin1String("text") || it.key() == QLatin1String("value");
+        args.insert(it.key(), secret && typed ? QJsonValue(QStringLiteral("••••")) : loggedValue(it.value()));
+    }
+    return args;
+}
+
+} // namespace
 
 void ControlApi::uiCommand(const QJsonObject &body, const Reply &reply, const QString &op, bool needsTarget,
                            const std::function<QString(const ui::Target &)> &fn)
@@ -594,7 +659,7 @@ void ControlApi::uiCommand(const QJsonObject &body, const Reply &reply, const QS
         }
         const QString blocked = ui::blockedReason(target, op);
         if (!blocked.isEmpty()) {
-            logAction(op, id, ui::labelOf(target.widget), false, blocked);
+            logAction(op, id, ui::labelOf(target.widget), false, blocked, loggedArgs(body, target.widget));
             reply.error(409, blocked);
             return;
         }
@@ -606,20 +671,9 @@ void ControlApi::uiCommand(const QJsonObject &body, const Reply &reply, const QS
     QString label = target.widget ? ui::labelOf(target.widget) : QString();
     if (!target.part.isEmpty())
         label += QStringLiteral(" @ ") + target.part;
-    QString detail;
-    if (body.contains(QStringLiteral("text")) || body.contains(QStringLiteral("value"))) {
-        const QJsonValue v = body.contains(QStringLiteral("text")) ? body.value(QStringLiteral("text"))
-                                                                    : body.value(QStringLiteral("value"));
-        auto *edit = target.widget ? qobject_cast<QLineEdit *>(target.widget) : nullptr;
-        // Never echo what goes into a password field.
-        detail = edit && edit->echoMode() != QLineEdit::Normal ? QStringLiteral("••••")
-                                                               : v.toVariant().toString().left(120);
-    } else if (body.contains(QStringLiteral("keys"))) {
-        detail = body.value(QStringLiteral("keys")).toVariant().toString();
-    }
     if (target.widget)
         m_feedback->flash(target.widget, ui::targetRect(target));
-    logAction(op, id, detail.isEmpty() ? label : label + QStringLiteral(" ← ") + detail);
+    logAction(op, id, label, true, QString(), loggedArgs(body, target.widget));
 
     QPointer<QWidget> widget = target.widget;
     const QString part = target.part;
@@ -714,7 +768,7 @@ void ControlApi::registerUiRoutes()
         const QJsonValue keys = body.value(QStringLiteral("keys"));
         if (keys.isArray()) {
             const QJsonArray array = keys.toArray();
-            for (const QJsonValue &k : array)
+            for (const auto &k : array)
                 sequences.append(k.toString());
         } else {
             sequences.append(keys.toString());
@@ -770,7 +824,7 @@ bool shownTextContains(const QJsonValue &v, const QString &needle, const QString
         return key != QLatin1String("id") && key != QLatin1String("key") && v.toString().contains(needle);
     if (v.isArray()) {
         const QJsonArray a = v.toArray();
-        for (const QJsonValue &e : a) {
+        for (const auto &e : a) {
             if (shownTextContains(e, needle, key))
                 return true;
         }
@@ -824,6 +878,7 @@ bool eventMatches(const QString &pattern, const QJsonObject &match, const QStrin
     return true;
 }
 
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization): a QStringList table cannot have noexcept dynamic init.
 const QStringList kStates{QStringLiteral("exists"),  QStringLiteral("gone"),     QStringLiteral("visible"),
                           QStringLiteral("hidden"),  QStringLiteral("enabled"),  QStringLiteral("disabled"),
                           QStringLiteral("idle"),    QStringLiteral("waitingForUser")};
@@ -839,7 +894,8 @@ void ControlApi::registerEventRoutes()
         const QString id = body.value(QStringLiteral("id")).toString();
         QStringList states;
         if (const QJsonValue sv = body.value(QStringLiteral("state")); sv.isArray()) {
-            for (const QJsonValue &v : sv.toArray())
+            const QJsonArray list = sv.toArray();
+            for (const auto &v : list)
                 states.append(v.toString());
         } else if (!sv.toString().isEmpty()) {
             states.append(sv.toString());
