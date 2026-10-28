@@ -52,9 +52,14 @@ public:
     // How extraction treats files that already exist. Ask shows the conflict
     // dialog (the tree's Zip > Upload); the others answer it for a caller that
     // already knows (the Control API). Refuse cancels and keeps the paths in
-    // lastConflicts(). Applies to the next upload only, then resets to Ask.
+    // lastConflicts(). Applies to the next upload only, then resets to Ask; a
+    // caller whose upload fails before extraction must reset it to Ask itself.
     enum class ConflictPolicy : std::uint8_t { Ask, Overwrite, Skip, Refuse };
-    void setConflictPolicy(ConflictPolicy policy) { m_conflictPolicy = policy; }
+    void setConflictPolicy(ConflictPolicy policy)
+    {
+        m_conflictPolicy = policy;
+        m_lastConflicts.clear();
+    }
     QStringList lastConflicts() const { return m_lastConflicts; }
     void setRemoteBackend(remote::RemoteFsBackend *backend);
     void reportZipProgress(int current, int total, const QString &currentFile);

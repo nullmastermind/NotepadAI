@@ -284,7 +284,7 @@ QJsonObject sessionJson(AiAgentDock *dock, const QString &sessionId, bool detail
 QVector<GrillMeForm::Answer> answersArg(const QJsonArray &array)
 {
     QVector<GrillMeForm::Answer> answers;
-    for (const QJsonValue &v : array) {
+    for (const auto &v : array) {
         const QJsonObject o = v.toObject();
         GrillMeForm::Answer a;
         a.questionId = o.value(QStringLiteral("id")).toString();
@@ -418,8 +418,11 @@ QJsonArray templatesJson(const GoalAgentSettings &s)
     return templates;
 }
 
-const Arg kSession = Registrar::optional(QStringLiteral("session"), ArgType::String,
-                                         QStringLiteral("session id from ai.sessions; default: the session in front"));
+Arg sessionArgSpec()
+{
+    return Registrar::optional(QStringLiteral("session"), ArgType::String,
+                               QStringLiteral("session id from ai.sessions; default: the session in front"));
+}
 
 } // namespace
 
@@ -574,7 +577,7 @@ void Registrar::ai()
     add(QStringLiteral("ai.state"),
         QStringLiteral("Read a session's state: working, waiting for an answer (permission / form), models, modes, "
                        "queue"),
-        false, {kSession}, [sessionArg, idOf](const CommandContext &ctx) {
+        false, {sessionArgSpec()}, [sessionArg, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
             if (!view)
@@ -586,7 +589,7 @@ void Registrar::ai()
     add(QStringLiteral("ai.debugLog"),
         QStringLiteral("Read a session's debug log, as its Debug log window shows it (agent env values are hidden)"),
         false,
-        {kSession, optional(QStringLiteral("last"), ArgType::Int, QStringLiteral("the last this many lines; default 200")),
+        {sessionArgSpec(), optional(QStringLiteral("last"), ArgType::Int, QStringLiteral("the last this many lines; default 200")),
          optional(QStringLiteral("goalOnly"), ArgType::Bool, QStringLiteral("only the goal agent's lines"))},
         [sessionArg](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
@@ -615,7 +618,7 @@ void Registrar::ai()
         });
 
     add(QStringLiteral("ai.read"), QStringLiteral("Read a session's transcript: prompts, replies and tool calls"), false,
-        {kSession, optional(QStringLiteral("last"), ArgType::Int, QStringLiteral("the last this many entries; default 30")),
+        {sessionArgSpec(), optional(QStringLiteral("last"), ArgType::Int, QStringLiteral("the last this many entries; default 30")),
          optional(QStringLiteral("from"), ArgType::Int, QStringLiteral("instead: entries from this index")),
          optional(QStringLiteral("count"), ArgType::Int, QStringLiteral("with `from`: how many; default 30")),
          optional(QStringLiteral("thoughts"), ArgType::Bool, QStringLiteral("include the agent's thinking; default false"))},
@@ -684,7 +687,7 @@ void Registrar::ai()
         });
 
     add(QStringLiteral("ai.report"), QStringLiteral("Read the final answer of a session's last finished turn"), false,
-        {kSession}, [sessionArg, idOf](const CommandContext &ctx) {
+        {sessionArgSpec()}, [sessionArg, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
             if (!view)
@@ -708,7 +711,7 @@ void Registrar::ai()
     add(QStringLiteral("ai.send"),
         QStringLiteral("Send a prompt from a session's composer (queued behind a running turn; slash commands work)"),
         true,
-        {kSession, required(QStringLiteral("text"), ArgType::String, QStringLiteral("the prompt")),
+        {sessionArgSpec(), required(QStringLiteral("text"), ArgType::String, QStringLiteral("the prompt")),
          optional(QStringLiteral("images"), ArgType::Array,
                   QStringLiteral("images to attach: [{path} (png/jpg/gif/webp; relative to the session folder) or "
                                  "{data: base64, mime: \"image/png\"}]")),
@@ -758,7 +761,7 @@ void Registrar::ai()
 
     add(QStringLiteral("ai.draft"),
         QStringLiteral("Put text into a session's composer without sending it (what Send to AI does)"), true,
-        {kSession, required(QStringLiteral("text"), ArgType::String, QStringLiteral("text to put in")),
+        {sessionArgSpec(), required(QStringLiteral("text"), ArgType::String, QStringLiteral("text to put in")),
          optional(QStringLiteral("append"), ArgType::Bool,
                   QStringLiteral("insert at the composer's caret (default true); false replaces the composer text"))},
         [sessionArg, showSession, idOf](const CommandContext &ctx) {
@@ -778,7 +781,7 @@ void Registrar::ai()
         QStringLiteral("Rewrite the composer's prompt with AI (the composer's Improve button) and leave the result "
                        "there"),
         true,
-        {kSession, optional(QStringLiteral("text"), ArgType::String,
+        {sessionArgSpec(), optional(QStringLiteral("text"), ArgType::String,
                             QStringLiteral("put this in the composer first; default: what it holds"))},
         [sessionArg, showSession, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
@@ -817,7 +820,7 @@ void Registrar::ai()
         });
 
     add(QStringLiteral("ai.queue"), QStringLiteral("List the prompts queued behind a session's running turn"), false,
-        {kSession}, [sessionArg, idOf](const CommandContext &ctx) {
+        {sessionArgSpec()}, [sessionArg, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
             if (!view)
@@ -831,7 +834,7 @@ void Registrar::ai()
 
     add(QStringLiteral("ai.unqueue"),
         QStringLiteral("Remove a queued prompt before it is sent (the queue strip's remove button)"), true,
-        {kSession, required(QStringLiteral("index"), ArgType::Int, QStringLiteral("its index in ai.queue"))},
+        {sessionArgSpec(), required(QStringLiteral("index"), ArgType::Int, QStringLiteral("its index in ai.queue"))},
         [sessionArg, showSession, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
@@ -850,7 +853,7 @@ void Registrar::ai()
 
     add(QStringLiteral("ai.stopTask"),
         QStringLiteral("Stop one of a session's background tasks (ai.state lists them under tasks)"), true,
-        {kSession, required(QStringLiteral("taskId"), ArgType::String, QStringLiteral("task id from ai.state"))},
+        {sessionArgSpec(), required(QStringLiteral("taskId"), ArgType::String, QStringLiteral("task id from ai.state"))},
         [sessionArg, showSession, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
@@ -878,7 +881,7 @@ void Registrar::ai()
 
     add(QStringLiteral("ai.retry"),
         QStringLiteral("Restart a session whose agent exited (the chat's Retry); a running agent has nothing to retry"),
-        true, {kSession}, [w = w, sessionArg, showSession, idOf](const CommandContext &ctx) {
+        true, {sessionArgSpec()}, [w = w, sessionArg, showSession, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
             if (!view)
@@ -899,7 +902,7 @@ void Registrar::ai()
         });
 
     add(QStringLiteral("ai.cancel"), QStringLiteral("Stop a session's running turn (and a goal running on it)"), true,
-        {kSession}, [sessionArg, showSession, idOf](const CommandContext &ctx) {
+        {sessionArgSpec()}, [sessionArg, showSession, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
             if (!view)
@@ -912,7 +915,7 @@ void Registrar::ai()
 
     add(QStringLiteral("ai.set"), QStringLiteral("Pick a session's model, mode or reasoning effort (ai.state lists them)"),
         true,
-        {kSession, optional(QStringLiteral("model"), ArgType::String, QStringLiteral("model id")),
+        {sessionArgSpec(), optional(QStringLiteral("model"), ArgType::String, QStringLiteral("model id")),
          optional(QStringLiteral("mode"), ArgType::String, QStringLiteral("mode id")),
          optional(QStringLiteral("effort"), ArgType::String, QStringLiteral("effort id")),
          optional(QStringLiteral("prewalk"), ArgType::String,
@@ -965,7 +968,7 @@ void Registrar::ai()
 
     add(QStringLiteral("ai.autoApprove"),
         QStringLiteral("Turn auto-approve of agent tool permissions on or off (applies to every session)"), true,
-        {required(QStringLiteral("on"), ArgType::Bool, QStringLiteral("true: agents run tools without asking")), kSession},
+        {required(QStringLiteral("on"), ArgType::Bool, QStringLiteral("true: agents run tools without asking")), sessionArgSpec()},
         [sessionArg, showSession, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
@@ -978,7 +981,7 @@ void Registrar::ai()
 
     add(QStringLiteral("ai.permission"),
         QStringLiteral("Answer the permission request a session is waiting on (ai.state shows its options)"), true,
-        {kSession, required(QStringLiteral("option"), ArgType::String,
+        {sessionArgSpec(), required(QStringLiteral("option"), ArgType::String,
                             QStringLiteral("option id or kind: allow_once, allow_always, reject_once, ..."))},
         [sessionArg, showSession, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
@@ -1005,7 +1008,7 @@ void Registrar::ai()
 
     add(QStringLiteral("ai.answer"),
         QStringLiteral("Answer the question form a session shows (ai.state has its questions) and submit it"), true,
-        {kSession,
+        {sessionArgSpec(),
          required(QStringLiteral("answers"), ArgType::Array,
                   QStringLiteral("[{id, value, other?, note?, clarify?}]: value is an option value (single/select), an "
                                  "array of them (multi), \"accept\"/\"change\" (proposal, a change in `other`), "
@@ -1034,7 +1037,7 @@ void Registrar::ai()
         });
 
     add(QStringLiteral("ai.dismissForm"), QStringLiteral("Dismiss the question form a session shows"), true,
-        {kSession, optional(QStringLiteral("note"), ArgType::String, QStringLiteral("a note for the agent"))},
+        {sessionArgSpec(), optional(QStringLiteral("note"), ArgType::String, QStringLiteral("a note for the agent"))},
         [sessionArg, showSession, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
@@ -1049,7 +1052,7 @@ void Registrar::ai()
             ctx.ok(sessionJson(dock, id, false));
         });
 
-    add(QStringLiteral("ai.focus"), QStringLiteral("Bring a session to the front"), true, {kSession},
+    add(QStringLiteral("ai.focus"), QStringLiteral("Bring a session to the front"), true, {sessionArgSpec()},
         [sessionArg, showSession, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
@@ -1061,7 +1064,7 @@ void Registrar::ai()
         });
 
     add(QStringLiteral("ai.close"), QStringLiteral("Close a session (its agent stops; history is kept)"), true,
-        {kSession, optional(QStringLiteral("force"), ArgType::Bool, QStringLiteral("close even while it works"))},
+        {sessionArgSpec(), optional(QStringLiteral("force"), ArgType::Bool, QStringLiteral("close even while it works"))},
         [w = w, sessionArg, idOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
@@ -1080,7 +1083,7 @@ void Registrar::ai()
 
     add(QStringLiteral("ai.restart"),
         QStringLiteral("Restart a session's agent with a fresh conversation in the same chat slot"), true,
-        {kSession, optional(QStringLiteral("force"), ArgType::Bool, QStringLiteral("restart even while it works"))},
+        {sessionArgSpec(), optional(QStringLiteral("force"), ArgType::Bool, QStringLiteral("restart even while it works"))},
         [w = w, sessionArg, idOf, showSession](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
@@ -1104,7 +1107,7 @@ void Registrar::ai()
     add(QStringLiteral("ai.switchAgent"),
         QStringLiteral("Move an idle local Claude Code session to another Claude Code agent, keeping the conversation"),
         true,
-        {kSession, required(QStringLiteral("agent"), ArgType::String, QStringLiteral("target agent id from ai.agents"))},
+        {sessionArgSpec(), required(QStringLiteral("agent"), ArgType::String, QStringLiteral("target agent id from ai.agents"))},
         [w = w, sessionArg, idOf, showSession](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             AcpSessionView *view = sessionArg(ctx, &dock);
@@ -1623,7 +1626,7 @@ void Registrar::goal()
         QStringLiteral("Run a goal on a session: send a prompt (or keep going in the conversation) until each success "
                        "criterion is met"),
         true,
-        {kSession,
+        {sessionArgSpec(),
          required(QStringLiteral("criteria"), ArgType::Array, QStringLiteral("success criteria, checked in order")),
          optional(QStringLiteral("prompt"), ArgType::String,
                   QStringLiteral("first prompt; default: the composer text, else the goal attaches to the conversation")),
@@ -1677,7 +1680,7 @@ void Registrar::goal()
         });
 
     add(QStringLiteral("goal.state"), QStringLiteral("Read the goal running on a session: criteria, iterations, verdicts"),
-        false, {kSession}, [sessionOf](const CommandContext &ctx) {
+        false, {sessionArgSpec()}, [sessionOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             QString id;
             if (!sessionOf(ctx, &dock, &id))
@@ -1707,7 +1710,7 @@ void Registrar::goal()
         });
 
     add(QStringLiteral("goal.stop"), QStringLiteral("Stop the goal running on a session (the turn keeps going)"), true,
-        {kSession}, [sessionOf](const CommandContext &ctx) {
+        {sessionArgSpec()}, [sessionOf](const CommandContext &ctx) {
             AiAgentDock *dock = nullptr;
             QString id;
             if (!sessionOf(ctx, &dock, &id))
@@ -1727,7 +1730,7 @@ void Registrar::goal()
         QStringLiteral("Write a prompt from success criteria with the judge agent (Improve on an empty composer) and "
                        "put it in the session's composer"),
         true,
-        {kSession, required(QStringLiteral("criteria"), ArgType::Array, QStringLiteral("the success criteria")),
+        {sessionArgSpec(), required(QStringLiteral("criteria"), ArgType::Array, QStringLiteral("the success criteria")),
          optional(QStringLiteral("judgeAgent"), ArgType::String, QStringLiteral("agent that writes it; default from goal.options")),
          optional(QStringLiteral("template"), ArgType::String, QStringLiteral("prompt template id; default from goal.options"))},
         [w = w, sessionOf](const CommandContext &ctx) {

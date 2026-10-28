@@ -592,10 +592,17 @@ void ControlApi::execute(const Command &command, QJsonObject args, Respond respo
     if (command.changes) {
         const QJsonObject logged = loggedArgs(command, args);
         const QString label = stepLabel(command, args);
-        hooks.finished = [this, name = command.name, label, logged](bool ok, const QString &error) {
-            logAction(name, QString(), label, ok, error, logged);
+        // Async handlers can answer after this object is gone (an AI dock destroyed after
+        // MainWindow's children deleted ControlApi at shutdown), so never capture a raw this.
+        const QPointer<ControlApi> api(this);
+        hooks.finished = [api, name = command.name, label, logged](bool ok, const QString &error) {
+            if (api)
+                api->logAction(name, QString(), label, ok, error, logged);
         };
-        hooks.reveal = [this](QWidget *w) { reveal(w); };
+        hooks.reveal = [api](QWidget *w) {
+            if (api)
+                api->reveal(w);
+        };
         emit commandRan(label);
     }
     const CommandContext ctx(&command, std::move(args), std::move(hooks));

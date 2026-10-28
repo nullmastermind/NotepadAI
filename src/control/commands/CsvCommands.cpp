@@ -215,7 +215,8 @@ void Registrar::csv()
             const quint64 from = quint64(std::max<qint64>(0, ctx.integer(QStringLiteral("row"))));
             const qint64 count = std::clamp<qint64>(ctx.integer(QStringLiteral("count"), 100), 0, kCsvReadMax);
             QList<int> columns;
-            for (const QJsonValue &v : ctx.array(QStringLiteral("columns"))) {
+            const QJsonArray columnsJson = ctx.array(QStringLiteral("columns"));
+            for (const auto &v : columnsJson) {
                 const int c = v.toInt(-1);
                 if (c < 0 || c >= model->columnCount()) {
                     ctx.fail(400, QStringLiteral("there is no column %1 (%2 columns)").arg(c).arg(model->columnCount()));
@@ -280,7 +281,8 @@ void Registrar::csv()
             if (!csv || !csvReady(ctx, csv))
                 return;
             QList<quint64> rows;
-            for (const QJsonValue &v : ctx.array(QStringLiteral("rows"))) {
+            const QJsonArray rowsJson = ctx.array(QStringLiteral("rows"));
+            for (const auto &v : rowsJson) {
                 if (!v.isDouble() || v.toDouble() < 0) {
                     ctx.fail(400, QStringLiteral("rows must be 0-based row numbers"));
                     return;
@@ -312,7 +314,8 @@ void Registrar::csv()
             if (!csv || !csvReady(ctx, csv))
                 return;
             QList<int> cols;
-            for (const QJsonValue &v : ctx.array(QStringLiteral("columns"))) {
+            const QJsonArray columnsJson = ctx.array(QStringLiteral("columns"));
+            for (const auto &v : columnsJson) {
                 if (!v.isDouble() || v.toInt(-1) < 0) {
                     ctx.fail(400, QStringLiteral("columns must be 0-based column numbers"));
                     return;
@@ -341,7 +344,8 @@ void Registrar::csv()
             if (!csv || !csvReady(ctx, csv))
                 return;
             QList<QPair<quint64, int>> cells;
-            for (const QJsonValue &v : ctx.array(QStringLiteral("cells"))) {
+            const QJsonArray cellsJson = ctx.array(QStringLiteral("cells"));
+            for (const auto &v : cellsJson) {
                 const QJsonObject o = v.toObject();
                 const qint64 row = qint64(o.value(QStringLiteral("row")).toDouble(-1));
                 const int col = o.value(QStringLiteral("column")).toInt(-1);

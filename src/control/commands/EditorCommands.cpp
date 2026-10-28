@@ -269,7 +269,8 @@ void Registrar::tabs()
         [w = w](const CommandContext &ctx) {
             QList<ads::CDockWidget *> targets;
             if (ctx.has(QStringLiteral("tabs"))) {
-                for (const QJsonValue &v : ctx.array(QStringLiteral("tabs"))) {
+                const QJsonArray tabsJson = ctx.array(QStringLiteral("tabs"));
+                for (const auto &v : tabsJson) {
                     ads::CDockWidget *dock = tabById(w, v.toInt());
                     if (!dock) {
                         ctx.fail(404, QStringLiteral("no tab %1; tabs.list lists them").arg(v.toInt()));
@@ -847,7 +848,9 @@ void Registrar::editor()
                 ctx.fail(400, QStringLiteral("lines %1-%2 are outside the document (lines 1-%3)").arg(first).arg(last).arg(lines));
                 return;
             }
-            const qint64 maxChars = std::max<qint64>(1, ctx.integer(QStringLiteral("maxChars"), 200000));
+            // A document never holds more characters than bytes; the cap keeps maxChars * 4 from overflowing.
+            const qint64 maxChars = std::clamp<qint64>(ctx.integer(QStringLiteral("maxChars"), 200000), 1,
+                                                       std::max<qint64>(1, e->length()));
             const sptr_t start = e->positionFromLine(first - 1);
             // Bytes >= characters, so reading maxChars*4 bytes is always enough.
             const sptr_t lastEnd = last == lines ? e->length() : e->positionFromLine(last);

@@ -170,9 +170,10 @@ void storeProfileSecret(const CommandContext &ctx, ai::CredentialStore *store, c
         store->storeSecret(remote::sshSecretKey(p.id, kind), secret);
 }
 
-// Answers once a transfer manager's queue reports its outcome.
+// Answers once a transfer manager's queue reports its outcome. Returns the guard that
+// lives until then, so per-command handlers can die with it.
 template <typename Manager>
-void answerWhenTransferred(const CommandContext &ctx, Manager *manager, const std::function<QJsonObject()> &extra = {})
+QObject *answerWhenTransferred(const CommandContext &ctx, Manager *manager, const std::function<QJsonObject()> &extra = {})
 {
     auto done = std::make_shared<bool>(false);
     auto *guard = new QObject(manager);
@@ -198,12 +199,16 @@ void answerWhenTransferred(const CommandContext &ctx, Manager *manager, const st
     QTimer::singleShot(kTransferTimeoutMs, guard, [ctx, finish] {
         finish([&] { ctx.fail(504, QStringLiteral("the transfer is still running after an hour")); });
     });
+    return guard;
 }
 
-const Arg kConflicts = Registrar::oneOf(
-    QStringLiteral("conflicts"), {QStringLiteral("overwrite"), QStringLiteral("skip")},
-    QStringLiteral("what to do with files that already exist there: overwrite or skip; without it, existing files "
-                   "refuse the transfer (409) and are listed"));
+Arg conflictsArgSpec()
+{
+    return Registrar::oneOf(
+        QStringLiteral("conflicts"), {QStringLiteral("overwrite"), QStringLiteral("skip")},
+        QStringLiteral("what to do with files that already exist there: overwrite or skip; without it, existing files "
+                       "refuse the transfer (409) and are listed"));
+}
 
 } // namespace
 
@@ -554,7 +559,7 @@ void Registrar::transfer()
          optional(QStringLiteral("folder"), ArgType::String, QStringLiteral("instead: a local folder to upload (with its contents)")),
          required(QStringLiteral("into"), ArgType::String,
                   QStringLiteral("remote folder (absolute, ssh://, or relative to the workspace root)")),
-         kConflicts},
+         conflictsArgSpec()},
         [w = w](const CommandContext &ctx) {
             FolderAsWorkspaceDock *dock = workspaceArg(ctx, w);
             if (!dock)
@@ -591,10 +596,13 @@ void Registrar::transfer()
                 ctx.fail(404, QStringLiteral("no local folder %1").arg(localFolder));
                 return;
             }
+            QObject *guard =
+                answerWhenTransferred(ctx, tx, [into] { return QJsonObject{{QStringLiteral("into"), into.uri}}; });
             if (conflicts != QLatin1String("overwrite")) {
-                // Detection runs first; answer its question here instead of the dialog.
+                // Detection runs first; answer its question here instead of the dialog. The handler
+                // dies with this command's guard: one left on tx would answer a later upload's conflicts.
                 QPointer<remote::RemoteTransferManager> mgr(tx);
-                QObject::connect(tx, &remote::RemoteTransferManager::uploadConflictsDetected, tx,
+                QObject::connect(tx, &remote::RemoteTransferManager::uploadConflictsDetected, guard,
                                  [ctx, mgr, conflicts](const QStringList &paths, const QString &, const QStringList &) {
                                      if (!mgr)
                                          return;
@@ -613,7 +621,6 @@ void Registrar::transfer()
                                  },
                                  Qt::SingleShotConnection);
             }
-            answerWhenTransferred(ctx, tx, [into] { return QJsonObject{{QStringLiteral("into"), into.uri}}; });
             ctx.reveal(dock);
             const bool overwrite = conflicts == QLatin1String("overwrite");
             if (folder)
@@ -652,7 +659,7 @@ void Registrar::transfer()
         QStringLiteral("Extract a local .zip into a workspace folder (the tree's Zip > Upload > From file)"), true,
         {workspaceArgSpec(), required(QStringLiteral("zip"), ArgType::String, QStringLiteral("the .zip file (local)")),
          optional(QStringLiteral("into"), ArgType::String, QStringLiteral("folder in the workspace; default its root")),
-         kConflicts},
+         conflictsArgSpec()},
         [w = w](const CommandContext &ctx) {
             FolderAsWorkspaceDock *dock = workspaceArg(ctx, w);
             if (!dock)
@@ -677,16 +684,22 @@ void Registrar::transfer()
             QPointer<FolderZipTransfer> z(zip);
             auto *guard = new QObject(zip);
             // Refused conflicts arrive as a cancel: answer with what to pass.
-            QObject::connect(zip, &FolderZipTransfer::transferCancelled, guard, [ctx, z, guard] {
+            // A policy left set (the upload failed before extraction) would answer the user's next upload.
+            auto release = [z, guard] {
                 guard->deleteLater();
+                if (z)
+                    z->setConflictPolicy(FolderZipTransfer::ConflictPolicy::Ask);
+            };
+            QObject::connect(zip, &FolderZipTransfer::transferCancelled, guard, [ctx, z, release] {
                 if (z && !z->lastConflicts().isEmpty())
                     ctx.fail(409, QStringLiteral("%1 file(s) already exist there; pass conflicts: \"overwrite\" or \"skip\"")
                                       .arg(z->lastConflicts().size()),
                              {{QStringLiteral("needs"), QStringLiteral("conflicts")},
                               {QStringLiteral("existing"), QJsonArray::fromStringList(z->lastConflicts())}});
+                release();
             });
-            QObject::connect(zip, &FolderZipTransfer::transferCompleted, guard, [guard](int) { guard->deleteLater(); });
-            QObject::connect(zip, &FolderZipTransfer::transferError, guard, [guard](const QString &) { guard->deleteLater(); });
+            QObject::connect(zip, &FolderZipTransfer::transferCompleted, guard, [release](int) { release(); });
+            QObject::connect(zip, &FolderZipTransfer::transferError, guard, [release](const QString &) { release(); });
             answerWhenTransferred(ctx, zip, [into] { return QJsonObject{{QStringLiteral("into"), into.uri}}; });
             ctx.reveal(dock);
             if (dock->sshWorkspaceUri().isEmpty())
@@ -739,7 +752,7 @@ void Registrar::transfer()
         true,
         {workspaceArgSpec(), required(QStringLiteral("code"), ArgType::String, QStringLiteral("the croc code-phrase")),
          optional(QStringLiteral("into"), ArgType::String, QStringLiteral("folder in the workspace; default its root")),
-         kConflicts},
+         conflictsArgSpec()},
         [w = w](const CommandContext &ctx) {
             FolderAsWorkspaceDock *dock = workspaceArg(ctx, w);
             if (!dock)
@@ -760,19 +773,25 @@ void Registrar::transfer()
             flow->setQuiet(true);
             auto done = std::make_shared<bool>(false);
             QPointer<FolderZipTransfer> z(zip);
-            QObject::connect(flow, &CrocShareFlow::finished, w, [ctx, done, into] {
+            QObject::connect(flow, &CrocShareFlow::finished, w, [ctx, done, into, z] {
                 if (std::exchange(*done, true))
                     return;
+                if (z)
+                    z->setConflictPolicy(FolderZipTransfer::ConflictPolicy::Ask);
                 ctx.ok({{QStringLiteral("into"), into.uri}});
             });
+            // A receive that fails before extraction leaves the policy set; reset it for the user's next upload.
             QObject::connect(flow, &CrocShareFlow::failed, w, [ctx, done, z](const QString &message) {
                 if (std::exchange(*done, true))
                     return;
-                if (z && !z->lastConflicts().isEmpty()) {
+                const QStringList existing = z ? z->lastConflicts() : QStringList();
+                if (z)
+                    z->setConflictPolicy(FolderZipTransfer::ConflictPolicy::Ask);
+                if (!existing.isEmpty()) {
                     ctx.fail(409, QStringLiteral("%1 file(s) already exist there; pass conflicts: \"overwrite\" or \"skip\"")
-                                      .arg(z->lastConflicts().size()),
+                                      .arg(existing.size()),
                              {{QStringLiteral("needs"), QStringLiteral("conflicts")},
-                              {QStringLiteral("existing"), QJsonArray::fromStringList(z->lastConflicts())}});
+                              {QStringLiteral("existing"), QJsonArray::fromStringList(existing)}});
                     return;
                 }
                 ctx.fail(422, message);

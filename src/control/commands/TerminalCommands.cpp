@@ -134,8 +134,6 @@ void typeText(TerminalWidget *t, const QString &text)
     QApplication::sendEvent(t, &ev);
 }
 
-const Arg kWorkspace = Registrar::workspaceArgSpec();
-
 } // namespace
 
 void Registrar::terminal()
@@ -154,7 +152,7 @@ void Registrar::terminal()
         QStringLiteral("Open a terminal tab (over SSH in an SSH workspace), optionally typing a command into it"), true,
         {optional(QStringLiteral("cwd"), ArgType::String,
                   QStringLiteral("folder; relative to the workspace root; default the workspace root (else home)")),
-         kWorkspace,
+         Registrar::workspaceArgSpec(),
          optional(QStringLiteral("command"), ArgType::String,
                   QStringLiteral("typed at the prompt and run (Enter); for a command whose exit code you want, use "
                                  "terminal.run"))},
@@ -188,7 +186,7 @@ void Registrar::terminal()
          optional(QStringLiteral("name"), ArgType::String, QStringLiteral("tab name; default the command")),
          optional(QStringLiteral("cwd"), ArgType::String,
                   QStringLiteral("folder; relative to the workspace root; default the workspace root")),
-         kWorkspace},
+         Registrar::workspaceArgSpec()},
         [w = w](const CommandContext &ctx) {
             remote::ExecutionContext *context = nullptr;
             QString cwd;
@@ -428,7 +426,7 @@ void Registrar::terminal()
         return TerminalTaskRegistry::normalizeWorkspacePath(dock->rootPath());
     };
 
-    add(QStringLiteral("tasks.list"), QStringLiteral("List a workspace's saved tasks (Terminal > Tasks)"), false, {kWorkspace},
+    add(QStringLiteral("tasks.list"), QStringLiteral("List a workspace's saved tasks (Terminal > Tasks)"), false, {Registrar::workspaceArgSpec()},
         [w = w, tasksRoot](const CommandContext &ctx) {
             const QString root = tasksRoot(ctx, w);
             if (root.isEmpty())
@@ -447,7 +445,7 @@ void Registrar::terminal()
         });
 
     add(QStringLiteral("tasks.run"), QStringLiteral("Run a saved task in its own terminal tab"), true,
-        {required(QStringLiteral("name"), ArgType::String, QStringLiteral("task name from tasks.list")), kWorkspace},
+        {required(QStringLiteral("name"), ArgType::String, QStringLiteral("task name from tasks.list")), Registrar::workspaceArgSpec()},
         [w = w, tasksRoot](const CommandContext &ctx) {
             const QString root = tasksRoot(ctx, w);
             if (root.isEmpty())
@@ -473,13 +471,14 @@ void Registrar::terminal()
     Arg tasksArg = required(QStringLiteral("tasks"), ArgType::Array,
                             QStringLiteral("[{name, command, cwd?, env?}] (env: KEY=VALUE lines); replaces the list"));
     tasksArg.secret = true; // env may hold secrets
-    add(QStringLiteral("tasks.set"), QStringLiteral("Replace a workspace's saved tasks"), true, {tasksArg, kWorkspace},
+    add(QStringLiteral("tasks.set"), QStringLiteral("Replace a workspace's saved tasks"), true, {tasksArg, Registrar::workspaceArgSpec()},
         [w = w, tasksRoot](const CommandContext &ctx) {
             const QString root = tasksRoot(ctx, w);
             if (root.isEmpty())
                 return;
             QList<TerminalTask> tasks;
-            for (const QJsonValue &v : ctx.array(QStringLiteral("tasks"))) {
+            const QJsonArray tasksJson = ctx.array(QStringLiteral("tasks"));
+            for (const auto &v : tasksJson) {
                 const QJsonObject o = v.toObject();
                 TerminalTask task;
                 task.name = o.value(QStringLiteral("name")).toString().trimmed();

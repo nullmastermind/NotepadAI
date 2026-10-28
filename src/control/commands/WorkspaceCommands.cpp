@@ -208,7 +208,7 @@ void Registrar::workspace()
             // Answer from the index once it is built (a large repo takes a moment).
             auto *wait = new QObject(w);
             QObject::connect(w->m_fileIndexEnumerator, &WorkspaceFileEnumerator::indexReady, wait,
-                             [ctx, rootKey, query, limit, wait](const QString &key, std::shared_ptr<const FileIndexCache> snapshot) {
+                             [ctx, rootKey, query, limit, wait](const QString &key, const std::shared_ptr<const FileIndexCache> &snapshot) {
                                  if (key != rootKey)
                                      return;
                                  wait->deleteLater();

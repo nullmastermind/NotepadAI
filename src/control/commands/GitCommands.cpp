@@ -1209,7 +1209,7 @@ void Registrar::git()
             static const QRegularExpression hex(QStringLiteral("^[0-9a-fA-F]{4,64}$"));
             QByteArray todoText;
             const QJsonArray todo = ctx.array(QStringLiteral("todo"));
-            for (const QJsonValue &v : todo) {
+            for (const auto &v : todo) {
                 const QJsonObject item = v.toObject();
                 const QString action = item.value(QStringLiteral("action")).toString(QStringLiteral("pick"));
                 const QString sha = item.value(QStringLiteral("sha")).toString().trimmed();

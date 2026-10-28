@@ -2737,7 +2737,7 @@ void AcpSessionView::onCurrentModeChanged(const QString &modeId)
 
 void AcpSessionView::onIsProcessingChanged(bool processing)
 {
-    if (control::events::wanted())
+    if (m_model && control::events::wanted())
         control::events::publish(processing ? QStringLiteral("chat.turnStarted") : QStringLiteral("chat.turnEnded"),
                                  {{QStringLiteral("session"), sessionModel()->sessionId()}});
     if (m_sendBtn)
@@ -2950,7 +2950,7 @@ void AcpSessionView::refreshWaiting()
     if (waiting == m_lastWaiting)
         return;
     m_lastWaiting = waiting;
-    if (control::events::wanted())
+    if (m_model && control::events::wanted())
         control::events::publish(QStringLiteral("chat.waitingForUser"),
                                  {{QStringLiteral("session"), sessionModel()->sessionId()},
                                   {QStringLiteral("waiting"), waiting}});
