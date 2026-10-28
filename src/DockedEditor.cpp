@@ -22,6 +22,8 @@
 #include "DockBottomToolTab.h"
 #include "DockAreaTabBar.h"
 #include "DockAreaWidget.h"
+#include "DockContainerWidget.h"
+#include "DockManager.h"
 #include "DockWidgetTab.h"
 #include "DockComponentsFactory.h"
 #include "DockedEditorTitleBar.h"
@@ -168,6 +170,20 @@ int DockedEditor::count() const
     return total;
 }
 
+QList<ads::CDockWidget *> DockedEditor::allTabs() const
+{
+    QList<ads::CDockWidget *> tabs;
+    for (const ads::CDockContainerWidget *container : dockManager->dockContainers()) {
+        for (int i = 0; i < container->dockAreaCount(); ++i) {
+            for (ads::CDockWidget *dw : container->dockArea(i)->dockWidgets()) {
+                if (!dw->isClosed())
+                    tabs.append(dw);
+            }
+        }
+    }
+    return tabs;
+}
+
 int DockedEditor::totalTabCount() const
 {
     // Content tabs only: editors + nn_previewTab (preview/browser/mini-app).
@@ -275,9 +291,6 @@ void DockedEditor::addEditor(ScintillaNext *editor)
     // We need a unique object name. Can't use the name or file path so use a uuid
     dockWidget->setObjectName(QUuid::createUuid().toString());
 
-    // The Control API addresses it as dock:<uuid>/editor.
-    if (editor->objectName().isEmpty())
-        editor->setObjectName(QStringLiteral("editor"));
     dockWidget->setWidget(editor);
     dockWidget->setFeature(ads::CDockWidget::DockWidgetFeature::DockWidgetDeleteOnClose, true);
     dockWidget->setFeature(ads::CDockWidget::DockWidgetFeature::CustomCloseHandling, true);

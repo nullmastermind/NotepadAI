@@ -26,6 +26,13 @@ public:
     HexPreviewWidget(const QString &typeId, const QString &displayName, QWidget *parent = nullptr);
     ~HexPreviewWidget() override;
 
+    // --- Control API (docs/adr/0007) ---
+    // The bytes the tab shows (its file, read page by page; never held open).
+    qint64 byteSize() const;
+    // Selects [offset, offset + length) and scrolls there, as a find hit or
+    // Go to does; loads the view first if the tab was never shown.
+    void selectRange(qint64 offset, qint64 length);
+
 protected:
     void startLoad(bool reload) override;
 

@@ -25,7 +25,6 @@
 #include <functional>
 
 #include "AcpAgentRegistry.h"
-#include "control/ControlIds.h"
 #include "ApplicationSettings.h"
 #include "GoalAgentSettings.h"
 #include "GoalCustomApiFields.h"
@@ -388,14 +387,12 @@ void GoalConfigWidget::populatePresets()
         hl->setContentsMargins(6, 2, 4, 2);
         hl->setSpacing(4);
         auto *loadBtn = new QPushButton(label, row);
-        control::ids::setKey(loadBtn, QStringLiteral("preset:") + key); // key: name, or project:name
         loadBtn->setFlat(true);
         loadBtn->setCursor(Qt::PointingHandCursor);
         loadBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         loadBtn->setStyleSheet(QStringLiteral("QPushButton { text-align: left; padding: 2px 4px; }"));
         hl->addWidget(loadBtn);
         auto *delBtn = new QToolButton(row);
-        control::ids::setKey(delBtn, QStringLiteral("deletePreset:") + key);
         delBtn->setIcon(QIcon(QStringLiteral(":/icons/bin_closed.png")));
         delBtn->setAutoRaise(true);
         delBtn->setIconSize(QSize(14, 14));
@@ -469,9 +466,6 @@ void GoalConfigWidget::updateRowCount()
         QStringLiteral("%1 / %2 rows").arg(m_criteriaEdits.size()).arg(kMaxRows));
     m_addBtn->setEnabled(m_criteriaEdits.size() < kMaxRows);
     m_removeBtn->setEnabled(m_criteriaEdits.size() > 1);
-    // Rows are addressed by position, so they are renumbered after every change.
-    for (int i = 0; i < m_criteriaEdits.size(); ++i)
-        control::ids::setKey(m_criteriaEdits[i], QStringLiteral("criterion:%1").arg(i + 1));
 }
 
 void GoalConfigWidget::updateTemplateButtons()

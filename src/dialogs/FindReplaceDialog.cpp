@@ -682,6 +682,11 @@ int FindReplaceDialog::computeSearchFlags()
 
 int FindReplaceDialog::ensureMarkIndicator()
 {
+    return markIndicatorFor(editor);
+}
+
+int FindReplaceDialog::markIndicatorFor(ScintillaNext *editor)
+{
     int markIndicator = editor->allocateIndicator(QStringLiteral("find_mark_highlight"));
     editor->indicSetFore(markIndicator, 0xFFCC00);
     editor->indicSetStyle(markIndicator, INDIC_FULLBOX);

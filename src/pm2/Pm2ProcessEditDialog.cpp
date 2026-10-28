@@ -9,7 +9,6 @@
  */
 
 #include "Pm2ProcessEditDialog.h"
-#include "control/ControlPicker.h"
 
 #include "Pm2Protocol.h"
 
@@ -217,22 +216,23 @@ Pm2Definition Pm2ProcessEditDialog::definition() const
 
 bool Pm2ProcessEditDialog::needsRecreate() const
 {
-    if (!m_original)
-        return false;
-    const Pm2Definition def = definition();
-    return def.name != m_original->name || QDir::cleanPath(def.cwd) != QDir::cleanPath(m_original->cwd)
-        || !(def.options == m_original->options);
+    return m_original && needsRecreate(*m_original, definition());
 }
 
-void Pm2ProcessEditDialog::updateState()
+bool Pm2ProcessEditDialog::needsRecreate(const Pm2Definition &original, const Pm2Definition &def)
 {
-    const Pm2Definition def = definition();
+    return def.name != original.name || QDir::cleanPath(def.cwd) != QDir::cleanPath(original.cwd)
+        || !(def.options == original.options);
+}
+
+QString Pm2ProcessEditDialog::problemWith(const Pm2Definition &def, const QStringList &takenNames)
+{
     static const QRegularExpression memory(QStringLiteral("^\\d+[KMG]?$"));
 
-    QString problem = Pm2Protocol::validateName(def.name, m_takenNames);
+    QString problem = Pm2Protocol::validateName(def.name, takenNames);
     if (problem.isEmpty() && def.command.isEmpty())
         problem = tr("Enter the command to run.");
-    if (problem.isEmpty() && (m_cwd->text().trimmed().isEmpty() || !QFileInfo(def.cwd).isDir()))
+    if (problem.isEmpty() && (def.cwd.trimmed().isEmpty() || !QFileInfo(def.cwd).isDir()))
         problem = tr("Choose an existing working directory.");
     if (problem.isEmpty()) {
         // A line the .env parser would skip silently.
@@ -249,6 +249,16 @@ void Pm2ProcessEditDialog::updateState()
     if (problem.isEmpty() && !def.options.maxMemoryRestart.isEmpty()
         && !memory.match(def.options.maxMemoryRestart).hasMatch())
         problem = tr("Write the memory limit as a number with K, M or G, e.g. 512M.");
+    return problem;
+}
+
+void Pm2ProcessEditDialog::updateState()
+{
+    const Pm2Definition def = definition();
+    QString problem = problemWith(def, m_takenNames);
+    // definition() cleans an empty field to ".", which is a directory.
+    if (problem.isEmpty() && m_cwd->text().trimmed().isEmpty())
+        problem = tr("Choose an existing working directory.");
 
     // Untouched New form: no complaint yet, just a disabled button.
     const bool pristine = !m_original && m_name->text().isEmpty() && m_command->toPlainText().isEmpty();
@@ -260,7 +270,7 @@ void Pm2ProcessEditDialog::updateState()
 
 void Pm2ProcessEditDialog::browseCwd()
 {
-    const QString dir = control::picker::getExistingDirectory(this, tr("Working Directory"), m_cwd->text());
+    const QString dir = QFileDialog::getExistingDirectory(this, tr("Working Directory"), m_cwd->text());
     if (!dir.isEmpty())
         m_cwd->setText(QDir::toNativeSeparators(dir));
 }

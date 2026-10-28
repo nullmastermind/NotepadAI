@@ -10,7 +10,6 @@
 
 #include "ControlFeedback.h"
 
-#include "ControlIds.h"
 
 #include <QAction>
 #include <QApplication>
@@ -30,6 +29,17 @@ namespace {
 
 constexpr int kPad = 3;
 
+// The menu holding `menu` as a submenu, if any.
+QMenu *parentMenu(const QMenu *menu)
+{
+    const QList<QObject *> owners = menu->menuAction()->associatedObjects();
+    for (QObject *o : owners) {
+        if (auto *m = qobject_cast<QMenu *>(o))
+            return m;
+    }
+    return nullptr;
+}
+
 // One per window; hidden (zero cost) whenever no flash is fading.
 class FlashOverlay : public QWidget
 {
@@ -38,7 +48,6 @@ public:
         : QWidget(window)
     {
         setObjectName(QStringLiteral("qt_controlFlashOverlay"));
-        ids::setIgnored(this);
         setAttribute(Qt::WA_TransparentForMouseEvents);
         setAttribute(Qt::WA_NoSystemBackground);
         setAttribute(Qt::WA_TranslucentBackground);
@@ -174,7 +183,7 @@ void ControlFeedback::flashAction(QAction *action)
         auto *menu = qobject_cast<QMenu *>(o);
         if (!menu)
             continue;
-        while (QMenu *parent = ids::parentMenuOf(menu))
+        while (QMenu *parent = parentMenu(menu))
             menu = parent;
         const QList<QObject *> menuOwners = menu->menuAction()->associatedObjects();
         for (QObject *mo : menuOwners) {

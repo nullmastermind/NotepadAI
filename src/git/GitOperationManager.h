@@ -26,6 +26,7 @@
 #include <QHash>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 class GitController;
@@ -60,6 +61,14 @@ public:
     QString editorHelperPath() const;
     int editorServerPort() const;
     QString editorToken() const;
+
+    // Answers git's sequence / message editor without the dialog (the Control
+    // API's git.rebaseInteractive): while set, an editor request calls it with
+    // the file to edit instead of emitting interactiveRebaseRequested /
+    // commitMessageEditRequested, and git gets its result (true: saved).
+    using EditorScript = std::function<bool(const QString &filePath, bool isTodoFile)>;
+    void setEditorScript(EditorScript script) { m_editorScript = std::move(script); }
+    bool hasEditorScript() const { return bool(m_editorScript); }
 
 public slots:
     void startMerge(GitController *controller, const QString &branch,
@@ -124,6 +133,7 @@ private:
 
     QTcpServer *m_editorServer = nullptr;
     QTcpSocket *m_pendingEditorConn = nullptr;
+    EditorScript m_editorScript;
     QString m_editorToken;
     int m_editorPort = 0;
 };

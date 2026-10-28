@@ -96,7 +96,8 @@ public slots:
     void commit(const QString &message, bool amend, bool signoff, bool trackedOnly);
     void switchBranch(const QString &name, BranchSwitchPolicy policy);
     void createBranch(const QString &name, const QString &base, bool checkout, bool setUpstream = true);
-    void setUpstream(const QString &remoteBranch);
+    // `localBranch` empty: the current branch.
+    void setUpstream(const QString &remoteBranch, const QString &localBranch = QString());
     void configBranchTracking(const QString &branchName, const QString &remote);
     void fetch(const QString &remote = {});
     void pull(bool rebase);

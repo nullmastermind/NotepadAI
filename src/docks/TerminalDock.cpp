@@ -24,7 +24,7 @@
 #include "ApplicationSettings.h"
 
 #include "control/ControlEvents.h"
-#include "control/ControlIds.h"
+#include "control/ControlCommands.h"
 #include "remote/ExecutionContext.h"
 #include "remote/RemoteExecutionContext.h"
 
@@ -154,11 +154,12 @@ void TerminalDock::connectTerminal()
     connect(m_terminal, &TerminalWidget::clearRequested, this, &TerminalDock::clearTerminal);
     connect(m_terminal, &TerminalWidget::taskExited, this, [this](int code) {
         if (isTask() && m_taskReportsExit) {
+            m_taskExitCode = code;
             setTaskState(code == 0 ? TaskState::Succeeded : TaskState::Failed);
         }
         if (control::events::wanted())
             control::events::publish(QStringLiteral("terminal.taskExited"),
-                                     {{QStringLiteral("id"), control::ids::nodeId(m_terminal).id},
+                                     {{QStringLiteral("tab"), control::tabIdOf(hostDockWidget())},
                                       {QStringLiteral("exitCode"), code}});
     });
     connect(m_terminal, &TerminalWidget::bellRung, this, [this]() {
@@ -172,9 +173,10 @@ void TerminalDock::connectTerminal()
         setProcessStats({});
         if (control::events::wanted())
             control::events::publish(QStringLiteral("terminal.exited"),
-                                     {{QStringLiteral("id"), control::ids::nodeId(m_terminal).id},
+                                     {{QStringLiteral("tab"), control::tabIdOf(hostDockWidget())},
                                       {QStringLiteral("exitCode"), code}});
         if (m_taskState == TaskState::Running) {
+            m_taskExitCode = code;
             setTaskState(code == 0 ? TaskState::Succeeded : TaskState::Failed);
         }
     });
@@ -289,6 +291,8 @@ QString TerminalDock::tabToolTip() const
 void TerminalDock::setTaskState(TaskState state)
 {
     if (state == m_taskState) return;
+    if (state == TaskState::Running)
+        m_taskExitCode = -1;
     m_taskState = state;
     emit presentationChanged();
 }
@@ -374,22 +378,9 @@ void TerminalDock::clearTerminal()
 
 bool TerminalDock::confirmClose()
 {
-    if (m_terminal && m_terminal->isProcessRunning()) {
-        // A local shell idle at its prompt closes silently; only a running
-        // command (a child of the shell) is worth asking about. Remote shells
-        // cannot be inspected, and a running task may be pure shell work (a
-        // PowerShell cmdlet has no child process), so both always ask.
-        if (!m_remoteSession && m_taskState != TaskState::Running) {
-            QVector<TerminalProcessStats::ProcessSample> samples;
-            const auto shellPid = static_cast<quint32>(m_terminal->ptyPid());
-            if (TerminalProcessStats::enumerateProcesses(samples)
-                && !TerminalProcessStats::hasChildProcess(samples.constData(),
-                                                          static_cast<int>(samples.size()),
-                                                          shellPid)) {
-                m_terminal->killProcess();
-                return true;
-            }
-        }
+    if (!m_terminal || !m_terminal->isProcessRunning())
+        return true;
+    if (isBusy()) {
         QMessageBox::StandardButton answer = QMessageBox::question(
             this,
             tr("Close terminal?"),
@@ -398,9 +389,31 @@ bool TerminalDock::confirmClose()
             QMessageBox::No);
         if (answer != QMessageBox::Yes)
             return false;
-        m_terminal->killProcess();
     }
+    m_terminal->killProcess();
     return true;
+}
+
+bool TerminalDock::isBusy() const
+{
+    if (!m_terminal || !m_terminal->isProcessRunning())
+        return false;
+    // A local shell idle at its prompt closes silently; only a running
+    // command (a child of the shell) is worth asking about. Remote shells
+    // cannot be inspected, and a running task may be pure shell work (a
+    // PowerShell cmdlet has no child process), so both always count.
+    if (m_remoteSession || m_taskState == TaskState::Running)
+        return true;
+    QVector<TerminalProcessStats::ProcessSample> samples;
+    const auto shellPid = static_cast<quint32>(m_terminal->ptyPid());
+    return !TerminalProcessStats::enumerateProcesses(samples)
+        || TerminalProcessStats::hasChildProcess(samples.constData(), static_cast<int>(samples.size()), shellPid);
+}
+
+void TerminalDock::killProcess()
+{
+    if (m_terminal && m_terminal->isProcessRunning())
+        m_terminal->killProcess();
 }
 
 ads::CDockWidget *TerminalDock::hostDockWidget() const

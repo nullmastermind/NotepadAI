@@ -353,8 +353,28 @@ QList<FolderZipTransfer::ExtractItem> FolderZipTransfer::applyConflictDialog(
     bool *aborted)
 {
     *aborted = false;
+    const ConflictPolicy policy = m_conflictPolicy;
+    m_conflictPolicy = ConflictPolicy::Ask;
+    m_lastConflicts.clear();
     if (conflicts.isEmpty())
         return items;
+    if (policy == ConflictPolicy::Overwrite)
+        return items;
+    if (policy == ConflictPolicy::Refuse) {
+        m_lastConflicts = conflicts;
+        *aborted = true;
+        return {};
+    }
+    if (policy == ConflictPolicy::Skip) {
+        const QSet<QString> skip(conflicts.cbegin(), conflicts.cend());
+        QList<ExtractItem> kept;
+        kept.reserve(items.size());
+        for (const ExtractItem &it : items) {
+            if (!skip.contains(it.destRel))
+                kept.append(it);
+        }
+        return kept;
+    }
     TransferConflictDialog dlg(conflicts, dialogParent);
     if (dlg.exec() != QDialog::Accepted) {
         *aborted = true;

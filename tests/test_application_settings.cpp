@@ -44,6 +44,8 @@ private slots:
     void commitMessageApiFormat_persistsAcrossInstances();
     void commitMessageApiFormat_changingFormatLeavesUrlAndModel();
 
+    void everySettingIsInTheMetaObject();
+
 private:
     QTemporaryDir tempDir;
 };
@@ -147,6 +149,22 @@ void TestApplicationSettings::commitMessageApiFormat_changingFormatLeavesUrlAndM
     s.setCommitMessageApiFormat(ApplicationSettings::OpenAiCompatible);
     QCOMPARE(s.commitMessageProviderUrl(), QStringLiteral("https://keep.example/v1"));
     QCOMPARE(s.commitMessageModel(), QStringLiteral("keep-model"));
+}
+
+// The Control API lists and changes settings through the meta-object
+// (settings.list / settings.set): a DEFINE_SETTING's getter must be an
+// invokable and its setter a slot.
+void TestApplicationSettings::everySettingIsInTheMetaObject()
+{
+    const QMetaObject &mo = ApplicationSettings::staticMetaObject;
+    for (const char *getter : {"showWhitespace()", "wordWrap()", "theme()", "showMenuBar()"}) {
+        const int g = mo.indexOfMethod(getter);
+        QVERIFY2(g >= 0, getter);
+        QCOMPARE(mo.method(g).methodType(), QMetaMethod::Method);
+    }
+    QVERIFY(mo.indexOfSlot("setShowWhitespace(bool)") >= 0);
+    QVERIFY(mo.indexOfSlot("setWordWrap(bool)") >= 0);
+    QVERIFY(mo.indexOfSlot("setShowMenuBar(bool)") >= 0);
 }
 
 QTEST_MAIN(TestApplicationSettings)

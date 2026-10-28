@@ -20,8 +20,9 @@ namespace control {
 
 class ControlApi;
 
-// Status bar chip shown while the Control API is on: "Agent API" (with a
-// static Highlight fill for a few seconds after each agent command) and Stop.
+// Status bar chip shown while the Control API is on: "Agent API", or for a few
+// seconds after each agent command what it did ("Agent: Open a file", static
+// Highlight fill), and Stop.
 class ControlStatusIndicator : public QWidget
 {
     Q_OBJECT
@@ -37,8 +38,8 @@ signals:
 private:
     // Server state changed: visibility and tooltip.
     void refresh();
-    // A command ran: restarts the timer; restyles only when the fill turns on.
-    void markActing();
+    // A command ran: names it and restarts the timer; restyles only when the fill turns on.
+    void markActing(const QString &label);
     void setActing(bool acting);
 
     ControlApi *m_api;
@@ -46,6 +47,7 @@ private:
     QToolButton *m_stop;
     QTimer m_actingTimer;
     bool m_acting = false;
+    QString m_actingLabel;
 };
 
 } // namespace control

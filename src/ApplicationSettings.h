@@ -55,11 +55,14 @@ private:
 };
 
 
+// The getter is invokable and the setter a slot so the Control API can list,
+// read and change every setting through the meta-object (settings.list /
+// settings.set, docs/adr/0007). Q_SLOT, not "public slots:": moc ignores an
+// access section inside a macro, so the setters were missing from it.
 #define DEFINE_SETTING(name, lname, type)\
 public:\
-    type lname() const;\
-public slots:\
-    void set##name(type lname);\
+    Q_INVOKABLE type lname() const;\
+    Q_SLOT void set##name(type lname);\
 Q_SIGNAL\
     void lname##Changed(type lname);\
 

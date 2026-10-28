@@ -1,11 +1,13 @@
 ---
 name: notepadai-control
-description: Operate the NotepadAI code editor running on this machine through its Control API (open projects and files, start AI agent sessions and send them prompts, run terminal commands, open the browser, change settings) the way its user would. Use when the user asks you to do something in NotepadAI.
+description: Control the NotepadAI code editor running on this machine through its Control API - open projects and files, edit text, start AI agent sessions and send them prompts, answer their questions, run terminal commands and tasks, use git, pm2, the browser, settings - with commands the user watches happen. Use when the user asks you to do something in NotepadAI.
 ---
 
-# Operating NotepadAI
+# Controlling NotepadAI
 
-NotepadAI is a desktop code editor with AI agent sessions, terminals, git tools and a browser. Its Control API lets you operate it **the way its user does**: every change goes through a menu item, button, field, tab or key the user can see. It flashes on screen and is written to an activity log the user reads. There are no hidden commands. Reading what is on screen is silent.
+NotepadAI is a desktop code editor with AI agent sessions, terminals, git tools, a browser and more. Its Control API is a set of **commands**: `files.open`, `editor.insert`, `ai.send`, `terminal.run`, `git.commit`... You call a command; NotepadAI does it with the same code its menus and buttons run, and **shows the result**: the tab, panel or chat it changed comes to the front and flashes, the status bar reads "Agent: <what you did>", and the step goes into an activity log the user reads. Read commands are silent.
+
+You never look for buttons or click pixels. Pick the command, pass its arguments, read the JSON answer.
 
 ## Connection
 
@@ -13,160 +15,161 @@ NotepadAI is a desktop code editor with AI agent sessions, terminals, git tools 
 
 ```sh
 api() { curl -s -H "Authorization: Bearer $NOTEPADAI_TOKEN" "$@"; }
-api "$NOTEPADAI_URL/instance"
-api -H "Content-Type: application/json" -d '{"id":"actionAiAgents"}' "$NOTEPADAI_URL/actions/trigger"
-api -G --data-urlencode "id=MainWindow/statusBar/labelDocPosition" "$NOTEPADAI_URL/ui/read"
+run() { api -H "Content-Type: application/json" -d "${2:-{\}}" "$NOTEPADAI_URL/commands/$1"; }
+
+api "$NOTEPADAI_URL/instance"                       # what is open
+run files.open '{"path":"src/main.cpp","line":42}'  # do something
+api -G --data-urlencode "tab=3" "$NOTEPADAI_URL/commands/editor.read"   # read commands also answer GET
 ```
 
-- Ids contain `/`, `@`, `:` and spaces: send query values URL-encoded (`-G --data-urlencode`).
-
-- Bodies are JSON objects. Responses are JSON with `"ok": true|false`; an error carries `"error"` with the reason and what to do.
+- Responses are JSON with `"ok": true|false`. A failure has `"error"`: what went wrong and what to do.
+- `400`: an argument is wrong (unknown, missing, wrong type, a value not allowed); the error lists what the command takes.
 - `401`: the token is wrong or was regenerated. Ask the user for a new connection prompt; never guess.
 - `403`: the `Host` must be the address in `NOTEPADAI_URL`. Never send an `Origin` header.
-- `404`: no such id; list again (`GET /ui`, `GET /actions`).
-- `409`: a user could not do it right now (hidden, disabled, or a modal dialog is open). The error says which; deal with that first.
+- `404`: no such thing (command, tab, session, file). The error says which list command shows what exists.
+- `405`: a command that changes something was sent as GET; POST it.
+- `409`: not now, or **an answer is missing**. When a step needs a decision a user would make in a dialog ("Save changes?", "A command is still running", "The branches diverged"), the command does not open the dialog: it refuses with `409` and `"needs": "<argument>"`. Decide (or ask the user) and call again with that argument (`unsaved: "discard"`, `force: true`, `strategy: "rebase"`...).
+- `422`: it was tried and failed (the error has the reason). `504`: it took too long.
+- `dismissedDialogs` in an answer: NotepadAI opened a dialog of its own while the command ran (e.g. "data.csv has been modified by another program. Reload it?" when the tab a command brought forward changed on disk). It was cancelled, which changes nothing, so the command could answer. Act on it with a command if needed (`files.reload`).
 - Never write the token into a file, a commit or this skill.
 - `GET /skill/version` returns `skillVersion`. Fetch `/skill` again when it is higher than the one below.
 
-Skill version: 3 (API version 1).
-
-## Ids
-
-Everything is addressed by an **id**, never by the text shown (the UI may be translated).
-
-- **Actions** (menu items, toolbar buttons): the object name, for example `actionNewAiTab`. Items of menus built on the fly are `<menu id>/<key>`, for example `menuOpenAiAgentInWorkspace/agent:<agent id>`, `menuLanguage/group:P/lang:Python`.
-- **Widgets**: a path from a root, for example `MainWindow/mainToolBar/button:actionSave`.
-  - Roots are windows and dialogs (`PreferencesDialog`), docked tabs (`dock:<uuid>`) and chat sessions (`chat:<session id>`).
-  - Segments are object names. A toolbar button is `button:<its action>`. A dialog's standard button is `button:ok`, `button:cancel`, `button:yes`, `button:save`, `button:discard`...
-  - An unnamed widget is `<Class>#<n>`.
-- **Parts** of a widget (list rows, tabs): `<widget id>@<key>`, for example `.../treeView@path:C:/src/app/main.cpp`, `.../tabBar@tab:2`.
-- Anything listed with `"stable": false` (no object name; id from text or position) works right after you list it. Never store it.
+Skill version: 4 (API version 2).
 
 ## Endpoints
 
 | Method | Path | What |
 |---|---|---|
-| GET | `/instance` | App version, window title, workspaces, active workspace, `workspacePanels` (`root`, panel `id`, `active`), `workspaceTasks` (the active workspace's terminal tasks: `name`, `command`, `cwd`), active editor |
-| GET | `/skill`, `/skill/version` | This skill, its version |
-| GET | `/actions[?menu=<id>]` | Every action (or one menu): `id`, `label`, `menu` path, `shortcut`, `enabled`, `checked`, `location`, `value` (what a direct command takes). Menus filled on opening are filled first |
-| POST | `/actions/trigger` | `{"id", "value"?}`: click the action |
-| GET | `/ui[?root=<id>&depth=8&parts=50&hidden=1]` | The window tree: `{ok, nodes: [...], focus, modal, popup}`. `nodes` holds the root(s); each node has `id`, `role`, `label`, `value`/`checked`/`items`, `enabled`, `focus`, `parts`, `children` (`more: true` where `depth` cut it) |
-| GET | `/ui/node?id=` | One node in detail (rect, tooltip, adapter summary) |
-| GET | `/ui/read?id=[&from=&count=]` | The content: text, value, items, rows, transcript (see Widgets) |
-| GET | `/ui/find?text=&role=&limit=` | Visible nodes whose label or text contains `text` |
-| POST | `/ui/click` | `{"id", "button"?: "left"\|"right"\|"middle", "double"?, "value"?}` |
-| POST | `/ui/type` | `{"id", "text", "replace"?}`: type into a field, editor, terminal |
-| POST | `/ui/key` | `{"id"?, "keys": "Ctrl+S"}` or `"keys": ["Ctrl+K", "Ctrl+C"]`; no `id`: the focused widget |
-| POST | `/ui/select` | `{"id", "index"\|"text"\|"data"}` (combo, tabs) or a part id (row, tab) |
-| POST | `/ui/set` | `{"id", "value"}`: check box (true/false), spin box, combo, field, slider |
-| POST | `/ui/scroll` | `{"id", "to": "top"\|"bottom"}` or `{"pages"\|"dy"\|"dx": n}`; a part id scrolls it into view |
-| POST | `/ui/close` | `{"id"}`: a dialog, a tab (`dock:...`), a tab part |
-| POST | `/ui/focus` | `{"id"}` |
-| POST | `/ui/do` | `{"id", "op", "args"}`: a widget's own operation (see Widgets) |
+| GET | `/instance` | Version, window title, open workspaces, active workspace, tab count, current editor, number of commands |
+| GET | `/commands[?domain=files]` | Every command (or one domain) with its arguments: name, type, required, allowed values, description |
+| POST | `/commands/<name>` | Run a command; the JSON body holds its arguments (`{}` for none) |
+| GET | `/commands/<name>?arg=value` | Run a read command (one that changes nothing); arguments in the query string |
+| POST | `/wait` | Block until an event arrives or a read command's answer matches (see Waiting) |
 | GET | `/events` | Server-sent events (see Events) |
-| POST | `/wait` | Block until something happens (see Waiting) |
-| GET | `/screenshot[?id=&maxWidth=1600]` | PNG of a window or widget (default: the open dialog, else the main window) |
-| GET | `/log?limit=N` | The activity log: `time`, `op`, `target`, `label`, `ok`, `detail` (why it failed), `args` (what the step was given: `text`, `value`, `index`, `op` + `args`, ...; long strings cut, password fields `••••`) |
+| GET | `/screenshot[?maxWidth=1600]` | PNG of the main window (or the dialog open on top of it) |
+| GET | `/log?limit=N` | The activity log: `time`, `op` (the command), `label`, `ok`, `detail` (why it failed), `args` (secret arguments masked) |
+| GET | `/skill`, `/skill/version` | This skill (with the command reference generated from the running app), its version |
 
-### Commands and effects
+## Things and their ids
 
-Every command (`/actions/trigger`, `/ui/click`, `type`, `key`, ...) answers once its work is done, or as soon as it opened a modal dialog or a menu:
-
-```json
-{"ok": true, "completed": false, "action": "actionPreferences", "label": "Settings ▸ Preferences…",
- "effects": {"opened": [{"id": "PreferencesDialog", "kind": "dialog", "title": "Preferences"}],
-             "closed": [], "focus": "...", "modal": "PreferencesDialog"}}
-```
-
-- `completed: false`: a dialog or menu is waiting for input (`effects.modal`, `effects.popup`). Answer it with `/ui/*` on its ids, or `POST /ui/close`.
-- While a menu is open (`popup`), only its own items answer; anything else is refused with `409`, except a click elsewhere, which closes the menu first, as it would for a user. `POST /ui/key {"keys": "Escape"}` closes it.
-- `effects.opened` / `effects.closed`: windows, dialogs, tabs (`kind: dock`), panels (`kind: panel`, the workspace tree) and chats that appeared or went away. Clicking a dialog's OK answers after the dialog has done its work, so the tab it opened is listed there.
-
-### Direct commands (pickers)
-
-A user picks files, folders, fonts and colours in a system picker you cannot operate. Pass the value instead: `{"id": "actionOpen", "value": "C:/src/app/main.cpp"}` (or a list: `"value": ["a.txt", "b.txt"]`). Works on `/actions/trigger` and `/ui/click` (a "Browse…" button). `GET /actions` shows which actions open one (`value`). Confirmations ("Replace it?", "Save changes?") still appear; answer them.
-
-## Widgets
-
-| Role | Read (`/ui/read`) | Do |
-|---|---|---|
-| `dock` (a tab: `kind` editor, preview, tool, panel; the workspace panels too) | its title, `open`, `current` | `/ui/select` brings it to front (for a workspace panel: makes it the active workspace), `/ui/close` closes it (unsaved editors ask; a workspace panel closes its workspace), `/ui/do op=float` |
-| `editor` | lines `from` (1-based, default 1), `count` (default 500): `text`, `path`, `modified`, `language`, `line`/`column`, `selection`; part `@selection` | `/ui/type` (multi-line text is inserted like a paste), `/ui/set` replaces all, `/ui/do op=goto args={"line", "column"?}`, `op=select args={"line","column"?,"toLine"?,"toColumn"?}` or `{"all":true}`; `/ui/key` for shortcuts |
-| `terminal` | `rows` (no `count`: the screen; `from` < 0 counts back), `cursor`, `cwd`, `running`, `exited`; part `@selection` | `/ui/type` types (a newline is Enter), `/ui/key` sends keys (`Ctrl+C`) |
-| `chat` (an AI agent session) | `entries` (messages and tool calls, last 30; `from`/`count`), `working`, `queued`, `waitingForUser`, `draft`; part `@report`: the last finished answer | `/ui/do op=send args={"text"}` types the prompt and presses Send; its widgets: `chatInput`, `chatSend`, `chatCancel`, `chatModel`, `chatMode`, `chatEffort` |
-| `list`/`tree`/`table` | `rows` with `key`, `text`, `cells`, `expanded`, `selected` | click or select a row part; `/ui/do op=expand`/`collapse` |
-| `tabs` | `current`, tabs as parts | click a tab part; `/ui/close` a tab part |
-
-Any pane (a panel, a tab, an editor, a chat, a splitter child): `POST /ui/do {"id", "op": "resize", "args": {"width"?, "height"?}}` (pixels) drags the nearest edge that sets that size: a splitter handle, a panel's separator, a floating window's edge. The neighbour gives or takes the difference, within the minimum sizes. `GET /ui/node` gives its `rect`. A `422` says no edge sets that size; try the pane around it.
-
-A question form or permission prompt from an agent is made of ordinary widgets inside the chat: read it with `GET /ui?root=chat:<id>`, answer with `/ui/click` and `/ui/type` (ids under Recipes).
-
-## Events
-
-`GET /events` streams `event: <name>` / `data: <json>` lines (each `data` has `seq` and `time`):
-
-- `window.opened`, `window.closed` (`id`, `kind`, `title`, `modal`); `dock.shown`, `dock.hidden` (`id`, `title`, `open`: false once closed, true when another tab of its area became current; `current`); `focus.changed`
-- `chat.turnStarted`, `chat.turnEnded`, `chat.waitingForUser` (`id` = `chat:<session>`)
-- `terminal.taskExited`, `terminal.exited` (`id`, `exitCode`)
-- `action`: each step an external agent took (`op`, `id`, `label`, `ok`, `args`)
+- **Tabs** (editors, diffs, terminals, previews, browsers) have a number: `tab`. `tabs.list` lists them with `kind`, `title`, `path`, `modified`, `current`. A tab keeps its number while it is open. Most editor and terminal commands default to the tab in front, but pass `tab` once you know it: the user may click elsewhere.
+- **Workspaces** (project folders) are named by their root path (`workspace.list`); an SSH one by `ssh://<profile id>/<remote path>`. Commands that take `workspace` default to the active one.
+- **Paths**: absolute, or relative to the active workspace. Forward slashes work everywhere.
+- **AI sessions** have an id: `session` (`ai.sessions`). Without it a command uses the session in front of the AI panel.
+- **Editor positions** are 1-based `line` and `column`; columns count characters.
+- **Settings** have keys (`settings.list`). **Menu actions** have ids (`menu.list`), for the rare thing no command covers.
 
 ## Waiting
 
 `POST /wait` answers when the condition holds (`ok: true`, `waitedMs`) or with `408` after `timeout` seconds (default 30, max 600):
 
-- `{"event": "chat.turnEnded", "match": {"id": "chat:abc"}}`: the next matching event (`"event": "window.*"` matches a prefix).
-- `{"id": "<node>", "state": "visible"|"hidden"|"exists"|"gone"|"enabled"|"disabled"|"idle"|"waitingForUser"}`. `idle` is a chat or other widget not working, with nothing queued and not waiting for the user. `"state"` may be a list: `["idle", "waitingForUser"]` answers when either holds, with `state` naming which.
-- `{"id": "<node>", "text": "Done"}`: its `/ui/read` contains the text (a terminal printing a line, a label changing).
+- `{"command": "<read command>", "args": {...}, "until": {"<field>": <value> | [<values>]}, "contains": {"<field>": "<text>"}, "timeout": 300}`: runs the read command every 100 ms until each `until` field equals the value (or one of the list) and each `contains` field's text contains the string. The answer has `result`, the matching answer; a `408` has `last`, the last one.
+- `{"event": "<name or prefix*>", "match": {"<field>": <value>}}`: the next matching event.
+
+```sh
+# until the agent's turn ends or it asks something
+api -d '{"command":"ai.state","args":{"session":"<id>"},"until":{"settled":true},"timeout":600}' "$NOTEPADAI_URL/wait"
+# until a terminal prints a line
+api -d '{"command":"terminal.read","args":{"tab":7},"contains":{"text":"passing"},"timeout":300}' "$NOTEPADAI_URL/wait"
+# until a task terminal finished
+api -d '{"command":"terminal.state","args":{"tab":7},"until":{"taskState":["succeeded","failed"]},"timeout":600}' "$NOTEPADAI_URL/wait"
+```
+
+## Events
+
+`GET /events` streams `event: <name>` / `data: <json>` lines (each `data` has `seq` and `time`):
+
+- `chat.turnStarted`, `chat.turnEnded`, `chat.waitingForUser` (`session`)
+- `terminal.taskExited`, `terminal.exited` (`tab`, `exitCode`)
+- `action`: each command an external agent ran (`op`, `label`, `ok`, `args`)
 
 ## Recipes
 
-Open a project folder (shows it in the workspace tree):
+Open a project and a file in it:
 ```sh
-api -H "Content-Type: application/json" -d '{"id":"actionOpenFolderAsWorkspaceNew","value":"C:/src/app"}' "$NOTEPADAI_URL/actions/trigger"
+run workspace.open '{"path":"C:/src/app"}'
+run files.open '{"path":"src/main.cpp","line":42}'      # answers {"tab": 3, "kind": "editor", ...}
 ```
-The File menu shows `actionOpenFolderAsWorkspaceNew` (in its Open Folder as Workspace submenu) once there are recent folders, and `actionOpenFolderasWorkspace` before that; a `409` for the hidden one names the other. A folder that is already open becomes the active workspace.
 
-Switch or close a workspace: `GET /instance` lists `workspacePanels`. `POST /ui/select {"id":"<panel id>"}` makes it the active workspace (like clicking its tab); `POST /ui/close {"id":"<panel id>"}` closes it (its close button). The View menu's entry for a panel (`menuView/toggle:<panel>`) shows or hides it: hiding a workspace panel closes the workspace.
+Edit a file and save it:
+```sh
+run editor.read '{"tab":3,"line":30,"endLine":60}'
+run editor.replaceRange '{"tab":3,"line":42,"endLine":43,"text":"    return parse(input);\n"}'
+run editor.replaceAll '{"tab":3,"text":"oldName","replacement":"newName","wholeWord":true}'
+run files.save '{"tab":3}'
+```
+`editor.insert` adds text at a position, `editor.setText` replaces everything, `editor.find` / `editor.findAll` search, `editor.undo` undoes. A new file: `files.new` then `files.save {"path": ...}`, or `workspace.createFile`.
 
-Open a file: `{"id":"actionOpen","value":"C:/src/app/main.cpp"}`. A new tab: `actionNew`. Save: `actionSave` (`actionSaveAs` with a `value`).
+Ask an AI agent to do something and get its answer:
+1. `run ai.agents` lists the agents. `run ai.open '{"agent":"<id>","prompt":"Fix the failing test in parser.cpp"}'` opens a chat in the active workspace and sends the prompt. It answers with the `session` id.
+2. Wait until it is done or needs someone: `POST /wait {"command":"ai.state","args":{"session":"<id>"},"until":{"settled":true},"timeout":600}`. `settled` is true once the turn has ended (`working` false: nothing running or queued) or the session waits for an answer (`waitingForUser`). Repeat the wait on a 408; a long task can take many minutes.
+3. `run ai.report '{"session":"<id>"}'` is its final answer. `ai.read` shows the whole transcript (prompts, replies, tool calls).
+4. When `ai.state` shows `waitingForUser`:
+   - a `permission` (what the agent wants to run, with `options`): `run ai.permission '{"session":"<id>","option":"allow_once"}'`, only for what the user allowed you to; otherwise ask the user.
+   - a question `form` (`questions` with `id`, `type`, `options`, `recommended`): `run ai.answer '{"session":"<id>","answers":[{"id":"Q1","value":"b"},{"id":"Q2","value":["x","y"]},{"id":"Q3","value":"accept"}]}'`. Answer what the user told you; otherwise ask them. `ai.dismissForm` closes it unanswered.
+   Then wait again.
+5. More prompts: `ai.send`. Stop a turn: `ai.cancel`. Model, mode, effort: `ai.set` (choices in `ai.state`).
 
-Open a file from the workspace tree, as the user would: `GET /ui/find?role=tree` gives the tree (`.../filesTab/treeView`); its rows are parts `@path:<absolute path>`. `POST /ui/do {"id":"<tree>@path:C:/src/app/src","op":"expand"}` opens a folder, `POST /ui/click {"id":"<tree>@path:C:/src/app/src/main.cpp","double":true}` opens the file.
+Run a goal (the agent keeps working until each criterion is met):
+```sh
+run goal.options
+run goal.start '{"session":"<id>","prompt":"Add CSV export","criteria":["Export button saves a valid CSV","Tests pass"]}'
+api -d '{"command":"goal.state","args":{"session":"<id>"},"until":{"goal":["achieved","cancelled","failed"]},"timeout":600}' "$NOTEPADAI_URL/wait"
+```
 
-Start an AI agent session in the active workspace and send it a prompt:
-1. `GET /actions?menu=menuOpenAiAgentInWorkspace` lists the agents (`menuOpenAiAgentInWorkspace/agent:<id>`). Trigger one. `effects.opened` names the new chat (or read `GET /ui` for `chat:` roots).
-2. `POST /ui/do {"id":"chat:<id>","op":"send","args":{"text":"Fix the failing test in parser.cpp"}}`
-3. `POST /wait {"id":"chat:<id>","state":["idle","waitingForUser"],"timeout":600}`. On `idle`, `GET /ui/read?id=chat:<id>@report` is the answer.
-4. On `waitingForUser` the agent asks something (`GET /ui?root=chat:<id>`):
-   - A permission prompt: `chat:<id>/permissionPrompt` (the labels inside it say what for), with buttons named by kind: `allow_once`, `allow_always`, `reject_once`, `reject_always`. Click the one the user allowed you to; otherwise ask the user.
-   - A question form: `chat:<id>/grillMeForm` (find its path with `GET /ui/find?text=Submit`). Each question is `q:<question id>` holding: `option:<value>/choice` (click to pick), `other/choice` + `other/text`, `answer` (a text, number or dropdown answer), `yes`/`no` (or `accept`/`change` + `changeText`), `clarify`, `note` + `noteText`. Then click the form's `submit` (or `dismiss`). Answer only what the user told you; otherwise ask them.
-   Then wait again (step 3).
+Run a command and get its result:
+```sh
+run terminal.run '{"command":"npm test"}'       # a task terminal: answers {"tab": 7, ...}
+api -d '{"command":"terminal.state","args":{"tab":7},"until":{"taskState":["succeeded","failed"]},"timeout":600}' "$NOTEPADAI_URL/wait"
+run terminal.read '{"tab":7,"lines":80}'
+```
+An interactive shell: `terminal.open`, then `terminal.send {"text":"ls\n"}` and `terminal.keys {"keys":["Ctrl+C"]}`. Saved tasks: `tasks.list`, `tasks.run`.
 
-Run a goal (the agent keeps working until success criteria are met):
-1. Optionally type the task into the chat's `chatInput`; clicking the chat's `chatSendWithGoal` ("Goal") opens `SendWithGoalDialog` and sends that text when the goal starts.
-2. Inside `SendWithGoalDialog/goalConfig`: the criteria are `criterion:1`, `criterion:2`, ... (`/ui/type`), `addCriterionButton` / `removeCriterionButton`, `goalAgentCombo`, `promptTemplateCombo`, `maxIterationsSpin`. `loadPresetButton` opens the saved presets as a popup (`presetMenu`): click `preset:<name>` (a project's own: `preset:project:<name>`) to fill the criteria, `deletePreset:<name>` to delete one (ids escape `/`, `@`, `#`, `%` in names; take them from the tree). `savePresetButton` saves the criteria as a preset. The footer has `autoCompactCheck`, `useNativeGoalCheck`, `prefixGoalCheck`, `startGoalButton`, `cancelButton`.
-3. Wait on the chat as for any prompt.
-To list the saved presets without starting a goal: open the dialog, click `loadPresetButton`, read the popup (`GET /ui`, its `popup`), press Escape, click `cancelButton`. Goal defaults (goal agent, max iterations, judge prompt templates) are in AI ▸ AI Agents… (`actionAiAgents`), tab "Goal agent": `goalAgentCombo`, `goalMaxIterationsSpin`, `goalTemplateCombo`, `goalTemplateEdit`. A scheduled task's goal: its edit dialog's Configure… opens `GoalAgentConfigDialog` with the same `goalConfig` widgets.
+Commit and push:
+```sh
+run git.status
+run git.stage '{"paths":["src/parser.cpp"]}'
+run git.commit '{"message":"Fix parser on empty input"}'
+run git.push
+```
+With nothing staged, `git.commit` stages and commits every change, as the Commit button does; stage first to commit only some files. `git.pull` refuses diverged branches until you pass `strategy` (`merge` / `rebase`); `git.switch` refuses a dirty tree until you pass `dirty` (`stash` / `force`). Merge and rebase conflicts: `git.status` lists them, `git.resolve` settles them, `git.operation` continues or aborts.
 
-Run a command in a terminal:
-1. Trigger `actionOpenTerminalInWorkspace`. `effects.opened` names its tab; the terminal is `dock:<uuid>/terminalDock/terminal` (or `GET /ui/find?role=terminal`).
-2. `POST /ui/type {"id":"<terminal>","text":"npm test\n"}`
-3. `POST /wait {"id":"<terminal>","text":"passing","timeout":300}` or poll `GET /ui/read?id=<terminal>`.
-4. Close it with `POST /ui/close {"id":"dock:<uuid>"}` (a running command asks first: answer the `QMessageBox`).
+Open a web page and read it: `run browser.open '{"url":"https://example.com"}'`, then `browser.read {"as":"text"}`; `browser.eval` runs JavaScript in it.
 
-Run a workspace task: `GET /instance` lists `workspaceTasks`. Trigger `menuTasks/task:<name>` (Terminal ▸ Tasks), or click the same `task:<name>` row in the empty terminal panel. The task opens its own terminal tab; it reports its exit through the `terminal.taskExited` event. Edit tasks: trigger `actionEditTasks` (dialog `EditTasksDialog`: `taskList` rows, `addTaskButton`, `removeTaskButton`, `moveTaskUpButton` / `moveTaskDownButton`, `taskNameEdit`, `taskCommandEdit`, `taskCwdEdit` (+ `browseCwdButton`, takes a `value`), `taskEnvEdit`, then `buttonBox/button:ok`).
+Change a setting: `run settings.list` (keys, types, values), `run settings.set '{"key":"showWhitespace","value":true}'`.
 
-Commit with git: the workspace panel (role `dock`, the folder's name) has a Files and a Git tab (`.../tabs/tabBar@tab:1` is Git). Under `.../tabs/gitTab`: `treeChanges` (rows are the changed files), `buttonStage`, `buttonStageAll`, `buttonUnstage`, `buttonUnstageAll`, `editCommitMessage` (type the message), `checkAmend`, `buttonCommit`; `buttonBranch` opens the branch picker, `buttonPull` / `buttonPush`, `buttonHistory` the log. `GET /ui/find?text=Stage All` gives the full ids.
+Edit a CSV as a table: a `.csv` opens as text, as for the user; its table is its preview.
+```sh
+run files.open '{"path":"data.csv"}'                 # {"tab": 5, "kind": "editor"}
+run preview.open '{"tab":5}'                         # {"tab": 6, "kind": "preview"}
+api -d '{"command":"csv.state","args":{"tab":6},"until":{"loading":false}}' "$NOTEPADAI_URL/wait"
+run csv.read '{"tab":6}'
+run csv.setCell '{"tab":6,"row":0,"column":1,"value":"37"}'
+run csv.save '{"tab":6}'
+```
+`csv.insertRows` / `deleteRows` / `insertColumns` / `deleteColumns` / `renameColumn` / `clearCells` change the table; `csv.sort` and `csv.filter` change only the view. The text editor of the same file then asks to reload: `files.reload` its tab.
 
-Open a web page: trigger `actionQuickBrowser` (a dialog opens), then `POST /ui/type {"id":"QuickBrowseDialog/editUrl","text":"https://example.com"}` and `POST /ui/click {"id":"QuickBrowseDialog/buttonBox/button:ok"}`.
+Binary files open in a hex view (`kind: "preview"`): `hex.read {"tab","offset","length"}`, `hex.find {"bytes":"4D 5A"} or {"text"}`, `hex.goto {"offset"}`.
 
-Change a setting: trigger `actionPreferences`, `GET /ui?root=PreferencesDialog`, change fields with `/ui/set`, then click its `button:save` (the id is in the tree; `button:cancel` discards).
+Editor extras: `editor.mark` highlights every match (`bookmark: true` also bookmarks their lines), `editor.clearMarks`; `editor.columnInsert` types text or a number sequence down a column (Edit > Column Editor); `editor.styles` / `editor.setStyle` read and change the lexer's colours and fonts for one editor (not saved). `files.print` prints an editor, or writes it as a PDF with `pdf`; `files.printers` lists printers.
 
-Edit text in the open file: `GET /ui/find?role=editor` → `POST /ui/do {"id":"<editor>","op":"goto","args":{"line":42}}` → `POST /ui/type {"id":"<editor>","text":"// TODO\n"}`.
+Macros: `macro.record {"action":"start"}`, edit with commands, `macro.record {"action":"stop"}`, `macro.save {"name"}`, `macro.run {"name","times"}`. Edit a saved one step by step: `macro.steps`, `macro.actions` (the step kinds), `macro.insertStep` / `deleteStep` / `moveStep`, `macro.rename` / `copy` / `delete`.
+
+Files between places:
+- `workspace.zip {"path","to"}` and `workspace.unzip {"zip","into"}`: an unzip over existing files refuses with `needs: "conflicts"` (and lists them) until you pass `conflicts`: `overwrite` / `skip`.
+- `workspace.share {"path"}` sends a workspace folder with croc and answers the code-phrase to give the other side; `workspace.receive {"code","into"}` receives one.
+- SSH: `ssh.profiles`, `ssh.addProfile {"host","username","auth","secret"}` (the secret goes to the keychain, never back to you), `ssh.connect {"profile"}`. A host key never seen before refuses with `needs: "trustHostKey"` and its `fingerprint`: show it to the user, and only when they confirm it pass `trustHostKey: "<fingerprint>"`. Then `workspace.open {"path":"ssh://<profile>/<dir>"}`, `ssh.listDir`, `workspace.upload` / `workspace.download`. `ssh.debugLog` when a connection fails.
+
+AI agent setup: `ai.addAgent {"name","command","args","env"}` / `ai.updateAgent` / `ai.cloneAgent` / `ai.removeAgent` / `ai.moveAgent` / `ai.setDefaultAgent` edit the agent list (env values are never shown back, only `hasEnv`). In a session: `ai.draft` puts text in the composer without sending (`@path` mentions a file), `ai.send {"images":[...]}` attaches images, `ai.queue` / `ai.unqueue` show and remove queued prompts, `ai.retry` restarts an agent that exited, `ai.debugLog` reads the agent's protocol log. Goal settings: `goal.setOptions`, templates `goal.template` / `saveTemplate`, criteria presets `goal.presets` / `savePreset`.
+
+Another app's window in a tab (Windows): `embed.list`, then `embed.window {"handle"}`; `tabs.close` gives it back.
+
+Something no command covers: `run menu.list` lists the menu actions; `run menu.run '{"id":"actionX"}'` runs one. An action that would open a dialog is refused and names the command that does its job.
 
 ## Rules
 
-- Do only what the user asked for. Everything you do is shown to them and logged.
-- Read before acting (`GET /ui`, `GET /actions?menu=...`), act one step at a time, and check each response's `effects`.
-- Use ids, never labels. Re-list rather than reuse an id marked `"stable": false`.
-- Never skip a confirmation by other means; answer the dialog the way the user asked, or ask the user.
+- Do only what the user asked for. Every change shows on their screen and goes into the log.
+- Read first (`tabs.list`, `git.status`, `ai.state`...), then change, one step at a time; check each answer.
+- When a command answers `409` with `needs`, the decision is the user's unless they already gave it to you. Ask them rather than guess, especially before discarding changes (`unsaved: "discard"`, `git.discard`), forcing (`force: true`, `git.push {force}`), deleting, or allowing an agent's permission request.
+- Never use NotepadAI to get around a confirmation, a permission or a login the user has to give.
 - If something needs the user (a login, a decision you were not given), stop and ask them.

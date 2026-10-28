@@ -40,7 +40,7 @@ public:
     explicit GitTabSegmentedBar(QWidget *parent = nullptr);
 
     // Replace the segment list. Buttons are recreated; the first segment
-    // becomes current. `names` are the buttons' object names (Control API ids).
+    // becomes current. `names` are the buttons' object names.
     void setSegments(const QStringList &labels, const QStringList &names = {});
 
     int currentIndex() const { return m_currentIndex; }

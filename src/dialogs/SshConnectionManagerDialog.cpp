@@ -22,7 +22,6 @@
 // list drives the form, Enter on the form Saves, Esc closes (Close button).
 
 #include "SshConnectionManagerDialog.h"
-#include "control/ControlPicker.h"
 
 #include "ai/CredentialStore.h"
 #include "remote/SshProfileRegistry.h"
@@ -153,7 +152,7 @@ SshConnectionManagerDialog::SshConnectionManagerDialog(remote::SshProfileRegistr
     connect(m_authCombo, &QComboBox::currentIndexChanged, this,
             [this](int) { updateAuthRows(); });
     connect(m_keyBrowseBtn, &QPushButton::clicked, this, [this]() {
-        const QString path = control::picker::getOpenFileName(this, tr("Select private key"));
+        const QString path = QFileDialog::getOpenFileName(this, tr("Select private key"));
         if (!path.isEmpty()) {
             m_keyPathEdit->setText(path);
         }

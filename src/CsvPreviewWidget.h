@@ -78,9 +78,52 @@ public:
     // model on completion.
     void loadFromFile(const QString &path) override;
 
+    // --- Control API (docs/adr/0007): what the grid's menus and toolbar do ---
+    // Rows are VIEW rows (the displayed order under a sort/filter, else data
+    // rows); columns are 0-based. Edits return why they could not run, empty
+    // when they did.
+    CsvTableModel *tableModel() const { return m_model; }   // null until indexed
+    bool isIndexing() const { return m_indexing; }
+    QString filePath() const { return m_path; }
+    QChar delimiter() const;
+    QString encodingName() const;
+    bool isModified() const;
+    // Re-checks the "open dirty in an editor" guard, as an edit commit does.
+    bool refreshReadOnly() { return conflictActive(true); }
+    quint64 viewRows() const { return viewRowCount(); }
+    int sortColumn() const { return m_pendingViewSortColumn; }
+    Qt::SortOrder sortOrder() const { return m_pendingViewSortOrder; }
+    QStringList filters() const { return currentFilters(); }
+    bool sortFilterAvailable() const;
+    bool viewRecomputing() const;
+    // A cell as the grid shows it.
+    QString cellText(quint64 viewRow, int col) const;
+    QString setCell(quint64 viewRow, int col, const QString &value);
+    QString insertRows(quint64 at, int count);
+    QString deleteRows(QList<quint64> rows);
+    QString insertColumns(int at, int count);
+    QString deleteColumns(QList<int> cols);
+    QString renameColumn(int col, const QString &name);
+    QString clearCells(const QList<QPair<quint64, int>> &cells);
+    // Header click cycle's states: ascending, descending, or cleared.
+    QString sortBy(int col, bool active, Qt::SortOrder order);
+    // A filter field's text (empty clears it); recomputes at once.
+    QString setFilter(int col, const QString &text);
+    void clearFilters();
+    // The Delimiter combo; re-indexes (indexed() fires when done).
+    QString setDelimiterChar(QChar delimiter);
+    // The "First row as header" box.
+    void setHeaderRow(bool on);
+    // Ctrl+S. Empty when written (a re-index follows; indexed() fires).
+    QString save();
+
 signals:
     // Toggles the tab's dirty indicator (overlay non-empty).
     void dirtyChanged(bool dirty);
+    // An index pass finished (load, delimiter change, reload, after a save).
+    void indexed();
+    // A sort/filter recompute that ran on a worker was applied.
+    void viewRecomputed();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -149,7 +192,8 @@ private:
 
     // --- Edit / save ---
     void onCellEdited();           // overlay changed
-    void saveToDisk();             // Ctrl+S
+    QString saveToDisk();          // Ctrl+S; why it did not save, empty when it did
+    void changeDelimiter();        // the Delimiter combo's current item
     bool conflictActive(bool refresh); // dirty-editor guard; updates the banner
 
     // --- Structural edits (insert blank row/column) ---

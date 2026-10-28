@@ -1458,6 +1458,12 @@ void FolderAsWorkspaceDock::showGitCommitDetail(const QByteArray &sha)
     }
 }
 
+GitController *FolderAsWorkspaceDock::gitController()
+{
+    ensureGitTab();
+    return gitTab ? gitTab->controller() : nullptr;
+}
+
 void FolderAsWorkspaceDock::showGitTab()
 {
     // Setting currentWidget triggers QTabWidget::currentChanged → onTabChanged,

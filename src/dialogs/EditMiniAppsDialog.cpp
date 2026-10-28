@@ -6,7 +6,6 @@
  */
 
 #include "EditMiniAppsDialog.h"
-#include "control/ControlPicker.h"
 #include "MiniAppMenuLayout.h"
 
 #include <QCheckBox>
@@ -526,7 +525,7 @@ void EditMiniAppsDialog::onMoveDownClicked()
 
 void EditMiniAppsDialog::onBrowseCwdClicked()
 {
-    const QString dir = control::picker::getExistingDirectory(
+    const QString dir = QFileDialog::getExistingDirectory(
         this, tr("Select Working Directory"), m_cwdEdit->text());
     if (!dir.isEmpty())
         m_cwdEdit->setText(dir);

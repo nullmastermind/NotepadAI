@@ -40,6 +40,7 @@ class AcpSessionView;
 class AiDockSessionStrip;
 class AiDockTitleBar;
 class ApplicationSettings;
+struct SendWithGoalResult;
 class GoalAgent;
 class QCloseEvent;
 class QHBoxLayout;
@@ -126,6 +127,20 @@ public:
     // conversation (Send-then-Goal); otherwise sends the composer text as the
     // first prompt. No-op if a goal is already active on that slot.
     void sendWithGoal();
+    // What Start in that dialog does, for a session: sends the composer text
+    // with the goal, or attaches the goal to the conversation. Returns why it
+    // could not start, empty when it did.
+    QString startGoal(const QString &sessionId, const SendWithGoalResult &result);
+    // The chat view of a session in this dock.
+    AcpSessionView *viewFor(const QString &sessionId) const;
+    QString agentNameFor(const QString &sessionId) const;
+    // The goal running on a session, if any.
+    GoalAgent *goalFor(const QString &sessionId) const;
+    // The agent connection of a session in this dock (background tasks, jobs).
+    AcpConnection *connectionFor(const QString &sessionId) const;
+    // Whether a session's agent process has exited (Retry restarts it).
+    bool hasAgentExited(const QString &sessionId) const;
+    AcpSessionModel *modelFor(const QString &sessionId) const;
 
     // Attach an externally-created GoalAgent and wire its signals for UI
     // feedback (system messages, status bar, debug log). Takes ownership.

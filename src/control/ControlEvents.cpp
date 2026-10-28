@@ -10,32 +10,16 @@
 
 #include "ControlEvents.h"
 
-#include "ControlEffects.h"
 #include "ControlHttp.h"
-#include "ControlIds.h"
 
-#include <QApplication>
 #include <QDateTime>
 #include <QJsonDocument>
-#include <QPointer>
-#include <QWidget>
 
 namespace control {
 
 namespace {
 
 ControlEvents *g_hub = nullptr;
-
-QJsonObject windowData(const QWidget *w)
-{
-    QJsonObject o{{QStringLiteral("id"), ids::nodeId(w).id}, {QStringLiteral("kind"), rootKind(w)}};
-    const QString title = rootTitle(w);
-    if (!title.isEmpty())
-        o.insert(QStringLiteral("title"), title);
-    if (w->isModal())
-        o.insert(QStringLiteral("modal"), true);
-    return o;
-}
 
 } // namespace
 
@@ -58,8 +42,6 @@ ControlEvents::ControlEvents(QObject *parent)
 
 ControlEvents::~ControlEvents()
 {
-    if (m_active)
-        qApp->removeEventFilter(this);
     if (g_hub == this)
         g_hub = nullptr;
 }
@@ -92,17 +74,7 @@ void ControlEvents::clearWaiters()
 
 void ControlEvents::updateActive()
 {
-    const bool active = m_subscribers > 0 || !m_waiters.isEmpty();
-    if (active == m_active)
-        return;
-    m_active = active;
-    if (active) {
-        qApp->installEventFilter(this);
-        m_focusConnection = connect(qApp, &QApplication::focusChanged, this, &ControlEvents::onFocusChanged);
-    } else {
-        qApp->removeEventFilter(this);
-        disconnect(m_focusConnection);
-    }
+    m_active = m_subscribers > 0 || !m_waiters.isEmpty();
 }
 
 void ControlEvents::publish(const QString &name, const QJsonObject &data)
@@ -124,44 +96,6 @@ void ControlEvents::publish(const QString &name, const QJsonObject &data)
         if (it != m_waiters.constEnd() && (*it)(name, data))
             removeWaiter(id);
     }
-}
-
-bool ControlEvents::eventFilter(QObject *watched, QEvent *event)
-{
-    const QEvent::Type type = event->type();
-    if ((type == QEvent::Show || type == QEvent::Hide) && watched->isWidgetType()) {
-        auto *w = static_cast<QWidget *>(watched);
-        if (w->isWindow()) {
-            const Qt::WindowType wt = w->windowType();
-            if (wt != Qt::ToolTip && wt != Qt::SplashScreen && !ids::isIgnored(w))
-                publish(type == QEvent::Show ? QStringLiteral("window.opened") : QStringLiteral("window.closed"),
-                        windowData(w));
-        } else if (w->inherits("ads::CDockWidget")) {
-            QJsonObject data = windowData(w);
-            if (type == QEvent::Show) {
-                // It is its area's current tab.
-                data.insert(QStringLiteral("open"), true);
-                data.insert(QStringLiteral("current"), true);
-                publish(QStringLiteral("dock.shown"), data);
-            } else {
-                // Closed, or another tab of its area became current. ADS hides
-                // a closing tab before marking it closed (and deletes it
-                // later), so ask once the close has run.
-                data.insert(QStringLiteral("current"), false);
-                QMetaObject::invokeMethod(this, [this, dock = QPointer<QWidget>(w), data]() mutable {
-                    data.insert(QStringLiteral("open"), dock && (m_presence ? m_presence(dock) : !dock->isHidden()));
-                    publish(QStringLiteral("dock.hidden"), data);
-                }, Qt::QueuedConnection);
-            }
-        }
-    }
-    return QObject::eventFilter(watched, event);
-}
-
-void ControlEvents::onFocusChanged(QWidget *, QWidget *now)
-{
-    if (now && !ids::isInsideIgnored(now))
-        publish(QStringLiteral("focus.changed"), {{QStringLiteral("id"), ids::nodeId(now).id}});
 }
 
 } // namespace control

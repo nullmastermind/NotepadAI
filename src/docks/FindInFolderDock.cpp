@@ -101,6 +101,7 @@ void FindInFolderDock::drainResults()
                 m_drainTimer->stop();
                 ui->statusLabel->setText(
                     tr("%L1 matches in %L2 files").arg(m_totalMatches).arg(m_totalFiles));
+                emit searchFinished(m_totalFiles, m_totalMatches);
             }
             return;
         }
@@ -140,6 +141,7 @@ void FindInFolderDock::drainResults()
             matchItem->setData(0, Qt::UserRole + 1, match.lineNumber);
             matchItem->setData(0, Qt::UserRole + 2, match.matchStart);
             matchItem->setData(0, Qt::UserRole + 3, match.matchEnd);
+            matchItem->setData(0, Qt::UserRole + 4, match.lineText);
         }
 
         m_totalFiles++;
@@ -162,6 +164,44 @@ void FindInFolderDock::drainResults()
 
     ui->statusLabel->setText(tr("Searching... %L1 matches in %L2 files")
                              .arg(m_totalMatches).arg(m_totalFiles));
+}
+
+void FindInFolderDock::search(const QString &query, bool caseSensitive, bool wholeWord, bool regex)
+{
+    ui->searchInput->setText(query);
+    ui->btnCaseSensitive->setChecked(caseSensitive);
+    ui->btnWholeWord->setChecked(wholeWord);
+    ui->btnRegex->setChecked(regex);
+    show();
+    raise();
+    performSearch();
+}
+
+bool FindInFolderDock::isSearching() const
+{
+    return m_drainTimer->isActive();
+}
+
+QVector<FolderSearchFileBatch> FindInFolderDock::results(int maxMatches) const
+{
+    QVector<FolderSearchFileBatch> out;
+    int left = maxMatches;
+    const int files = ui->resultsTree->topLevelItemCount();
+    for (int i = 0; i < files && left > 0; ++i) {
+        const QTreeWidgetItem *fileItem = ui->resultsTree->topLevelItem(i);
+        FolderSearchFileBatch batch;
+        const int n = fileItem->childCount();
+        for (int j = 0; j < n && left > 0; ++j, --left) {
+            const QTreeWidgetItem *item = fileItem->child(j);
+            if (batch.filePath.isEmpty())
+                batch.filePath = item->data(0, Qt::UserRole).toString();
+            batch.matches.append({item->data(0, Qt::UserRole + 1).toInt(), item->data(0, Qt::UserRole + 2).toInt(),
+                                  item->data(0, Qt::UserRole + 3).toInt(), item->data(0, Qt::UserRole + 4).toString()});
+        }
+        if (!batch.matches.isEmpty())
+            out.append(std::move(batch));
+    }
+    return out;
 }
 
 void FindInFolderDock::onItemActivated(QTreeWidgetItem *item, int column)

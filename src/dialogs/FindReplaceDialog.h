@@ -43,6 +43,9 @@ class FindReplaceDialog : public QDialog
     Q_OBJECT
 
 public:
+    // The Mark tab's indicator on `editor` (allocated and styled on first use);
+    // editor.mark draws with the same one so Clear marks clears both.
+    static int markIndicatorFor(ScintillaNext *editor);
     enum : std::uint8_t {
         FIND_TAB = 0,
         REPLACE_TAB = 1,

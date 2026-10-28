@@ -11,7 +11,7 @@
 #ifndef CONTROL_API_H
 #define CONTROL_API_H
 
-#include "ControlEffects.h"
+#include "ControlCommands.h"
 #include "ControlHttp.h"
 
 #include <QHash>
@@ -26,6 +26,7 @@
 
 class ApplicationSettings;
 class QMainWindow;
+class QWidget;
 
 namespace control {
 
@@ -33,7 +34,6 @@ class ControlActivityLog;
 class ControlEvents;
 class ControlFeedback;
 class ControlServer;
-namespace ui { struct Target; }
 
 // Answers one request exactly once; copies share that "once".
 class Reply
@@ -56,16 +56,16 @@ private:
     std::shared_ptr<bool> m_sent;
 };
 
-// The Control API on the GUI thread (docs/adr/0006): settings, token,
-// routing, the action endpoints, feedback and the activity log. Other
-// modules (UI tree, events) add routes. Off: no server, no thread.
+// The Control API on the GUI thread (docs/adr/0007): settings, token, the
+// command registry and its endpoints, feedback, the activity log, events.
+// Domains register their commands in commands(). Off: no server, no thread.
 class ControlApi : public QObject
 {
     Q_OBJECT
 
 public:
-    static constexpr int kApiVersion = 1;
-    static constexpr int kSkillVersion = 3;
+    static constexpr int kApiVersion = 2;
+    static constexpr int kSkillVersion = 4;
     static constexpr quint16 kDefaultPort = 47821;
     // The keychain entry holding the token.
     static constexpr char kTokenSecretKey[] = "control-api-token";
@@ -78,13 +78,12 @@ public:
         // failing: a session-only token.
         std::function<std::optional<QString>()> loadToken;
         std::function<bool(const QString &token)> saveToken;
-        // Window title, workspaces, active workspace for GET /instance.
+        // Window title, workspaces, active workspace, tabs for GET /instance.
         std::function<QJsonObject()> instanceInfo;
-        // Whether a window or dock counts as open (effects).
-        ControlSnapshot::Presence presence;
     };
 
     using Handler = std::function<void(const http::Request &request, const QJsonObject &body, const Reply &reply)>;
+    using Respond = std::function<void(int status, const QJsonObject &body)>;
 
     ControlApi(const Host &host, QMainWindow *window, QObject *parent = nullptr);
     ~ControlApi() override;
@@ -94,11 +93,14 @@ public:
     ControlFeedback *feedback() const { return m_feedback; }
     ControlEvents *events() const { return m_events; }
     const Host &host() const { return m_host; }
+    CommandRegistry &commands() { return m_commands; }
+    const CommandRegistry &commands() const { return m_commands; }
 
     // --- Settings ---------------------------------------------------------
     bool isEnabled() const;
     void setEnabled(bool on);
-    // Turns the server on if the setting says so (startup).
+    // Turns the server on if the setting says so (startup, after the
+    // commands are registered: the skill lists them).
     void startFromSettings();
     quint16 configuredPort() const;
     void setConfiguredPort(quint16 port);
@@ -119,44 +121,36 @@ public:
 
     // --- Extension points ---------------------------------------------------
     void route(const QByteArray &method, const QByteArray &path, Handler handler);
-    // Documents that an action or button opens a picker, so GET /actions and
-    // the tree say what `value` it takes (any picker accepts one; see
-    // control::picker).
-    void notePicker(const QString &id, const QString &valueHint);
-    QString pickerHint(const QString &id) const { return m_pickers.value(id); }
-    // Logs the step, flashes nothing (callers flash what they touched).
+    // Writes one step to the activity log (and the `action` event).
     void logAction(const QString &op, const QString &target, const QString &label, bool ok = true,
                    const QString &detail = QString(), const QJsonObject &args = {});
+    // Runs a command with already validated arguments: logs and shows it when
+    // it changes something. `respond` gets the HTTP status and body.
+    void execute(const Command &command, QJsonObject args, Respond respond);
+    // Validates, then runs (400 on invalid arguments). In-process callers
+    // (the self-test) use it like an HTTP request.
+    void run(const QString &name, QJsonObject args, const Respond &respond);
 
-    // Runs `act` as a command: answers with {ok, completed, effects} once it
-    // finished or a modal dialog / popup took over. With `pickerValues`, the
-    // first picker `act` opens returns them (a direct command).
-    void runCommand(const Reply &reply, std::function<QString()> act, const QJsonObject &extra = {},
-                    const QStringList *pickerValues = nullptr);
-    // Strings from a JSON `value`: an array, or a string split at newlines.
-    static QStringList pickerValues(const QJsonValue &value);
-
-    static QByteArray skillText();
+    // The skill: the hand-written guide followed by the command reference.
+    QByteArray skill() const;
+    static QByteArray skillGuide();
     static QJsonObject versionJson();
     // Addresses of this machine's interfaces a LAN client can use.
     static QStringList lanAddresses();
 
 signals:
     void stateChanged();
-    void commandRan();
+    // A changing command started: what the indicator names.
+    void commandRan(const QString &label);
 
 private:
     void restart();
     void stopServer();
     void onRequest(quint64 id, const http::Request &request);
+    void handleCommand(const QString &name, const http::Request &request, QJsonObject body, const Reply &reply);
     void handleInstance(const Reply &reply);
-    void handleActions(const http::Request &request, const Reply &reply);
-    void handleTrigger(const QJsonObject &body, const Reply &reply);
-    void registerUiRoutes();
-    void registerEventRoutes(); // /wait, /screenshot
-    // Resolve, check a user could act on it, flash, log, run.
-    void uiCommand(const QJsonObject &body, const Reply &reply, const QString &op, bool needsTarget,
-                   const std::function<QString(const ui::Target &)> &fn);
+    void registerRoutes();
+    void reveal(QWidget *widget);
 
     Host m_host;
     QPointer<QMainWindow> m_window;
@@ -164,12 +158,16 @@ private:
     ControlActivityLog *m_log = nullptr;
     ControlFeedback *m_feedback = nullptr;
     ControlEvents *m_events = nullptr;
+    CommandRegistry m_commands;
     QHash<QByteArray, Handler> m_routes; // "GET /path"
-    QHash<QString, QString> m_pickers; // id -> value hint
     QString m_token;
     bool m_tokenSessionOnly = false;
     QString m_lastError;
 };
+
+// Makes `widget` visible to the user: its ADS tab current, its dock panel
+// shown and in front, its page of a QTabWidget current, its window restored.
+void revealWidget(QWidget *widget);
 
 } // namespace control
 

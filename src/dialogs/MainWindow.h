@@ -21,6 +21,7 @@
 #define MAINWINDOW_H
 
 #include <cstdint>
+#include <optional>
 
 #include <QMainWindow>
 #include <QLabel>
@@ -67,6 +68,7 @@ class WorkspaceFileEnumerator;
 class QuickFileOpenDialog;
 namespace remote { class ExecutionContext; }
 namespace control { class ControlApi; }
+namespace control::commands { struct Registrar; }
 class SshDebugDialog;
 class Pm2ProcessesDialog;
 struct ConflictEntry;
@@ -150,7 +152,8 @@ public slots:
     // rollback) and, only on success, rebases every open editor under the old
     // path via ScintillaNext::updatePathAfterMove so tabs follow the move
     // without a buffer rewrite. Returns true on success.
-    bool renameWorkspaceEntry(const QString &oldPath, const QString &newPath, bool isDir);
+    // error: set instead of a warning box when it fails.
+    bool renameWorkspaceEntry(const QString &oldPath, const QString &newPath, bool isDir, QString *error = nullptr);
 
     // Disk-level rename for renameWorkspaceEntry. Plain QDir::rename, except a
     // case-only rename (caseOnly==true) on a case-insensitive FS goes via a
@@ -223,8 +226,8 @@ public slots:
     remote::ExecutionContext *activeExecutionContext() const;
 
     control::ControlApi *controlApi() const { return m_controlApi; }
-    // --control-api-audit: prints every action and interactive widget of this
-    // window that has no stable Control API id; returns the count.
+    // --control-api-audit: prints undocumented commands and menu actions that
+    // name a missing command; returns the count.
     int runControlApiAudit();
 
 signals:
@@ -258,8 +261,10 @@ private:
     void editTasksForActiveWorkspace();
     // Terminal > PM2 Processes: the one modeless dialog, raised if open.
     void showPm2Processes();
-    // Control API (docs/adr/0006): server, indicator, dialog, direct commands.
+    // Control API (docs/adr/0007): server, commands, indicator, dialog.
     void setupControlApi();
+    // The commands reach the window's managers and helpers directly.
+    friend struct control::commands::Registrar;
     void showControlApiDialog();
 
     Ui::MainWindow *ui = Q_NULLPTR;
@@ -344,6 +349,9 @@ private:
 
     enum class UserSaveAction : std::uint8_t { SaveAll, DiscardAll, Cancel };
     UserSaveAction promptForSave(const QVector<ScintillaNext *> &editors);
+    // The answer to the next close-time save prompt, given ahead by a caller
+    // that already knows it (the Control API's app.quit); used once.
+    std::optional<UserSaveAction> m_closeSaveAnswer;
 
     void saveSettings() const;
     void restoreSettings();

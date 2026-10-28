@@ -43,9 +43,11 @@ CrocShareFlow::CrocShareFlow(QWidget *dialogParent)
             m_loadDlg->setLabelText(text);
     });
     connect(m_croc, &CrocTool::codePhraseReady, this, [this](const QString &phrase) {
+        emit phraseReady(phrase);
         showPhrase(phrase);
     });
     connect(m_croc, &CrocTool::sendFinished, this, [this]() {
+        emit finished();
         if (m_phraseDlg)
             m_phraseDlg->close();
         cleanupTemp();
@@ -78,14 +80,17 @@ CrocShareFlow::CrocShareFlow(QWidget *dialogParent)
         // Temp dir lives until this flow is destroyed; destroy after extract starts.
         // Extract reads the zip on a worker; keep tmp until zip transfer completes.
         connect(m_zip, &FolderZipTransfer::transferCompleted, this, [this](int) {
+            emit finished();
             cleanupTemp();
             deleteLater();
         });
-        connect(m_zip, &FolderZipTransfer::transferError, this, [this](const QString &) {
+        connect(m_zip, &FolderZipTransfer::transferError, this, [this](const QString &msg) {
+            emit failed(msg);
             cleanupTemp();
             deleteLater();
         });
         connect(m_zip, &FolderZipTransfer::transferCancelled, this, [this]() {
+            emit failed(tr("The extraction was cancelled."));
             cleanupTemp();
             deleteLater();
         });
@@ -104,6 +109,17 @@ void CrocShareFlow::closeLoading()
 
 void CrocShareFlow::showError(const QString &msg)
 {
+    emit failed(msg);
+    if (m_quiet) {
+        closeLoading();
+        if (m_phraseDlg) {
+            m_phraseDlg->disconnect();
+            m_phraseDlg->hide();
+            m_phraseDlg->deleteLater();
+            m_phraseDlg = nullptr;
+        }
+        return;
+    }
     QWidget *anchor = m_parent;
     if (m_loadDlg) {
         m_loadDlg->disconnect();
@@ -174,7 +190,7 @@ void CrocShareFlow::shareFolder(FolderZipTransfer *zip, const QString &workspace
     m_zip = zip;
     m_tmp = new QTemporaryDir();
     if (!m_tmp->isValid()) {
-        QMessageBox::warning(m_parent, tr("croc"), tr("Could not create a temp folder."));
+        showError(tr("Could not create a temp folder."));
         deleteLater();
         return;
     }
@@ -192,11 +208,12 @@ void CrocShareFlow::shareFolder(FolderZipTransfer *zip, const QString &workspace
             m_croc->sendFile(m_zipPath);
         }, Qt::SingleShotConnection);
         connect(zip, &FolderZipTransfer::transferError, this, [this](const QString &msg) {
-            QMessageBox::warning(m_parent, tr("Zip"), msg);
+            showError(msg);
             cleanupTemp();
             deleteLater();
         }, Qt::SingleShotConnection);
         connect(zip, &FolderZipTransfer::transferCancelled, this, [this]() {
+            emit failed(tr("Zipping was cancelled."));
             cleanupTemp();
             deleteLater();
         }, Qt::SingleShotConnection);
@@ -249,24 +266,33 @@ void CrocShareFlow::showPhrase(const QString &phrase)
 void CrocShareFlow::receiveIntoFolder(FolderZipTransfer *zip, const QString &workspaceRoot,
                                       const QString &folderPath, bool ssh)
 {
-    m_zip = zip;
-    m_extractWorkspaceRoot = workspaceRoot;
-    m_extractTarget = folderPath;
-    m_extractSsh = ssh;
     bool ok = false;
     const QString phrase = QInputDialog::getText(m_parent, tr("croc code-phrase"),
                                                  tr("Code-phrase:"), QLineEdit::Normal,
                                                  QString(), &ok).trimmed();
-    if (!ok || !CrocTool::isValidCodePhrase(phrase)) {
-        if (ok)
-            QMessageBox::warning(m_parent, tr("croc"), tr("That does not look like a croc code-phrase."));
+    if (!ok) {
+        deleteLater();
+        return;
+    }
+    receiveIntoFolder(zip, workspaceRoot, folderPath, ssh, phrase);
+}
+
+void CrocShareFlow::receiveIntoFolder(FolderZipTransfer *zip, const QString &workspaceRoot,
+                                      const QString &folderPath, bool ssh, const QString &phrase)
+{
+    m_zip = zip;
+    m_extractWorkspaceRoot = workspaceRoot;
+    m_extractTarget = folderPath;
+    m_extractSsh = ssh;
+    if (!CrocTool::isValidCodePhrase(phrase)) {
+        showError(tr("That does not look like a croc code-phrase."));
         deleteLater();
         return;
     }
     ensureThen([this, phrase]() {
         m_tmp = new QTemporaryDir();
         if (!m_tmp->isValid()) {
-            QMessageBox::warning(m_parent, tr("croc"), tr("Could not create a temp folder."));
+            showError(tr("Could not create a temp folder."));
             deleteLater();
             return;
         }

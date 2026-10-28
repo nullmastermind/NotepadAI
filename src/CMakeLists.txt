@@ -595,42 +595,43 @@ qt_add_executable(NotepadAI
 	pm2/Pm2ProcessesDialog.h
 	pm2/Pm2ProcessesDialog.cpp
 	pm2/pm2.qrc
-	control/ControlActionIndex.h
-	control/ControlActionIndex.cpp
 	control/ControlActivityLog.h
 	control/ControlActivityLog.cpp
 	control/ControlApi.h
 	control/ControlApi.cpp
-	control/ControlAppAdapters.h
-	control/ControlAppAdapters.cpp
 	control/ControlApiDialog.h
-	control/ControlScreenshot.h
-	control/ControlScreenshot.cpp
 	control/ControlApiDialog.cpp
 	control/ControlAudit.h
 	control/ControlAudit.cpp
 	control/ControlAuth.h
 	control/ControlAuth.cpp
-	control/ControlEffects.h
-	control/ControlEffects.cpp
+	control/ControlCommands.h
+	control/ControlCommands.cpp
 	control/ControlEvents.h
 	control/ControlEvents.cpp
 	control/ControlFeedback.h
 	control/ControlFeedback.cpp
 	control/ControlHttp.h
 	control/ControlHttp.cpp
-	control/ControlIds.h
-	control/ControlIds.cpp
+	control/ControlScreenshot.h
+	control/ControlScreenshot.cpp
 	control/ControlServer.h
 	control/ControlServer.cpp
 	control/ControlStatusIndicator.h
 	control/ControlStatusIndicator.cpp
-	control/ControlAdapter.h
-	control/ControlStandardAdapters.cpp
-	control/ControlPicker.h
-	control/ControlPicker.cpp
-	control/ControlUiTree.h
-	control/ControlUiTree.cpp
+	control/commands/Registrar.h
+	control/commands/Registrar.cpp
+	control/commands/AppCommands.cpp
+	control/commands/SettingsCommands.cpp
+	control/commands/WorkspaceCommands.cpp
+	control/commands/EditorCommands.cpp
+	control/commands/PreviewCommands.cpp
+	control/commands/TerminalCommands.cpp
+	control/commands/Pm2Commands.cpp
+	control/commands/GitCommands.cpp
+	control/commands/AiCommands.cpp
+	control/commands/TransferCommands.cpp
+	control/commands/CsvCommands.cpp
 	control/control.qrc
 	MiniAppDefinition.h
 	MiniAppMenuLayout.h

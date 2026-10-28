@@ -36,6 +36,8 @@
 #include <QTcpServer>
 #include <QTimer>
 #include <QUrl>
+
+#include <algorithm>
 #include <QUuid>
 #include <QVariant>
 #include <QVBoxLayout>
@@ -133,6 +135,30 @@ MiniAppManager::MiniAppManager(NotepadNextApplication *app,
 MiniAppManager::~MiniAppManager()
 {
     shutdown();
+}
+
+MiniAppInstance *MiniAppManager::instanceFor(const ads::CDockWidget *dw) const
+{
+    for (MiniAppInstance *instance : m_instances) {
+        if (instance && instance->dockWidget() == dw)
+            return instance;
+    }
+    return nullptr;
+}
+
+bool MiniAppManager::isPinnableTab(const ads::CDockWidget *dw) const
+{
+    if (!dw)
+        return false;
+    if (instanceFor(dw))
+        return true;
+    return std::any_of(m_quickBrowserTabs.cbegin(), m_quickBrowserTabs.cend(),
+                       [dw](const QuickBrowserTab &t) { return t.dockWidget == dw; });
+}
+
+bool MiniAppManager::isTabPinned(const ads::CDockWidget *dw)
+{
+    return dockTabPinned(dw);
 }
 
 void MiniAppManager::setDockTabPinned(ads::CDockWidget *dw, bool pinned)

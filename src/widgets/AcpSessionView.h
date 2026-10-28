@@ -95,6 +95,7 @@ public:
     QVector<QPair<QByteArray, QString>> peekInputImages() const;
     QVector<QPair<QByteArray, QString>> takeInputImages();
     QStringList goalDebugLog() const;
+    AcpConnection *connection() const { return m_connection; }
 
     // If "New worktree" is checked, return displayText plus a hidden instruction
     // for the agent. The transcript should keep displayText. Stays checked for
@@ -148,7 +149,59 @@ public:
     void noteUserSend();
     bool isDraft() const { return m_draft; }
 
+    // --- Control API (docs/adr/0007): what the composer's controls do -------
+    // Types `text` into the composer and presses Send (queued behind a running
+    // turn). Empty when it went out or was queued, else why it could not.
+    QString sendFromComposer(const QString &text);
+    // The Cancel button: stops the running turn (and a goal on it).
+    void cancelFromComposer();
+    enum class Selector : std::uint8_t { Model, Mode, Effort };
+    struct Choice
+    {
+        QString id;
+        QString name;
+        bool current = false;
+    };
+    // The items of the model / mode / effort picker (empty until the agent
+    // reports them).
+    QVector<Choice> choices(Selector selector) const;
+    // Picks an item as the user would; false when the picker does not offer it.
+    bool choose(Selector selector, const QString &id);
+    bool autoApprove() const;
+    void setAutoApprove(bool on);
+    // The permission request waiting for an answer, if any.
+    const AcpProtocol::AcpPermissionRequest *pendingPermission() const;
+    // Clicks the option with this id or kind; false when none is pending or matches.
+    bool answerPermission(const QString &optionIdOrKind);
+    // The question form waiting for answers, if any.
+    const GrillMeForm::Spec *pendingFormSpec() const;
+    // Fills the form in and submits it; returns the required question ids
+    // still unanswered (nothing sent then).
+    QStringList answerForm(const QVector<GrillMeForm::Answer> &answers, const QString &note);
+    // The form's Dismiss button.
+    bool dismissForm(const QString &note);
+    // Attaches an image to the composer as a paste or drop does. Empty when
+    // added, else why it was refused (type, size, count).
+    QString attachImage(const QByteArray &data, const QString &filenameHint);
+    QString attachImageFile(const QString &path);
+    // The composer's "New worktree" toggle.
+    bool newWorktree() const;
+    void setNewWorktree(bool on);
+    // Starts Improve prompt (the composer's sparkle button) on the composer
+    // text. Empty when it started (improveSettled follows), else why it cannot.
+    QString improveComposer();
+    // The prompts the queue strip shows (host replies excluded), oldest first.
+    QStringList queuedPromptTexts() const;
+    // The strip's remove button on its `visibleIndex`-th row; false when none.
+    bool removeQueuedPrompt(int visibleIndex);
+    // The Prewalk submenu: a model id the model picker lists, or "" for Off.
+    // Empty when picked, else why not (Claude Code only).
+    QString pickPrewalk(const QString &modelId);
+    QString prewalkTarget() const;
+
 signals:
+    // Improve prompt ended: the improved text (now in the composer), or the error.
+    void improveSettled(bool ok, const QString &textOrError);
     void retryRequested();
     // Ctrl+N in the composer. The dock decides whether to confirm before
     // forwarding to the manager.

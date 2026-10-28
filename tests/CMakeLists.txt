@@ -329,8 +329,6 @@ target_include_directories(test_edit_tasks_dialog PRIVATE
 target_link_libraries(test_edit_tasks_dialog PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
 target_sources(test_edit_tasks_dialog PRIVATE
     ${CMAKE_SOURCE_DIR}/src/dialogs/EditTasksDialog.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.h
     ${CMAKE_SOURCE_DIR}/src/dialogs/EditTasksDialog.h
     ${CMAKE_SOURCE_DIR}/src/TerminalTaskRegistry.h
 )
@@ -346,8 +344,6 @@ target_link_libraries(test_edit_miniapps_dialog PRIVATE
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Test)
 target_sources(test_edit_miniapps_dialog PRIVATE
     ${CMAKE_SOURCE_DIR}/src/dialogs/EditMiniAppsDialog.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.h
     ${CMAKE_SOURCE_DIR}/src/dialogs/EditMiniAppsDialog.h
     ${CMAKE_SOURCE_DIR}/src/MiniAppRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/MiniAppRegistry.h
@@ -923,12 +919,8 @@ target_sources(test_acp_agent_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.h
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpSessionView.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlEffects.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlEvents.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlHttp.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlIds.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.h
     ${ACP_SESSION_VIEW_DEPS}
     ${CMAKE_SOURCE_DIR}/src/widgets/GrillMeFormWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GrillMeFormWidget.h
@@ -1041,12 +1033,8 @@ target_sources(test_acp_agent_exit_restart PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.h
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpSessionView.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlEffects.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlEvents.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlHttp.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlIds.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.h
     ${ACP_SESSION_VIEW_DEPS}
     ${CMAKE_SOURCE_DIR}/src/widgets/GrillMeFormWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/GrillMeFormWidget.h
@@ -1151,12 +1139,8 @@ target_sources(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.cpp
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpPlanWidget.h
     ${CMAKE_SOURCE_DIR}/src/widgets/AcpSessionView.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlEffects.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlEvents.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlHttp.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlIds.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.h
     ${CMAKE_SOURCE_DIR}/src/AcpAgentManager.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpAgentManager.h
     ${CMAKE_SOURCE_DIR}/src/GrillMeMcp.cpp
@@ -3140,7 +3124,7 @@ target_sources(bench_diff_view_apply PRIVATE
     ${CMAKE_SOURCE_DIR}/src/git/GitStatusModel.h
 )
 
-# --- Control API (docs/adr/0006) ---
+# --- Control API (docs/adr/0007) ---
 qt_add_executable(test_control_http test_control_http.cpp)
 target_include_directories(test_control_http PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_control_http PRIVATE Qt6::Core Qt6::Test)
@@ -3172,98 +3156,58 @@ target_sources(test_control_server PRIVATE
 )
 add_test(NAME ControlServer COMMAND test_control_server)
 
-qt_add_executable(test_control_action_index test_control_action_index.cpp)
-target_include_directories(test_control_action_index PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(test_control_action_index PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
-target_sources(test_control_action_index PRIVATE
-    ${CMAKE_SOURCE_DIR}/src/control/ControlActionIndex.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlActionIndex.h
-    ${CMAKE_SOURCE_DIR}/src/control/ControlEffects.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlEffects.h
-    ${CMAKE_SOURCE_DIR}/src/control/ControlIds.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlIds.h
-)
-add_test(NAME ControlActionIndex COMMAND test_control_action_index)
-set_tests_properties(ControlActionIndex PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-
-qt_add_executable(test_control_ui_tree test_control_ui_tree.cpp)
-target_include_directories(test_control_ui_tree PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(test_control_ui_tree PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
-target_sources(test_control_ui_tree PRIVATE
-    ${CMAKE_SOURCE_DIR}/src/control/ControlActionIndex.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlActionIndex.h
-    ${CMAKE_SOURCE_DIR}/src/control/ControlAdapter.h
-    ${CMAKE_SOURCE_DIR}/src/control/ControlAudit.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlAudit.h
-    ${CMAKE_SOURCE_DIR}/src/control/ControlEffects.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlEffects.h
-    ${CMAKE_SOURCE_DIR}/src/control/ControlIds.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlIds.h
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.h
-    ${CMAKE_SOURCE_DIR}/src/control/ControlStandardAdapters.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlUiTree.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlUiTree.h
-)
-add_test(NAME ControlUiTree COMMAND test_control_ui_tree)
-set_tests_properties(ControlUiTree PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-
 qt_add_executable(test_control_events test_control_events.cpp)
 target_include_directories(test_control_events PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(test_control_events PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_link_libraries(test_control_events PRIVATE Qt6::Core Qt6::Test)
 target_sources(test_control_events PRIVATE
-    ${CMAKE_SOURCE_DIR}/src/control/ControlEffects.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlEffects.h
     ${CMAKE_SOURCE_DIR}/src/control/ControlEvents.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlEvents.h
     ${CMAKE_SOURCE_DIR}/src/control/ControlHttp.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlHttp.h
-    ${CMAKE_SOURCE_DIR}/src/control/ControlIds.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlIds.h
 )
 add_test(NAME ControlEvents COMMAND test_control_events)
-set_tests_properties(ControlEvents PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
-# The Control API end to end over real HTTP against a test window.
+# The command registry: validation, GET arguments, the generated reference (docs/adr/0007).
+qt_add_executable(test_control_commands test_control_commands.cpp)
+target_include_directories(test_control_commands PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_control_commands PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+target_sources(test_control_commands PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/control/ControlCommands.cpp
+    ${CMAKE_SOURCE_DIR}/src/control/ControlCommands.h
+    ${CMAKE_SOURCE_DIR}/src/control/ControlHttp.cpp
+)
+add_test(NAME ControlCommands COMMAND test_control_commands)
+
+# The Control API end to end over real HTTP with test commands.
 qt_add_executable(test_control_api test_control_api.cpp)
 target_include_directories(test_control_api PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(test_control_api PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Test)
+target_link_libraries(test_control_api PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Concurrent Qt6::Test
+    qtadvanceddocking-qt6)
 target_sources(test_control_api PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlActionIndex.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlActivityLog.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlActivityLog.h
     ${CMAKE_SOURCE_DIR}/src/control/ControlApi.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlApi.h
     ${CMAKE_SOURCE_DIR}/src/control/ControlAudit.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlAuth.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlEffects.cpp
+    ${CMAKE_SOURCE_DIR}/src/control/ControlCommands.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlEvents.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlEvents.h
     ${CMAKE_SOURCE_DIR}/src/control/ControlFeedback.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlFeedback.h
     ${CMAKE_SOURCE_DIR}/src/control/ControlHttp.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlIds.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlPicker.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlScreenshot.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlServer.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ControlServer.h
-    ${CMAKE_SOURCE_DIR}/src/control/ControlStandardAdapters.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/ControlUiTree.cpp
     ${CMAKE_SOURCE_DIR}/src/control/control.qrc
 )
 add_test(NAME ControlApi COMMAND test_control_api)
 set_tests_properties(ControlApi PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
 
-# Every picker goes through control::picker (docs/adr/0006).
-qt_add_executable(test_control_picker_seam test_control_picker_seam.cpp)
-target_link_libraries(test_control_picker_seam PRIVATE Qt6::Core Qt6::Test)
-target_compile_definitions(test_control_picker_seam PRIVATE NOTEPADAI_SRC_DIR="${CMAKE_SOURCE_DIR}/src")
-add_test(NAME ControlPickerSeam COMMAND test_control_picker_seam)
-
-# The rule for new features: every action and interactive widget of the real
-# main window has a stable id. Runs the app offscreen in a throwaway data dir.
-# A workspace (this checkout, a git repo) so the workspace panel and its Git tab are audited too.
+# The rule for new features (docs/adr/0007): every command and argument of the
+# real app is documented and every dialog-opening menu action names a command
+# that exists. Runs the app offscreen in a throwaway data dir.
 add_test(NAME ControlApiAudit COMMAND $<TARGET_FILE:NotepadAI> --control-api-audit --workspace ${CMAKE_SOURCE_DIR})
 set_tests_properties(ControlApiAudit PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;NOTEPADAI_DATA_DIR=${CMAKE_BINARY_DIR}/control-api-audit-data"

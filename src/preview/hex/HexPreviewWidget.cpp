@@ -113,6 +113,19 @@ void HexPreviewWidget::startLoad(bool reload)
     updateInfo();
 }
 
+qint64 HexPreviewWidget::byteSize() const
+{
+    return QFileInfo(filePath()).size();
+}
+
+void HexPreviewWidget::selectRange(qint64 offset, qint64 length)
+{
+    if (m_source.size() == 0)
+        startLoad(false);
+    hideBanner();
+    m_view->select(offset, length);
+}
+
 void HexPreviewWidget::goTo()
 {
     const std::optional<qint64> offset = HexFormat::parseOffset(m_goto->text(), m_view->cursorOffset());

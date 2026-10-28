@@ -281,6 +281,8 @@ void SshConnection::acceptHostKey()
         m_hostKeyStore.add(m_profile.host, m_profile.port, m_pendingHostKey);
         m_pendingHostKey.clear();
     }
+    m_pendingFingerprint.clear();
+    m_pendingChanged = false;
     QMetaObject::invokeMethod(m_worker, "acceptHostKey", Qt::QueuedConnection);
 }
 
@@ -288,6 +290,8 @@ void SshConnection::rejectHostKey()
 {
     appendDebugLog(QStringLiteral("host-key-rejected"));
     m_pendingHostKey.clear();
+    m_pendingFingerprint.clear();
+    m_pendingChanged = false;
     QMetaObject::invokeMethod(m_worker, "rejectHostKey", Qt::QueuedConnection);
 }
 
@@ -308,6 +312,8 @@ void SshConnection::handleHostKey(const QString &fingerprint, const QByteArray &
         return;
     }
     m_pendingHostKey = key;
+    m_pendingFingerprint = fingerprint;
+    m_pendingChanged = !known.isEmpty();
     if (!known.isEmpty() && known != key) {
         emit hostKeyChanged(fingerprint, key);
     } else {

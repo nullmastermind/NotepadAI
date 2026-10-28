@@ -338,6 +338,16 @@ void LuaConsoleDock::runCurrentCommand()
     LuaExtension::Instance().OnExecute(text.toLatin1().constData());
 }
 
+QString LuaConsoleDock::runCommand(const QString &code)
+{
+    input->setText(code.toUtf8().constData());
+    // The echo of the command ends with the line break runCurrentCommand writes.
+    const int echoEnd = int(output->length()) + int(code.toUtf8().size()) + 2;
+    runCurrentCommand();
+    const int end = int(output->length());
+    return end > echoEnd ? QString::fromUtf8(output->get_text_range(echoEnd, end)) : QString();
+}
+
 bool LuaConsoleDock::eventFilter(QObject *obj, QEvent *event)
 {
     if (event->type() == QEvent::KeyPress) {

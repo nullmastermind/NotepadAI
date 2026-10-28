@@ -18,8 +18,6 @@
 
 #include "AcpSessionView.h"
 #include "control/ControlEvents.h"
-#include "control/ControlIds.h"
-#include "control/ControlPicker.h"
 
 #include "AcpAgentRegistry.h"
 #include "AcpConnection.h"
@@ -670,18 +668,8 @@ void AcpSessionView::buildUi()
     outer->addWidget(m_goalStatusRow);
 
     m_queueStrip = new AcpPromptQueueStrip(this);
-    connect(m_queueStrip, &AcpPromptQueueStrip::removeRequested, this, [this](int visibleIndex) {
-        // Strip rows are the visible items only: host replies cannot be removed.
-        const int index = m_promptQueue.indexOfVisible(visibleIndex);
-        if (index < 0)
-            return;
-        const bool deferredGoal = m_promptQueue.items().at(index).fromGoalAgent;
-        m_promptQueue.removeAt(index);
-        refreshQueueStrip();
-        if (deferredGoal)
-            emit deferredGoalRemoved();
-        emit promptQueueChanged();
-    });
+    connect(m_queueStrip, &AcpPromptQueueStrip::removeRequested, this,
+            [this](int visibleIndex) { removeQueuedPrompt(visibleIndex); });
     outer->addWidget(m_queueStrip);
 
     // 6. Input.
@@ -2751,7 +2739,7 @@ void AcpSessionView::onIsProcessingChanged(bool processing)
 {
     if (control::events::wanted())
         control::events::publish(processing ? QStringLiteral("chat.turnStarted") : QStringLiteral("chat.turnEnded"),
-                                 {{QStringLiteral("id"), control::ids::nodeId(this).id}});
+                                 {{QStringLiteral("session"), sessionModel()->sessionId()}});
     if (m_sendBtn)
         updateSendButton();
     if (m_cancelBtn) {
@@ -2964,7 +2952,7 @@ void AcpSessionView::refreshWaiting()
     m_lastWaiting = waiting;
     if (control::events::wanted())
         control::events::publish(QStringLiteral("chat.waitingForUser"),
-                                 {{QStringLiteral("id"), control::ids::nodeId(this).id},
+                                 {{QStringLiteral("session"), sessionModel()->sessionId()},
                                   {QStringLiteral("waiting"), waiting}});
     emit waitingChanged(waiting);
 }
@@ -3454,6 +3442,197 @@ void AcpSessionView::dispatchPrompt(const QString &text,
     scrollToBottomDeferred();
 }
 
+// ---------- Control API ---------------------------------------------------
+
+QString AcpSessionView::sendFromComposer(const QString &text)
+{
+    if (!m_connection || !m_model || !m_input)
+        return tr("This chat has no agent connection.");
+    if (!m_switchingTo.isEmpty())
+        return tr("The session is switching to %1.").arg(m_switchingTo);
+    if (m_resumeBlocked)
+        return tr("The session could not be resumed; restart it first.");
+    if (m_parked.active)
+        return tr("A prompt is already waiting for the agent to connect.");
+    if (text.trimmed().isEmpty())
+        return tr("The prompt is empty.");
+    m_input->setPlainText(text);
+    const int before = m_promptQueue.size();
+    onSendClicked();
+    if (!m_input->toPlainText().trimmed().isEmpty() && m_promptQueue.size() == before)
+        return tr("The prompt was not sent (it is still in the composer).");
+    return QString();
+}
+
+void AcpSessionView::cancelFromComposer()
+{
+    onCancelClicked();
+}
+
+QVector<AcpSessionView::Choice> AcpSessionView::choices(Selector selector) const
+{
+    const QComboBox *combo = selector == Selector::Model ? m_modelCombo
+                           : selector == Selector::Mode  ? m_modeCombo
+                                                         : m_effortCombo;
+    QVector<Choice> out;
+    if (!combo || !combo->isVisible())
+        return out;
+    out.reserve(combo->count());
+    for (int i = 0; i < combo->count(); ++i) {
+        const QString id = combo->itemData(i).toString();
+        if (!id.isEmpty())
+            out.append({id, combo->itemText(i), i == combo->currentIndex()});
+    }
+    return out;
+}
+
+bool AcpSessionView::choose(Selector selector, const QString &id)
+{
+    QComboBox *combo = selector == Selector::Model ? m_modelCombo
+                     : selector == Selector::Mode  ? m_modeCombo
+                                                   : m_effortCombo;
+    if (!combo || !combo->isEnabled())
+        return false;
+    const int index = combo->findData(id);
+    if (index < 0)
+        return false;
+    combo->setCurrentIndex(index);
+    return true;
+}
+
+bool AcpSessionView::autoApprove() const
+{
+    return m_autoApproveAction && m_autoApproveAction->isChecked();
+}
+
+void AcpSessionView::setAutoApprove(bool on)
+{
+    if (m_autoApproveAction)
+        m_autoApproveAction->setChecked(on);
+}
+
+const AcpProtocol::AcpPermissionRequest *AcpSessionView::pendingPermission() const
+{
+    return m_activePermissionPrompt ? &m_activePermissionPrompt->request() : nullptr;
+}
+
+bool AcpSessionView::answerPermission(const QString &optionIdOrKind)
+{
+    return m_activePermissionPrompt && m_activePermissionPrompt->choose(optionIdOrKind);
+}
+
+const GrillMeForm::Spec *AcpSessionView::pendingFormSpec() const
+{
+    return m_pendingForm && m_pendingForm->isPending() ? &m_pendingForm->spec() : nullptr;
+}
+
+QStringList AcpSessionView::answerForm(const QVector<GrillMeForm::Answer> &answers, const QString &note)
+{
+    if (!m_pendingForm || !m_pendingForm->isPending())
+        return {};
+    return m_pendingForm->fillAndSubmit(answers, note);
+}
+
+QString AcpSessionView::attachImage(const QByteArray &data, const QString &filenameHint)
+{
+    if (!m_attachmentList)
+        return tr("This chat cannot take images.");
+    QString reason;
+    const auto c = connect(m_attachmentList, &AcpImageAttachmentList::imageRejected, this,
+                           [&reason](const QString &r) { reason = r; });
+    const bool added = m_attachmentList->tryAddImage(data, filenameHint);
+    disconnect(c);
+    return added ? QString() : (reason.isEmpty() ? tr("The image was refused.") : reason);
+}
+
+QString AcpSessionView::attachImageFile(const QString &path)
+{
+    if (!m_attachmentList)
+        return tr("This chat cannot take images.");
+    QString reason;
+    const auto c = connect(m_attachmentList, &AcpImageAttachmentList::imageRejected, this,
+                           [&reason](const QString &r) { reason = r; });
+    const bool added = m_attachmentList->addFileByPath(path);
+    disconnect(c);
+    return added ? QString() : (reason.isEmpty() ? tr("%1 is not an image the chat takes.").arg(path) : reason);
+}
+
+bool AcpSessionView::newWorktree() const
+{
+    return m_newWorktreeCheck && m_newWorktreeCheck->isChecked();
+}
+
+void AcpSessionView::setNewWorktree(bool on)
+{
+    if (m_newWorktreeCheck)
+        m_newWorktreeCheck->setChecked(on);
+}
+
+QString AcpSessionView::improveComposer()
+{
+    if (!m_input || !m_promptImprover)
+        return tr("Prompt improvement is not available in this chat.");
+    if (m_promptImprover->state() == ai::PromptImprover::State::Streaming)
+        return tr("The prompt is already being improved.");
+    if ((m_model && m_model->isProcessing()) || m_goalRunning)
+        return tr("The session is working; improve the prompt once the turn ends.");
+    if (m_input->toPlainText().trimmed().isEmpty())
+        return tr("The composer is empty.");
+    QString whyNot;
+    if (!m_promptImprover->canImprove(&whyNot))
+        return whyNot.isEmpty() ? tr("Prompt improvement is not configured.") : whyNot;
+    onImproveClicked();
+    return QString();
+}
+
+QStringList AcpSessionView::queuedPromptTexts() const
+{
+    QStringList out;
+    for (const AcpPromptQueue::Item &item : m_promptQueue.items()) {
+        if (!item.host)
+            out.append(item.text);
+    }
+    return out;
+}
+
+bool AcpSessionView::removeQueuedPrompt(int visibleIndex)
+{
+    // Strip rows are the visible items only: host replies cannot be removed.
+    const int index = m_promptQueue.indexOfVisible(visibleIndex);
+    if (index < 0)
+        return false;
+    const bool deferredGoal = m_promptQueue.items().at(index).fromGoalAgent;
+    m_promptQueue.removeAt(index);
+    refreshQueueStrip();
+    if (deferredGoal)
+        emit deferredGoalRemoved();
+    emit promptQueueChanged();
+    return true;
+}
+
+QString AcpSessionView::pickPrewalk(const QString &modelId)
+{
+    if (!prewalkAvailable())
+        return tr("Prewalk is only offered for Claude Code sessions, once the agent has listed its models.");
+    if (!modelId.isEmpty() && m_modelCombo->findData(modelId) < 0)
+        return tr("The model picker has no '%1'; ai.state lists the models.").arg(modelId);
+    onPrewalkPicked(modelId);
+    return QString();
+}
+
+QString AcpSessionView::prewalkTarget() const
+{
+    return m_prewalk.target();
+}
+
+bool AcpSessionView::dismissForm(const QString &note)
+{
+    if (!m_pendingForm || !m_pendingForm->isPending())
+        return false;
+    m_pendingForm->dismiss(note);
+    return true;
+}
+
 void AcpSessionView::onSendClicked()
 {
     if (!m_connection || !m_model || !m_input || composerLocked())
@@ -3534,7 +3713,7 @@ void AcpSessionView::onCancelClicked()
 
 void AcpSessionView::onAttachClicked()
 {
-    const QStringList files = control::picker::getOpenFileNames(
+    const QStringList files = QFileDialog::getOpenFileNames(
         this,
         tr("Attach images"),
         QString(),
@@ -4592,6 +4771,7 @@ void AcpSessionView::onImproveFinished(const QString &improvedText)
     m_improveBtn->setToolTip(tr("Improve prompt with AI (Ctrl+I)"));
     m_input->setFocus();
     updateImproveButtonState();
+    emit improveSettled(true, improvedText);
 }
 
 void AcpSessionView::onImproveError(const QString &message)
@@ -4605,5 +4785,6 @@ void AcpSessionView::onImproveError(const QString &message)
 
     setBanner(message, BannerKind::Warning);
     QTimer::singleShot(4000, this, &AcpSessionView::clearBanner);
+    emit improveSettled(false, message);
 }
 

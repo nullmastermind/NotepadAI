@@ -34,7 +34,6 @@
 #include "widgets/AiDockSessionStrip.h"
 #include "widgets/AiDockTitleBar.h"
 #include "remote/ExecutionContext.h"
-#include "control/ControlIds.h"
 
 #include <QCloseEvent>
 #include <QCoreApplication>
@@ -173,7 +172,6 @@ void AiAgentDock::addSlot(QString sessionId,
     slot.model = model;
     slot.connection = connection;
     slot.view = new AcpSessionView(model, connection, m_registry, m_stack);
-    control::ids::setRoot(slot.view, QStringLiteral("chat:") + slot.sessionId);
     m_stack->addWidget(slot.view);
     wireSlotSignals(slot);
     m_slots.append(std::move(slot));
@@ -476,7 +474,6 @@ void AiAgentDock::rebind(const QString &oldSessionId,
     slot->agentExited = false;
 
     if (slot->view) {
-        control::ids::setRoot(slot->view, QStringLiteral("chat:") + slot->sessionId);
         slot->view->rebind(model, connection);
         // rebind() calls clearGoalStatus(). Goal-driven (and user) restart
         // keeps an Active GoalAgent on this slot — restore the banner.
@@ -1086,6 +1083,42 @@ const AiAgentDock::Slot *AiAgentDock::slotById(const QString &sessionId) const
     return index < 0 ? nullptr : &m_slots[index];
 }
 
+AcpSessionView *AiAgentDock::viewFor(const QString &sessionId) const
+{
+    const Slot *slot = slotById(sessionId);
+    return slot ? slot->view : nullptr;
+}
+
+QString AiAgentDock::agentNameFor(const QString &sessionId) const
+{
+    const Slot *slot = slotById(sessionId);
+    return slot ? slot->agentName : QString();
+}
+
+GoalAgent *AiAgentDock::goalFor(const QString &sessionId) const
+{
+    const Slot *slot = slotById(sessionId);
+    return slot ? slot->goal : nullptr;
+}
+
+AcpConnection *AiAgentDock::connectionFor(const QString &sessionId) const
+{
+    const Slot *slot = slotById(sessionId);
+    return slot ? slot->connection : nullptr;
+}
+
+bool AiAgentDock::hasAgentExited(const QString &sessionId) const
+{
+    const Slot *slot = slotById(sessionId);
+    return slot && slot->agentExited;
+}
+
+AcpSessionModel *AiAgentDock::modelFor(const QString &sessionId) const
+{
+    const Slot *slot = slotById(sessionId);
+    return slot ? slot->model : nullptr;
+}
+
 AiAgentDock::Slot *AiAgentDock::slotForView(const AcpSessionView *view)
 {
     if (!view)
@@ -1529,10 +1562,19 @@ void AiAgentDock::sendWithGoal()
     const auto res = dlg.goalResult();
     if (res.successCriteriaList.isEmpty())
         return;
+    if (const QString error = startGoal(id, res); !error.isEmpty())
+        QMessageBox::information(this, tr("Send with Goal"), error);
+}
 
-    slot = slotById(id);
+QString AiAgentDock::startGoal(const QString &id, const SendWithGoalResult &res)
+{
+    Slot *slot = slotById(id);
     if (!slot)
-        return;
+        return tr("The session is gone.");
+    if (slot->goal && slot->goal->status() == GoalAgent::Active)
+        return tr("A goal is already active on this session. Stop the current goal before starting a new one.");
+    if (res.successCriteriaList.isEmpty())
+        return tr("The goal has no success criteria.");
 
     // Peek first so Attach leaves the composer intact (no stacked send, no
     // dropped follow-up text/images while a turn is in flight).
@@ -1546,17 +1588,14 @@ void AiAgentDock::sendWithGoal()
     const bool processing = slot->model && slot->model->isProcessing();
     const bool hasHistory = slot->model && !slot->model->isEmpty();
     const auto action = GoalAgent::launchAction(hasComposer, hasHistory, processing);
-    if (action == GoalAgent::LaunchAction::NeedComposer) {
-        QMessageBox::information(this, tr("Send with Goal"),
-                                 tr("Type a message before sending with a goal."));
-        return;
-    }
+    if (action == GoalAgent::LaunchAction::NeedComposer)
+        return tr("Type a message before sending with a goal.");
 
     const bool attach = action == GoalAgent::LaunchAction::Attach;
     if (res.useNativeGoal) {
         const QStringList goalCommands = GoalAgent::nativeGoalCommands(res.successCriteriaList);
         if (goalCommands.isEmpty())
-            return;
+            return tr("The goal has no success criteria.");
         if (!attach && slot->view) {
             composerText = slot->view->takeInputText();
             composerImages = slot->view->takeInputImages();
@@ -1568,7 +1607,7 @@ void AiAgentDock::sendWithGoal()
                 if (live && live->view)
                     live->view->insertTextToInput(composerText);
             }
-            return;
+            return tr("The session has no agent connection.");
         }
         live->nativeAutoCompact = res.autoCompact;
         if (!attach) {
@@ -1601,7 +1640,7 @@ void AiAgentDock::sendWithGoal()
             live->connection->sendSidePrompt(wireGoal);
         }
         emit inputFocused();
-        return;
+        return QString();
     }
 
     if (!attach && slot->view) {
@@ -1626,9 +1665,6 @@ void AiAgentDock::sendWithGoal()
 
     Slot *attached = slotById(id);
     if (!attached || !attached->goal || !attached->goal->start(req)) {
-        QMessageBox::warning(this, tr("Send with Goal"),
-                             tr("Failed to start goal. Check that the target session "
-                                "is connected and the goal-agent is available."));
         attached = slotById(id);
         if (attached && attached->goal) {
             attached->goal->deleteLater();
@@ -1639,12 +1675,13 @@ void AiAgentDock::sendWithGoal()
             if (attached && attached->view)
                 attached->view->insertTextToInput(composerText);
         }
-        return;
+        return tr("Failed to start goal. Check that the target session "
+                  "is connected and the goal-agent is available.");
     }
 
     if (attach) {
         emit inputFocused();
-        return;
+        return QString();
     }
 
     QList<QPair<QByteArray, QString>> imageList;
@@ -1661,4 +1698,5 @@ void AiAgentDock::sendWithGoal()
     if (res.prefixGoal && attached->goal)
         attached->goal->sendFirstCriterionGoal();
     emit inputFocused();
+    return QString();
 }

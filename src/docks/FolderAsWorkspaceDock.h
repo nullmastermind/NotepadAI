@@ -45,6 +45,7 @@ class QMenu;
 class QProgressBar;
 class QPushButton;
 class QTimer;
+class GitController;
 class GitTabWidget;
 class GitDiffViewController;
 class GitCommitView;
@@ -143,6 +144,9 @@ public:
     // Returns the lazily-created Git tab, or nullptr if the user has never
     // opened the Git tab in this dock yet.
     GitTabWidget *gitTabWidget() const { return gitTab; }
+    // The workspace's git controller, creating the Git tab's widget if needed
+    // (without switching to it); null when the workspace is not in a repo yet.
+    GitController *gitController();
 
     // Forwards to the per-dock GitDiffViewController, creating it on first use.
     // Host (MainWindow) calls this in response to gitDiffRequested.

@@ -46,6 +46,10 @@ public:
     void historyAdd(const QString &line);
     void historyEnd();
 
+    // Runs `code` as if typed into the console and Enter pressed; returns
+    // what it printed (the echoed command excluded).
+    QString runCommand(const QString &code);
+
 public slots:
     void runCurrentCommand();
 

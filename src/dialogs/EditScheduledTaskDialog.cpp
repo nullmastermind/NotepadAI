@@ -17,7 +17,6 @@
  */
 
 #include "EditScheduledTaskDialog.h"
-#include "control/ControlPicker.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -216,7 +215,7 @@ void EditScheduledTaskDialog::updateCronPreview()
 
 void EditScheduledTaskDialog::onBrowseWorkspace()
 {
-    const QString dir = control::picker::getExistingDirectory(this, tr("Select Workspace"));
+    const QString dir = QFileDialog::getExistingDirectory(this, tr("Select Workspace"));
     if (!dir.isEmpty()) {
         m_workspaceCombo->setCurrentText(dir);
     }

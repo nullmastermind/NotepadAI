@@ -69,6 +69,8 @@ public:
     // Tab presentation.
     QString tabToolTip() const;
     TaskState taskState() const { return m_taskState; }
+    // Exit code of the last task run; -1 while it runs or before it ends.
+    int taskExitCode() const { return m_taskExitCode; }
     bool bellPending() const { return m_bellPending; }
     QString customName() const { return m_customName; }
     // Empty restores the automatic title. Tasks keep their name.
@@ -76,6 +78,11 @@ public:
 
     // Prompt if a command is still running. Returns false when the user cancels.
     bool confirmClose();
+    // Closing would stop work: a command under a local shell, a running task,
+    // or a live remote shell (which cannot be inspected).
+    bool isBusy() const;
+    // Stops the shell and everything it runs.
+    void killProcess();
     // Raise the hosting ADS dock widget (this is no longer a QDockWidget).
     void reveal();
 
@@ -117,6 +124,7 @@ private:
     QString m_lastToolTip;
     TaskState m_taskState = TaskState::None;
     bool m_taskReportsExit = false;
+    int m_taskExitCode = -1;
     bool m_bellPending = false;
 
     TerminalProcessStats::TreeStats m_stats;

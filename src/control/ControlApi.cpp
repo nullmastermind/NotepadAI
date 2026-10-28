@@ -11,33 +11,32 @@
 #include "ControlApi.h"
 
 #include "ApplicationSettings.h"
-#include "ControlActionIndex.h"
 #include "ControlActivityLog.h"
 #include "ControlAuth.h"
 #include "ControlEvents.h"
 #include "ControlFeedback.h"
-#include "ControlIds.h"
-#include "ControlPicker.h"
 #include "ControlScreenshot.h"
 #include "ControlServer.h"
-#include "ControlUiTree.h"
 
-#include <QAction>
+#include "DockManager.h"
+#include "DockWidget.h"
+
 #include <QApplication>
 #include <QBuffer>
 #include <QCoreApplication>
+#include <QDockWidget>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFutureWatcher>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QKeyEvent>
-#include <QLineEdit>
 #include <QMainWindow>
-#include <QMenu>
+#include <QMessageBox>
 #include <QNetworkInterface>
-#include <QPixmap>
+#include <QStackedWidget>
+#include <QTabWidget>
+#include <QTextDocumentFragment>
 #include <QTimer>
 #include <QtConcurrent/QtConcurrentRun>
 
@@ -58,13 +57,6 @@ constexpr char kPendingWait[] = "controlPendingWait";
 QByteArray routeKey(const QByteArray &method, const QByteArray &path)
 {
     return method + ' ' + path;
-}
-
-QString menuLabel(const QStringList &path, const QString &label)
-{
-    QStringList parts = path;
-    parts.append(label);
-    return parts.join(QStringLiteral(" ▸ "));
 }
 
 } // namespace
@@ -112,23 +104,7 @@ ControlApi::ControlApi(const Host &host, QMainWindow *window, QObject *parent)
     , m_feedback(new ControlFeedback(this))
     , m_events(new ControlEvents(this))
 {
-    m_events->setPresence(m_host.presence);
-    route("GET", "/instance", [this](const http::Request &, const QJsonObject &, const Reply &reply) {
-        handleInstance(reply);
-    });
-    route("GET", "/actions", [this](const http::Request &request, const QJsonObject &, const Reply &reply) {
-        handleActions(request, reply);
-    });
-    route("POST", "/actions/trigger", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
-        handleTrigger(body, reply);
-    });
-    route("GET", "/log", [this](const http::Request &request, const QJsonObject &, const Reply &reply) {
-        const int limit = request.hasQuery("limit") ? request.queryValue("limit").toInt() : 100;
-        reply.json(200, {{QStringLiteral("ok"), true},
-                         {QStringLiteral("entries"), m_log->toJson(qBound(1, limit, int(ControlActivityLog::kCapacity)))}});
-    });
-    registerUiRoutes();
-    registerEventRoutes();
+    registerRoutes();
 }
 
 ControlApi::~ControlApi()
@@ -279,9 +255,9 @@ void ControlApi::regenerateToken()
 QString ControlApi::connectionPrompt()
 {
     return QStringLiteral(
-               "NotepadAI (the code editor on this machine) exposes a Control API so you can operate it the "
-               "way its user does: every change you make goes through its visible menus, buttons and fields, "
-               "and the user sees it.\n\n"
+               "NotepadAI (the code editor on this machine) exposes a Control API: you operate it by calling "
+               "commands (open a project or file, edit text, run terminals, drive AI agent sessions, git, "
+               "settings), and its window shows the user everything those commands do.\n\n"
                "NOTEPADAI_URL=%1\n"
                "NOTEPADAI_TOKEN=%2\n\n"
                "1. Fetch the skill:\n"
@@ -295,12 +271,19 @@ QString ControlApi::connectionPrompt()
         .arg(baseUrl(), token());
 }
 
-QByteArray ControlApi::skillText()
+QByteArray ControlApi::skillGuide()
 {
     QFile f(QStringLiteral(":/control/SKILL.md"));
     if (!f.open(QIODevice::ReadOnly))
         return QByteArrayLiteral("# notepadai-control\n\nSkill resource missing from this build.\n");
-    return f.readAll();
+    // LF whatever the checkout's line endings (autocrlf builds embed CRLF):
+    // agents parse the front matter.
+    return f.readAll().replace("\r\n", "\n");
+}
+
+QByteArray ControlApi::skill() const
+{
+    return skillGuide() + '\n' + m_commands.reference();
 }
 
 QJsonObject ControlApi::versionJson()
@@ -322,7 +305,7 @@ void ControlApi::restart()
     ControlServer::Config config;
     config.port = configuredPort();
     config.token = token();
-    config.skill = skillText();
+    config.skill = skill();
     config.skillVersion = QJsonDocument(versionJson()).toJson(QJsonDocument::Compact);
     if (allowLan()) {
         config.bindAddress = QHostAddress::AnyIPv4;
@@ -358,24 +341,6 @@ void ControlApi::route(const QByteArray &method, const QByteArray &path, Handler
     m_routes.emplace(routeKey(method, path), std::move(handler));
 }
 
-void ControlApi::notePicker(const QString &id, const QString &valueHint)
-{
-    m_pickers.insert(id, valueHint);
-}
-
-QStringList ControlApi::pickerValues(const QJsonValue &value)
-{
-    QStringList out;
-    if (value.isArray()) {
-        const QJsonArray array = value.toArray();
-        for (const auto &v : array)
-            out.append(v.toVariant().toString());
-    } else {
-        out = value.toVariant().toString().split(QLatin1Char('\n'));
-    }
-    return out;
-}
-
 void ControlApi::logAction(const QString &op, const QString &target, const QString &label, bool ok,
                            const QString &detail, const QJsonObject &args)
 {
@@ -398,212 +363,11 @@ void ControlApi::logAction(const QString &op, const QString &target, const QStri
         events::publish(QStringLiteral("action"), data);
     }
     m_log->append(std::move(e));
-    emit commandRan();
 }
-
-void ControlApi::onRequest(quint64 id, const http::Request &request)
-{
-    const Reply reply(m_server, id);
-    QJsonObject body;
-    if (!request.body.isEmpty()) {
-        QJsonParseError err{};
-        const QJsonDocument doc = QJsonDocument::fromJson(request.body, &err);
-        if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-            reply.error(400, QStringLiteral("body must be a JSON object: %1").arg(err.errorString()));
-            return;
-        }
-        body = doc.object();
-    }
-    const auto it = m_routes.constFind(routeKey(request.method, request.path));
-    if (it == m_routes.constEnd()) {
-        bool pathKnown = false;
-        for (auto r = m_routes.constBegin(); r != m_routes.constEnd(); ++r)
-            pathKnown = pathKnown || r.key().endsWith(' ' + request.path);
-        if (pathKnown)
-            reply.error(405, QStringLiteral("method not allowed"));
-        else
-            reply.error(404, QStringLiteral("no endpoint %1 %2; see GET /skill")
-                                 .arg(QString::fromLatin1(request.method), QString::fromLatin1(request.path)));
-        return;
-    }
-    (*it)(request, body, reply);
-}
-
-void ControlApi::handleInstance(const Reply &reply)
-{
-    QJsonObject o = versionJson();
-    o.insert(QStringLiteral("ok"), true);
-    o.insert(QStringLiteral("pid"), qint64(QCoreApplication::applicationPid()));
-    o.insert(QStringLiteral("url"), baseUrl());
-    if (m_host.instanceInfo) {
-        const QJsonObject info = m_host.instanceInfo();
-        for (auto it = info.constBegin(); it != info.constEnd(); ++it)
-            o.insert(it.key(), it.value());
-    }
-    reply.json(200, o);
-}
-
-void ControlApi::handleActions(const http::Request &request, const Reply &reply)
-{
-    if (!m_window) {
-        reply.error(503, QStringLiteral("no window"));
-        return;
-    }
-    const ControlActionIndex index(m_window);
-    const QString menu = request.queryValue("menu");
-    const auto entries = index.list(menu);
-    if (!menu.isEmpty() && entries.isEmpty() && !index.resolve(menu).action) {
-        reply.error(404, QStringLiteral("no menu '%1'").arg(menu));
-        return;
-    }
-    QJsonArray actions;
-    for (const auto &e : entries) {
-        QJsonObject o = ControlActionIndex::toJson(e);
-        const auto picker = m_pickers.constFind(e.id);
-        if (picker != m_pickers.constEnd())
-            o.insert(QStringLiteral("value"), picker.value());
-        actions.append(o);
-    }
-    reply.json(200, {{QStringLiteral("ok"), true}, {QStringLiteral("actions"), actions}});
-}
-
-void ControlApi::runCommand(const Reply &reply, std::function<QString()> act, const QJsonObject &extra,
-                            const QStringList *pickerValues)
-{
-    const bool withValue = pickerValues != nullptr;
-    // One value at a time: an earlier command may still be inside a dialog
-    // its action opened before reaching its picker.
-    if (withValue && picker::isArmed()) {
-        reply.error(409, QStringLiteral("an earlier direct command is still waiting for its picker; answer the "
-                                        "dialog it opened first"),
-                    extra);
-        return;
-    }
-    const ControlSnapshot before = ControlSnapshot::take(m_host.presence);
-    auto error = std::make_shared<QString>();
-    auto valueUsed = std::make_shared<bool>(false);
-    const QStringList values = withValue ? *pickerValues : QStringList();
-    runUntilSettled(this, [act = std::move(act), error, valueUsed, withValue, values, reply] {
-            // Stopped (or restarted) since the request came in: it has no effect.
-            if (!reply.live())
-                return;
-            // The value serves only pickers this action opens while it runs.
-            if (withValue)
-                picker::arm(values);
-            *error = act();
-            if (withValue)
-                *valueUsed = picker::disarm();
-        },
-        [this, reply, before, error, valueUsed, extra, withValue](bool finished) {
-            if (finished && !error->isEmpty()) {
-                reply.error(422, *error, extra);
-                return;
-            }
-            QJsonObject body = extra;
-            if (withValue && !finished) {
-                body.insert(QStringLiteral("valuePending"), picker::isArmed());
-            } else if (withValue) {
-                body.insert(QStringLiteral("valueUsed"), *valueUsed);
-                if (!*valueUsed)
-                    body.insert(QStringLiteral("warning"),
-                                QStringLiteral("no picker opened, so the value was not used"));
-            }
-            body.insert(QStringLiteral("ok"), true);
-            body.insert(QStringLiteral("completed"), finished);
-            body.insert(QStringLiteral("effects"), before.diff(ControlSnapshot::take(m_host.presence)));
-            reply.json(200, body);
-        });
-}
-
-void ControlApi::handleTrigger(const QJsonObject &body, const Reply &reply)
-{
-    if (!m_window) {
-        reply.error(503, QStringLiteral("no window"));
-        return;
-    }
-    const QString id = body.value(QStringLiteral("id")).toString();
-    if (id.isEmpty()) {
-        reply.error(400, QStringLiteral("missing \"id\""));
-        return;
-    }
-    const ControlActionIndex index(m_window);
-    const ControlActionIndex::Resolved r = index.resolve(id);
-    if (!r.action) {
-        reply.error(404, r.error);
-        return;
-    }
-    const QString label = menuLabel(r.menuPath, ControlActionIndex::plainText(r.action->text()));
-    if (!r.visible) {
-        logAction(QStringLiteral("trigger"), id, label, false, QStringLiteral("not visible"));
-        QString message = QStringLiteral("'%1' is hidden; a user could not click it").arg(label);
-        const QString alternative = r.action->property(ids::kAlternativeProperty).toString();
-        if (!alternative.isEmpty()) {
-            const ControlActionIndex::Resolved alt = index.resolve(alternative);
-            if (alt.action && alt.visible && alt.enabled)
-                message += QStringLiteral(". '%1' (id %2) does the same")
-                               .arg(menuLabel(alt.menuPath, ControlActionIndex::plainText(alt.action->text())),
-                                    alternative);
-        }
-        reply.error(409, message);
-        return;
-    }
-    if (!r.enabled) {
-        logAction(QStringLiteral("trigger"), id, label, false, QStringLiteral("disabled"));
-        reply.error(409, QStringLiteral("'%1' is disabled; a user could not click it").arg(label));
-        return;
-    }
-    // The window's menus and toolbars cannot be clicked behind a modal dialog
-    // (an open popup menu's own items can).
-    if (QWidget *modal = QApplication::activeModalWidget(); modal && !r.inPopup && modal != m_window) {
-        logAction(QStringLiteral("trigger"), id, label, false, QStringLiteral("behind a modal dialog"));
-        reply.error(409, QStringLiteral("the modal dialog '%1' is open; answer it first").arg(ids::nodeId(modal).id));
-        return;
-    }
-    // Nor while a menu is open (its exec() loop is on the stack): only its own items.
-    if (QApplication::activePopupWidget() && !r.inPopup) {
-        logAction(QStringLiteral("trigger"), id, label, false, QStringLiteral("a menu is open"));
-        reply.error(409, QStringLiteral("a menu is open; pick from it, or close it with POST /ui/key {\"keys\": \"Escape\"}"));
-        return;
-    }
-
-    const bool hasValue = body.contains(QStringLiteral("value"));
-    const QStringList values = hasValue ? pickerValues(body.value(QStringLiteral("value"))) : QStringList();
-    std::function<QString()> act;
-    if (r.inPopup && r.menu) {
-        // Select it and press Return: exec() returns this action, as on a click.
-        QPointer<QMenu> menu = r.menu;
-        QPointer<QAction> action = r.action;
-        act = [menu, action] {
-            if (!menu || !action)
-                return QStringLiteral("the menu closed");
-            menu->setActiveAction(action);
-            QKeyEvent press(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
-            QApplication::sendEvent(menu, &press);
-            return QString();
-        };
-    } else {
-        QPointer<QAction> action = r.action;
-        act = [action] {
-            if (!action)
-                return QStringLiteral("the action went away");
-            action->trigger();
-            return QString();
-        };
-    }
-
-    if (!r.inPopup)
-        m_feedback->flashAction(r.action);
-    logAction(QStringLiteral("trigger"), id, label, true, QString(),
-              hasValue ? QJsonObject{{QStringLiteral("value"), QJsonArray::fromStringList(values)}} : QJsonObject());
-    runCommand(reply, std::move(act), {{QStringLiteral("action"), id}, {QStringLiteral("label"), label}},
-               hasValue ? &values : nullptr);
-}
-
-// --- /ui ---------------------------------------------------------------------
 
 namespace {
 
-// A log line's copy of a string: bounded, so a pasted file cannot fill the log.
+// A log line's copy of a value: bounded, so a pasted file cannot fill the log.
 QJsonValue loggedValue(const QJsonValue &v)
 {
     constexpr qsizetype kMaxChars = 120;
@@ -628,243 +392,86 @@ QJsonValue loggedValue(const QJsonValue &v)
     return v;
 }
 
-// What the step was given (the body minus its id), as the log keeps it.
-// Never what goes into a password field.
-QJsonObject loggedArgs(const QJsonObject &body, const QWidget *target)
+// What the command was given, as the log keeps it: secrets masked.
+QJsonObject loggedArgs(const Command &command, const QJsonObject &args)
 {
-    QJsonObject args;
-    const auto *edit = qobject_cast<const QLineEdit *>(target);
-    const bool secret = edit && edit->echoMode() != QLineEdit::Normal;
-    for (auto it = body.constBegin(); it != body.constEnd(); ++it) {
-        if (it.key() == QLatin1String("id"))
+    QJsonObject out;
+    for (auto it = args.constBegin(); it != args.constEnd(); ++it) {
+        bool secret = false;
+        for (const Arg &a : command.args)
+            secret = secret || (a.name == it.key() && a.secret);
+        out.insert(it.key(), secret ? QJsonValue(QStringLiteral("••••")) : loggedValue(it.value()));
+    }
+    return out;
+}
+
+// What the status bar and the log show for a step: the command and its first
+// two non-secret arguments in declared order ("files.open "src/app.py""),
+// short enough for the indicator; the log keeps every argument besides.
+QString stepLabel(const Command &command, const QJsonObject &args)
+{
+    QStringList parts{command.name};
+    for (const Arg &a : command.args) {
+        if (parts.size() > 2)
+            break;
+        const QJsonValue v = args.value(a.name);
+        if (a.secret || v.isUndefined() || v.isNull())
             continue;
-        const bool typed = it.key() == QLatin1String("text") || it.key() == QLatin1String("value");
-        args.insert(it.key(), secret && typed ? QJsonValue(QStringLiteral("••••")) : loggedValue(it.value()));
+        if (v.isString()) {
+            QString text = v.toString().simplified();
+            if (text.isEmpty())
+                continue;
+            if (text.size() > 48)
+                text = text.left(47) + QChar(0x2026);
+            parts.append(QLatin1Char('"') + text + QLatin1Char('"'));
+        } else if (v.isArray()) {
+            parts.append(QStringLiteral("%1[%2]").arg(a.name).arg(v.toArray().size()));
+        } else if (!v.isObject()) {
+            parts.append(a.name + QLatin1Char('=') + argText(v));
+        }
     }
-    return args;
+    return parts.join(QLatin1Char(' '));
 }
 
-} // namespace
-
-void ControlApi::uiCommand(const QJsonObject &body, const Reply &reply, const QString &op, bool needsTarget,
-                           const std::function<QString(const ui::Target &)> &fn)
-{
-    const QString id = body.value(QStringLiteral("id")).toString();
-    ui::Target target;
-    if (!id.isEmpty()) {
-        target = ui::resolve(id);
-        if (!target.widget) {
-            reply.error(404, target.error + QStringLiteral("; list nodes with GET /ui"));
-            return;
-        }
-        const QString blocked = ui::blockedReason(target, op);
-        if (!blocked.isEmpty()) {
-            logAction(op, id, ui::labelOf(target.widget), false, blocked, loggedArgs(body, target.widget));
-            reply.error(409, blocked);
-            return;
-        }
-    } else if (needsTarget) {
-        reply.error(400, QStringLiteral("missing \"id\""));
-        return;
-    }
-
-    QString label = target.widget ? ui::labelOf(target.widget) : QString();
-    if (!target.part.isEmpty())
-        label += QStringLiteral(" @ ") + target.part;
-    if (target.widget)
-        m_feedback->flash(target.widget, ui::targetRect(target));
-    logAction(op, id, label, true, QString(), loggedArgs(body, target.widget));
-
-    QPointer<QWidget> widget = target.widget;
-    const QString part = target.part;
-    const bool hadTarget = target.widget != nullptr;
-    const bool hasValue = op == QLatin1String("click") && body.contains(QStringLiteral("value"));
-    const QStringList values = hasValue ? pickerValues(body.value(QStringLiteral("value"))) : QStringList();
-    runCommand(reply, [widget, part, hadTarget, fn] {
-            if (hadTarget && !widget)
-                return QStringLiteral("it went away");
-            ui::Target t;
-            t.widget = widget;
-            t.part = part;
-            return fn(t);
-        }, {{QStringLiteral("op"), op}, {QStringLiteral("id"), id}}, hasValue ? &values : nullptr);
-}
-
-void ControlApi::registerUiRoutes()
-{
-    auto readOptions = [](const http::Request &r) {
-        ReadOptions o;
-        if (r.hasQuery("from"))
-            o.from = r.queryValue("from").toLongLong();
-        if (r.hasQuery("count"))
-            o.count = r.queryValue("count").toLongLong();
-        return o;
-    };
-
-    route("GET", "/ui", [](const http::Request &r, const QJsonObject &, const Reply &reply) {
-        ui::TreeOptions options;
-        if (r.hasQuery("depth"))
-            options.depth = qBound(0, r.queryValue("depth").toInt(), 64);
-        if (r.hasQuery("parts"))
-            options.maxParts = qBound(0, r.queryValue("parts").toInt(), 2000);
-        options.includeHidden = r.queryValue("hidden") == QLatin1String("1");
-        QWidget *root = nullptr;
-        const QString rootId = r.queryValue("root");
-        if (!rootId.isEmpty()) {
-            QString error;
-            root = ids::resolveNode(rootId, &error);
-            if (!root) {
-                reply.error(404, error);
-                return;
-            }
-        }
-        reply.json(200, ui::tree(root, options));
-    });
-    route("GET", "/ui/node", [](const http::Request &r, const QJsonObject &, const Reply &reply) {
-        const ui::Target t = ui::resolve(r.queryValue("id"));
-        if (!t.widget) {
-            reply.error(404, t.error);
-            return;
-        }
-        reply.json(200, ui::node(t.widget));
-    });
-    route("GET", "/ui/read", [readOptions](const http::Request &r, const QJsonObject &, const Reply &reply) {
-        const ui::Target t = ui::resolve(r.queryValue("id"));
-        if (!t.widget) {
-            reply.error(404, t.error);
-            return;
-        }
-        const QJsonObject out = ui::read(t.widget, t.part, readOptions(r));
-        reply.json(out.value(QStringLiteral("ok")).toBool() ? 200 : 404, out);
-    });
-    route("GET", "/ui/find", [](const http::Request &r, const QJsonObject &, const Reply &reply) {
-        const int limit = r.hasQuery("limit") ? qBound(1, r.queryValue("limit").toInt(), 500) : 50;
-        const QString text = r.queryValue("text");
-        const QString role = r.queryValue("role");
-        if (text.isEmpty() && role.isEmpty()) {
-            reply.error(400, QStringLiteral("give text= and/or role="));
-            return;
-        }
-        reply.json(200, {{QStringLiteral("ok"), true}, {QStringLiteral("nodes"), ui::find(text, role, limit)}});
-    });
-
-    route("POST", "/ui/click", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
-        const QString b = body.value(QStringLiteral("button")).toString();
-        const Qt::MouseButton button = b == QLatin1String("right")    ? Qt::RightButton
-                                       : b == QLatin1String("middle") ? Qt::MiddleButton
-                                                                      : Qt::LeftButton;
-        const bool dbl = body.value(QStringLiteral("double")).toBool();
-        uiCommand(body, reply, QStringLiteral("click"), true,
-                  [button, dbl](const ui::Target &t) { return ui::click(t, button, dbl); });
-    });
-    route("POST", "/ui/type", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
-        const QString text = body.value(QStringLiteral("text")).toString();
-        const bool replace = body.value(QStringLiteral("replace")).toBool();
-        uiCommand(body, reply, QStringLiteral("type"), true,
-                  [text, replace](const ui::Target &t) { return ui::type(t, text, replace); });
-    });
-    route("POST", "/ui/key", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
-        QStringList sequences;
-        const QJsonValue keys = body.value(QStringLiteral("keys"));
-        if (keys.isArray()) {
-            const QJsonArray array = keys.toArray();
-            for (const auto &k : array)
-                sequences.append(k.toString());
-        } else {
-            sequences.append(keys.toString());
-        }
-        uiCommand(body, reply, QStringLiteral("key"), false, [sequences](const ui::Target &t) {
-            for (const QString &s : sequences) {
-                const QString error = ui::keys(t, s);
-                if (!error.isEmpty())
-                    return error;
-            }
-            return QString();
-        });
-    });
-    route("POST", "/ui/select", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
-        uiCommand(body, reply, QStringLiteral("select"), true,
-                  [body](const ui::Target &t) { return ui::select(t, body); });
-    });
-    route("POST", "/ui/set", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
-        const QJsonValue value = body.value(QStringLiteral("value"));
-        uiCommand(body, reply, QStringLiteral("set"), true,
-                  [value](const ui::Target &t) { return ui::set(t, value); });
-    });
-    route("POST", "/ui/scroll", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
-        uiCommand(body, reply, QStringLiteral("scroll"), true,
-                  [body](const ui::Target &t) { return ui::scroll(t, body); });
-    });
-    route("POST", "/ui/close", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
-        uiCommand(body, reply, QStringLiteral("close"), true, [](const ui::Target &t) { return ui::close(t); });
-    });
-    route("POST", "/ui/focus", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
-        uiCommand(body, reply, QStringLiteral("focus"), true, [](const ui::Target &t) { return ui::focus(t); });
-    });
-    route("POST", "/ui/do", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
-        const QString op = body.value(QStringLiteral("op")).toString();
-        const QJsonObject args = body.value(QStringLiteral("args")).toObject();
-        if (op.isEmpty()) {
-            reply.error(400, QStringLiteral("missing \"op\""));
-            return;
-        }
-        uiCommand(body, reply, op, true, [op, args](const ui::Target &t) { return ui::perform(t, op, args); });
-    });
-}
-
-// --- /wait and /screenshot -----------------------------------------------------
-
-namespace {
-
-// Whether any string the read shows (text, values, rows, labels; never ids,
-// keys or field names) contains `needle`.
-bool shownTextContains(const QJsonValue &v, const QString &needle, const QString &key = QString())
+// Whether a string anywhere in `v` contains `needle`.
+bool textContains(const QJsonValue &v, const QString &needle)
 {
     if (v.isString())
-        return key != QLatin1String("id") && key != QLatin1String("key") && v.toString().contains(needle);
+        return v.toString().contains(needle);
     if (v.isArray()) {
         const QJsonArray a = v.toArray();
         for (const auto &e : a) {
-            if (shownTextContains(e, needle, key))
+            if (textContains(e, needle))
                 return true;
         }
     } else if (v.isObject()) {
         const QJsonObject o = v.toObject();
         for (auto it = o.constBegin(); it != o.constEnd(); ++it) {
-            if (shownTextContains(it.value(), needle, it.key()))
+            if (textContains(it.value(), needle))
                 return true;
         }
     }
     return false;
 }
 
-// Whether a node is in `state` now. Missing fields count as satisfied.
-bool nodeInState(const QString &id, const QString &state, const QString &text)
+// `until`: each field equals the value, or one of an array's values.
+// `contains`: each field's text contains the string.
+bool resultMatches(const QJsonObject &result, const QJsonObject &until, const QJsonObject &contains)
 {
-    const ui::Target t = ui::resolve(id);
-    if (state == QLatin1String("gone"))
-        return !t.widget;
-    if (!t.widget)
-        return false;
-    if (!text.isEmpty())
-        return shownTextContains(ui::read(t.widget, t.part, {}), text);
-    if (state.isEmpty() || state == QLatin1String("exists"))
-        return true;
-    if (state == QLatin1String("visible"))
-        return t.widget->isVisible();
-    if (state == QLatin1String("hidden"))
-        return !t.widget->isVisible();
-    if (state == QLatin1String("enabled"))
-        return t.widget->isVisible() && t.widget->isEnabled();
-    if (state == QLatin1String("disabled"))
-        return !t.widget->isEnabled();
-    const QJsonObject node = ui::node(t.widget);
-    if (state == QLatin1String("idle"))
-        return !node.value(QStringLiteral("working")).toBool() && node.value(QStringLiteral("queued")).toInt() == 0
-               && !node.value(QStringLiteral("waitingForUser")).toBool(); // a pending form is not idle
-    if (state == QLatin1String("waitingForUser"))
-        return node.value(QStringLiteral("waitingForUser")).toBool();
-    return false;
+    for (auto it = until.constBegin(); it != until.constEnd(); ++it) {
+        const QJsonValue have = result.value(it.key());
+        if (it.value().isArray()) {
+            if (!it.value().toArray().contains(have))
+                return false;
+        } else if (have != it.value()) {
+            return false;
+        }
+    }
+    for (auto it = contains.constBegin(); it != contains.constEnd(); ++it) {
+        if (!textContains(result.value(it.key()), it.value().toString()))
+            return false;
+    }
+    return true;
 }
 
 bool eventMatches(const QString &pattern, const QJsonObject &match, const QString &name, const QJsonObject &data)
@@ -878,39 +485,230 @@ bool eventMatches(const QString &pattern, const QJsonObject &match, const QStrin
     return true;
 }
 
-// NOLINTNEXTLINE(bugprone-throwing-static-initialization): a QStringList table cannot have noexcept dynamic init.
-const QStringList kStates{QStringLiteral("exists"),  QStringLiteral("gone"),     QStringLiteral("visible"),
-                          QStringLiteral("hidden"),  QStringLiteral("enabled"),  QStringLiteral("disabled"),
-                          QStringLiteral("idle"),    QStringLiteral("waitingForUser")};
-
 } // namespace
 
-void ControlApi::registerEventRoutes()
+void ControlApi::onRequest(quint64 id, const http::Request &request)
 {
-    // {"event": "chat.turnEnded", "match": {...}} or {"id": node, "state": a state or a list (any of
-    // them), "text": ...}; "timeout" seconds.
-    route("POST", "/wait", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
-        const QString event = body.value(QStringLiteral("event")).toString();
-        const QString id = body.value(QStringLiteral("id")).toString();
-        QStringList states;
-        if (const QJsonValue sv = body.value(QStringLiteral("state")); sv.isArray()) {
-            const QJsonArray list = sv.toArray();
-            for (const auto &v : list)
-                states.append(v.toString());
-        } else if (!sv.toString().isEmpty()) {
-            states.append(sv.toString());
-        }
-        const QString text = body.value(QStringLiteral("text")).toString();
-        if (event.isEmpty() && id.isEmpty()) {
-            reply.error(400, QStringLiteral("give \"event\" (a name, or a prefix ending in *), or \"id\" with "
-                                            "\"state\" (%1) or \"text\"")
-                                 .arg(kStates.join(QStringLiteral(", "))));
+    const Reply reply(m_server, id);
+    QJsonObject body;
+    if (!request.body.isEmpty()) {
+        QJsonParseError err{};
+        const QJsonDocument doc = QJsonDocument::fromJson(request.body, &err);
+        if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+            reply.error(400, QStringLiteral("body must be a JSON object: %1").arg(err.errorString()));
             return;
         }
-        for (const QString &state : std::as_const(states)) {
-            if (!kStates.contains(state)) {
-                reply.error(400, QStringLiteral("unknown state '%1'; use one of: %2")
-                                     .arg(state, kStates.join(QStringLiteral(", "))));
+        body = doc.object();
+    }
+    constexpr QByteArrayView kCommandPrefix("/commands/");
+    if (request.path.startsWith(kCommandPrefix)) {
+        const QString name =
+            QString::fromUtf8(QByteArray::fromPercentEncoding(request.path.mid(kCommandPrefix.size())));
+        handleCommand(name, request, std::move(body), reply);
+        return;
+    }
+    const auto it = m_routes.constFind(routeKey(request.method, request.path));
+    if (it == m_routes.constEnd()) {
+        bool pathKnown = false;
+        for (auto r = m_routes.constBegin(); r != m_routes.constEnd(); ++r)
+            pathKnown = pathKnown || r.key().endsWith(' ' + request.path);
+        if (pathKnown)
+            reply.error(405, QStringLiteral("method not allowed"));
+        else
+            reply.error(404, QStringLiteral("no endpoint %1 %2; see GET /skill")
+                                 .arg(QString::fromLatin1(request.method), QString::fromLatin1(request.path)));
+        return;
+    }
+    (*it)(request, body, reply);
+}
+
+void ControlApi::handleCommand(const QString &name, const http::Request &request, QJsonObject body,
+                               const Reply &reply)
+{
+    const Command *command = m_commands.find(name);
+    if (!command) {
+        // Same domain's commands help a near miss ("file.open" for "files.open").
+        const QString domain = name.left(name.lastIndexOf(QLatin1Char('.')));
+        QStringList near;
+        for (const Command &c : m_commands.all()) {
+            if (!domain.isEmpty() && c.name.startsWith(domain))
+                near.append(c.name);
+        }
+        reply.error(404, near.isEmpty()
+                             ? QStringLiteral("no command '%1'; GET /commands lists them").arg(name)
+                             : QStringLiteral("no command '%1'; %2 has: %3")
+                                   .arg(name, domain, near.join(QStringLiteral(", "))));
+        return;
+    }
+    if (request.method == "GET") {
+        if (command->changes) {
+            reply.error(405, QStringLiteral("%1 changes things: POST it with a JSON body").arg(name),
+                        {{QStringLiteral("command"), CommandRegistry::describe(*command)}});
+            return;
+        }
+        body = CommandRegistry::queryArgs(*command, request);
+    } else if (request.method != "POST") {
+        reply.error(405, QStringLiteral("use POST (or GET for a command that changes nothing)"));
+        return;
+    }
+    run(name, std::move(body), [reply](int status, const QJsonObject &result) { reply.json(status, result); });
+}
+
+void ControlApi::run(const QString &name, QJsonObject args, const Respond &respond)
+{
+    const Command *command = m_commands.find(name);
+    if (!command) {
+        respond(404, {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("no command '%1'").arg(name)}});
+        return;
+    }
+    if (const QString error = CommandRegistry::validate(*command, args); !error.isEmpty()) {
+        if (command->changes)
+            logAction(command->name, QString(), stepLabel(*command, args), false, error, loggedArgs(*command, args));
+        respond(400, {{QStringLiteral("ok"), false}, {QStringLiteral("error"), error}});
+        return;
+    }
+    execute(*command, std::move(args), respond);
+}
+
+void ControlApi::execute(const Command &command, QJsonObject args, Respond respond)
+{
+    // A dialog or menu the app opens on its own while a handler runs (a
+    // "modified by another program, reload?" prompt when the tab a command
+    // brings forward changed on disk) would hold the answer until the user
+    // closed it. It is cancelled, the answer that changes nothing, and the
+    // answer names it. Only while the handler is on the stack: a dialog that
+    // opens later is the user's to answer.
+    auto dismissed = std::make_shared<QJsonArray>();
+    CommandContext::Hooks hooks;
+    hooks.respond = [respond = std::move(respond), dismissed](int status, const QJsonObject &body) {
+        if (dismissed->isEmpty()) {
+            respond(status, body);
+            return;
+        }
+        QJsonObject withDialogs = body;
+        withDialogs.insert(QStringLiteral("dismissedDialogs"), *dismissed);
+        respond(status, withDialogs);
+    };
+    if (command.changes) {
+        const QJsonObject logged = loggedArgs(command, args);
+        const QString label = stepLabel(command, args);
+        hooks.finished = [this, name = command.name, label, logged](bool ok, const QString &error) {
+            logAction(name, QString(), label, ok, error, logged);
+        };
+        hooks.reveal = [this](QWidget *w) { reveal(w); };
+        emit commandRan(label);
+    }
+    const CommandContext ctx(&command, std::move(args), std::move(hooks));
+    QWidget *const modalBefore = QApplication::activeModalWidget();
+    QWidget *const popupBefore = QApplication::activePopupWidget();
+    QTimer trap; // fires only inside a nested event loop
+    trap.setInterval(20);
+    connect(&trap, &QTimer::timeout, this, [this, modalBefore, popupBefore, dismissed, name = command.name] {
+        QWidget *opened = QApplication::activePopupWidget();
+        if (!opened || opened == popupBefore)
+            opened = QApplication::activeModalWidget();
+        if (!opened || opened == modalBefore || opened == popupBefore)
+            return;
+        QJsonObject dialog{{QStringLiteral("title"), opened->windowTitle()}};
+        if (auto *box = qobject_cast<QMessageBox *>(opened)) {
+            const QString text = box->text();
+            dialog.insert(QStringLiteral("text"), Qt::mightBeRichText(text)
+                                                      ? QTextDocumentFragment::fromHtml(text).toPlainText()
+                                                      : text);
+        }
+        dismissed->append(dialog);
+        logAction(name, QString(), tr("Cancelled a dialog it opened: %1").arg(opened->windowTitle()), true);
+        if (auto *d = qobject_cast<QDialog *>(opened))
+            d->reject();
+        else
+            opened->close();
+    });
+    trap.start();
+    command.handler(ctx);
+    trap.stop();
+    if (ctx.abandoned())
+        ctx.fail(500, QStringLiteral("%1 did not answer (a bug in NotepadAI)").arg(command.name));
+}
+
+void ControlApi::reveal(QWidget *widget)
+{
+    revealWidget(widget);
+    // Flash once the tab switch has laid it out (a new tab is shown a pass later).
+    QTimer::singleShot(0, this, [this, w = QPointer<QWidget>(widget)] {
+        if (w)
+            m_feedback->flash(w);
+    });
+}
+
+void ControlApi::handleInstance(const Reply &reply)
+{
+    QJsonObject o = versionJson();
+    o.insert(QStringLiteral("ok"), true);
+    o.insert(QStringLiteral("pid"), qint64(QCoreApplication::applicationPid()));
+    o.insert(QStringLiteral("url"), baseUrl());
+    o.insert(QStringLiteral("commands"), int(m_commands.all().size()));
+    if (m_host.instanceInfo) {
+        const QJsonObject info = m_host.instanceInfo();
+        for (auto it = info.constBegin(); it != info.constEnd(); ++it)
+            o.insert(it.key(), it.value());
+    }
+    reply.json(200, o);
+}
+
+void ControlApi::registerRoutes()
+{
+    route("GET", "/instance", [this](const http::Request &, const QJsonObject &, const Reply &reply) {
+        handleInstance(reply);
+    });
+    route("GET", "/log", [this](const http::Request &request, const QJsonObject &, const Reply &reply) {
+        const int limit = request.hasQuery("limit") ? request.queryValue("limit").toInt() : 100;
+        reply.json(200, {{QStringLiteral("ok"), true},
+                         {QStringLiteral("entries"), m_log->toJson(qBound(1, limit, int(ControlActivityLog::kCapacity)))}});
+    });
+    route("GET", "/commands", [this](const http::Request &request, const QJsonObject &, const Reply &reply) {
+        // ?domain=files lists files.*; no domain: all of them.
+        const QString domain = request.queryValue("domain");
+        QJsonArray list;
+        for (const Command &c : m_commands.all()) {
+            if (domain.isEmpty() || c.name.startsWith(domain + QLatin1Char('.')))
+                list.append(CommandRegistry::describe(c));
+        }
+        reply.json(200, {{QStringLiteral("ok"), true}, {QStringLiteral("commands"), list}});
+    });
+
+    // {"event": name or prefix*, "match": {...}} or {"command": a read command, "args": {...},
+    // "until": {field: value | [values]}, "contains": {field: text}}; "timeout" seconds.
+    route("POST", "/wait", [this](const http::Request &, const QJsonObject &body, const Reply &reply) {
+        const QString event = body.value(QStringLiteral("event")).toString();
+        const QString commandName = body.value(QStringLiteral("command")).toString();
+        if (event.isEmpty() == commandName.isEmpty()) {
+            reply.error(400, QStringLiteral("give \"event\" (a name, or a prefix ending in *) with an optional "
+                                            "\"match\", or \"command\" (one that changes nothing) with \"args\" "
+                                            "and \"until\" / \"contains\""));
+            return;
+        }
+        const Command *command = nullptr;
+        QJsonObject args = body.value(QStringLiteral("args")).toObject();
+        const QJsonObject until = body.value(QStringLiteral("until")).toObject();
+        const QJsonObject contains = body.value(QStringLiteral("contains")).toObject();
+        if (!commandName.isEmpty()) {
+            command = m_commands.find(commandName);
+            if (!command) {
+                reply.error(404, QStringLiteral("no command '%1'").arg(commandName));
+                return;
+            }
+            if (command->changes) {
+                reply.error(400, QStringLiteral("%1 changes things; wait on a command that only reads").arg(commandName));
+                return;
+            }
+            if (until.isEmpty() && contains.isEmpty()) {
+                reply.error(400, QStringLiteral("give \"until\" ({field: value or [values]}) or \"contains\" "
+                                                "({field: text}) for the result of %1")
+                                     .arg(commandName));
+                return;
+            }
+            if (const QString error = CommandRegistry::validate(*command, args); !error.isEmpty()) {
+                reply.error(400, error);
                 return;
             }
         }
@@ -920,28 +718,32 @@ void ControlApi::registerEventRoutes()
         // timer of it may be the one calling).
         auto *wait = new QObject(this);
         wait->setObjectName(QLatin1String(kPendingWait));
-        auto *deadline = new QTimer(wait);
         auto clock = std::make_shared<QElapsedTimer>();
         auto waiter = std::make_shared<quint64>(0);
         auto done = std::make_shared<bool>(false);
+        auto last = std::make_shared<QJsonObject>();
         clock->start();
         QPointer<QObject> guard(wait);
         // fromWaiter: the event hub is calling the waiter and drops it itself.
-        auto finish = [this, guard, reply, clock, waiter, done](bool ok, QJsonObject extra, bool fromWaiter) {
+        auto finish = [this, guard, reply, clock, waiter, done, last](bool ok, QJsonObject extra, bool fromWaiter) {
             if (*done)
                 return;
             *done = true;
             if (*waiter && !fromWaiter)
                 m_events->removeWaiter(*waiter);
+            if (!ok) {
+                extra.insert(QStringLiteral("error"), QStringLiteral("timed out"));
+                if (!last->isEmpty())
+                    extra.insert(QStringLiteral("last"), *last);
+            }
             extra.insert(QStringLiteral("ok"), ok);
             extra.insert(QStringLiteral("waitedMs"), clock->elapsed());
-            if (!ok)
-                extra.insert(QStringLiteral("error"), QStringLiteral("timed out"));
             reply.json(ok ? 200 : 408, extra);
             if (guard)
                 guard->deleteLater();
         };
 
+        auto *deadline = new QTimer(wait);
         deadline->setSingleShot(true);
         connect(deadline, &QTimer::timeout, wait, [finish] { finish(false, {}, false); });
         deadline->start(timeoutMs);
@@ -956,19 +758,18 @@ void ControlApi::registerEventRoutes()
             });
             return;
         }
-        // A node condition: checked now, then every 100 ms until it holds.
-        auto check = [finish, id, states, text] {
-            if (states.isEmpty()) {
-                if (nodeInState(id, QString(), text))
-                    finish(true, {{QStringLiteral("id"), id}}, false);
+        // A read command, run now and every 100 ms (one run in flight) until its result matches.
+        auto inFlight = std::make_shared<bool>(false);
+        auto check = [this, command, args, until, contains, finish, inFlight, done, last] {
+            if (*inFlight || *done)
                 return;
-            }
-            for (const QString &state : states) {
-                if (nodeInState(id, state, text)) {
-                    finish(true, {{QStringLiteral("id"), id}, {QStringLiteral("state"), state}}, false);
-                    return;
-                }
-            }
+            *inFlight = true;
+            execute(*command, args, [finish, until, contains, inFlight, last](int, const QJsonObject &result) {
+                *inFlight = false;
+                *last = result;
+                if (resultMatches(result, until, contains))
+                    finish(true, {{QStringLiteral("result"), result}}, false);
+            });
         };
         auto *poll = new QTimer(wait);
         connect(poll, &QTimer::timeout, wait, check);
@@ -977,20 +778,9 @@ void ControlApi::registerEventRoutes()
     });
 
     route("GET", "/screenshot", [this](const http::Request &request, const QJsonObject &, const Reply &reply) {
-        QWidget *w = nullptr;
-        const QString id = request.queryValue("id");
-        if (!id.isEmpty()) {
-            const ui::Target t = ui::resolve(id);
-            if (!t.widget) {
-                reply.error(404, t.error);
-                return;
-            }
-            w = t.widget;
-        } else {
-            w = QApplication::activeModalWidget();
-            if (!w)
-                w = m_window;
-        }
+        QWidget *w = QApplication::activeModalWidget();
+        if (!w)
+            w = m_window;
         if (!w) {
             reply.error(404, QStringLiteral("no window"));
             return;
@@ -1014,6 +804,38 @@ void ControlApi::registerEventRoutes()
             return png;
         }));
     });
+}
+
+void revealWidget(QWidget *widget)
+{
+    if (!widget)
+        return;
+    // Outermost last: a tab inside a panel inside a dock.
+    ads::CDockWidget *tab = nullptr;
+    QWidget *child = widget;
+    for (QWidget *w = widget; w; child = w, w = w->parentWidget()) {
+        if (auto *dock = qobject_cast<ads::CDockWidget *>(w)) {
+            if (dock->isClosed())
+                dock->toggleView(true);
+            dock->setAsCurrentTab();
+            if (!tab)
+                tab = dock;
+        } else if (auto *panel = qobject_cast<QDockWidget *>(w)) {
+            if (panel->isHidden())
+                panel->show();
+            panel->raise(); // a tabified panel comes to the front
+        } else if (auto *stack = qobject_cast<QStackedWidget *>(w); stack && child != w) {
+            if (auto *tabs = qobject_cast<QTabWidget *>(stack->parentWidget()))
+                tabs->setCurrentWidget(child);
+        }
+    }
+    if (QWidget *window = widget->window(); window && window->isMinimized())
+        window->showNormal();
+    // As a click on the tab: it becomes the focused tab, which is what the
+    // editor's "current editor" follows. Keyboard focus alone never moves
+    // while NotepadAI is not the foreground window (the agent's terminal is).
+    if (tab && tab->dockManager())
+        tab->dockManager()->setDockWidgetFocused(tab);
 }
 
 } // namespace control

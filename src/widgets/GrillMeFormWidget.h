@@ -63,6 +63,12 @@ public:
     void setNote(const QString &note);
 
     void setChatFont(const QFont &font);
+    // Fills `answers` in as if picked (clarify flags too) and submits like the
+    // Submit button. Returns the ids of required questions still unanswered;
+    // nothing is sent then.
+    QStringList fillAndSubmit(const QVector<GrillMeForm::Answer> &answers, const QString &note);
+    // As the Dismiss button (with `note` sent along when not empty).
+    void dismiss(const QString &note);
     void focusFirstQuestion();
 
 signals:

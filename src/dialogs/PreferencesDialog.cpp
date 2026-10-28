@@ -18,7 +18,6 @@
 
 
 #include "PreferencesDialog.h"
-#include "control/ControlPicker.h"
 #include "MainWindow.h"
 #include "DataPaths.h"
 #include "NotepadNextApplication.h"
@@ -232,7 +231,7 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
     });
 
     connect(ui->btnSelectHardCodedPath, &QToolButton::clicked, this, [=]() {
-        QString dir = control::picker::getExistingDirectory(this, tr("Default Directory"));
+        QString dir = QFileDialog::getExistingDirectory(this, tr("Default Directory"));
         if (dir.isEmpty()) return; // user cancelled
 
         ui->txtHardCodedPath->setText(QDir::toNativeSeparators(dir));
@@ -340,7 +339,7 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
 
     connect(ui->btnBrowseShell, &QToolButton::clicked, this, [=]() {
         const QString filter = tr("Executables (*.exe);;All files (*)");
-        const QString path = control::picker::getOpenFileName(this, tr("Choose Shell"), ui->lineEditShellCommand->text(), filter);
+        const QString path = QFileDialog::getOpenFileName(this, tr("Choose Shell"), ui->lineEditShellCommand->text(), filter);
         if (!path.isEmpty()) {
             ui->lineEditShellCommand->setText(QDir::toNativeSeparators(path));
             m_pending.markDirty();
@@ -366,7 +365,7 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
 
     connect(ui->btnBrowseShell, &QToolButton::clicked, this, [=]() {
         const QString filter = tr("All files (*)");
-        const QString path = control::picker::getOpenFileName(this, tr("Choose Shell"), ui->lineEditShellCommand->text(), filter);
+        const QString path = QFileDialog::getOpenFileName(this, tr("Choose Shell"), ui->lineEditShellCommand->text(), filter);
         if (!path.isEmpty()) {
             ui->lineEditShellCommand->setText(QDir::toNativeSeparators(path));
             m_pending.markDirty();
@@ -392,7 +391,7 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
             current = QFontDatabase::systemFont(QFontDatabase::FixedFont);
         }
         bool ok = false;
-        const QFont chosen = control::picker::getFont(&ok, current, this, tr("Terminal Font"));
+        const QFont chosen = QFontDialog::getFont(&ok, current, this, tr("Terminal Font"));
         if (ok) {
             m_pendingTerminalFont = chosen.toString();
             showTerminalFont();
@@ -578,7 +577,7 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
         m_pending.markDirty();
     });
     connect(ui->btnAddClaudeConfigDir, &QPushButton::clicked, this, [=]() {
-        const QString dir = control::picker::getExistingDirectory(this, tr("Claude Config Folder"), QDir::homePath());
+        const QString dir = QFileDialog::getExistingDirectory(this, tr("Claude Config Folder"), QDir::homePath());
         if (dir.isEmpty())
             return;
         const QString native = QDir::toNativeSeparators(dir);
@@ -621,7 +620,7 @@ PreferencesDialog::PreferencesDialog(ApplicationSettings *settings, QWidget *par
     ui->btnBrowseDataDir->setEnabled(!isOverridden);
 
     connect(ui->btnBrowseDataDir, &QToolButton::clicked, this, [this]() {
-        const QString dir = control::picker::getExistingDirectory(
+        const QString dir = QFileDialog::getExistingDirectory(
             this, tr("Choose Data Directory"),
             QDir::toNativeSeparators(DataPaths::baseDir()));
         if (dir.isEmpty()) return;

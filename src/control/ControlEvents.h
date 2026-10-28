@@ -28,9 +28,9 @@ bool wanted();
 void publish(const QString &name, const QJsonObject &data = {});
 } // namespace events
 
-// The event hub (one per ControlApi). While a listener exists it also watches
-// windows opening and closing, docks showing and hiding, and focus moving;
-// with none it has no event filter and no connections.
+// The event hub (one per ControlApi). Domain code publishes where things
+// happen (a tab opened, a chat turn ended, a task exited); with no listener
+// publishing costs one load.
 class ControlEvents : public QObject
 {
     Q_OBJECT
@@ -43,9 +43,6 @@ public:
     ~ControlEvents() override;
 
     bool isActive() const { return m_active; }
-    // Whether a widget is open even while hidden (a dock behind another tab).
-    // dock.shown / dock.hidden carry it as `open`.
-    void setPresence(std::function<bool(const QWidget *)> presence) { m_presence = std::move(presence); }
     void setSubscribers(int count);
     quint64 addWaiter(Waiter waiter);
     void removeWaiter(quint64 id);
@@ -56,20 +53,14 @@ signals:
     // An SSE frame for the server's subscribers.
     void frameReady(const QByteArray &frame);
 
-protected:
-    bool eventFilter(QObject *watched, QEvent *event) override;
-
 private:
     void updateActive();
-    void onFocusChanged(QWidget *old, QWidget *now);
 
     int m_subscribers = 0;
     bool m_active = false;
     quint64 m_seq = 0;
     quint64 m_nextWaiter = 1;
     QHash<quint64, Waiter> m_waiters;
-    std::function<bool(const QWidget *)> m_presence;
-    QMetaObject::Connection m_focusConnection;
 };
 
 } // namespace control

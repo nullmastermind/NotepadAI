@@ -24,6 +24,7 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
@@ -354,6 +355,7 @@ void Pm2ProcessesDialog::onStateChanged(Pm2Client::State state)
     updateActions();
     updateBanner();
     updateFooter();
+    emit statusChanged();
 }
 
 void Pm2ProcessesDialog::onList(const QList<Pm2ProcessInfo> &processes, const QStringList &dumpNames,
@@ -372,6 +374,7 @@ void Pm2ProcessesDialog::onList(const QList<Pm2ProcessInfo> &processes, const QS
     updateActions();
     updateBanner();
     updateFooter();
+    emit statusChanged();
 }
 
 void Pm2ProcessesDialog::refreshNotRunning()
@@ -638,24 +641,206 @@ void Pm2ProcessesDialog::showContextMenu(const QPoint &pos)
         (this->*handlers.value(chosen))();
 }
 
+// --- Commands -------------------------------------------------------------------
+
+bool Pm2ProcessesDialog::isReady() const
+{
+    return m_client->state() == Pm2Client::State::Ready && m_listLoaded;
+}
+
+bool Pm2ProcessesDialog::hasFailed() const
+{
+    const Pm2Client::State state = m_client->state();
+    return state == Pm2Client::State::NodeMissing || state == Pm2Client::State::Failed;
+}
+
+QString Pm2ProcessesDialog::statusText() const
+{
+    if (m_banner->isVisible())
+        return m_bannerText->text();
+    return m_footer->text();
+}
+
+const QVector<Pm2ProcessInfo> &Pm2ProcessesDialog::processes() const
+{
+    return m_model->processes();
+}
+
+std::optional<Pm2Definition> Pm2ProcessesDialog::definitionOf(int pmId) const
+{
+    const int row = m_model->rowForId(pmId);
+    if (row < 0)
+        return std::nullopt;
+    const QString script = m_model->processAt(row).script;
+    if (!Pm2Protocol::isOwnEntrypoint(script, Pm2Client::entrypointDir()))
+        return std::nullopt;
+    return readEntrypoint(script);
+}
+
+void Pm2ProcessesDialog::selectIds(const QList<int> &ids)
+{
+    QItemSelection selection;
+    for (const int id : ids) {
+        const int row = m_model->rowForId(id);
+        if (row < 0)
+            continue;
+        const QModelIndex index = m_proxy->mapFromSource(m_model->index(row, 0));
+        selection.select(index, index);
+    }
+    m_table->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    if (!selection.isEmpty())
+        m_table->scrollTo(selection.indexes().constFirst());
+}
+
+void Pm2ProcessesDialog::startIds(const QList<int> &ids, Done done)
+{
+    // pm2 restarts a stopped process by id; that is how `pm2 start <id>` works.
+    track(m_client->restartProcesses(ids), std::move(done));
+}
+
+void Pm2ProcessesDialog::stopIds(const QList<int> &ids, Done done)
+{
+    track(m_client->stopProcesses(ids), std::move(done));
+}
+
+void Pm2ProcessesDialog::restartIds(const QList<int> &ids, Done done)
+{
+    track(m_client->restartProcesses(ids), std::move(done));
+}
+
+void Pm2ProcessesDialog::deleteIds(const QList<int> &ids, Done done)
+{
+    QList<int> stillThere;
+    QStringList leaving;
+    QStringList ownScripts;
+    for (const int id : ids) {
+        const int row = m_model->rowForId(id);
+        if (row < 0)
+            continue;
+        const Pm2ProcessInfo &p = m_model->processAt(row);
+        stillThere.append(id);
+        leaving.append(p.name);
+        if (Pm2Protocol::isOwnEntrypoint(p.script, Pm2Client::entrypointDir()))
+            ownScripts.append(p.script);
+    }
+    track(m_client->deleteProcesses(stillThere),
+          [ownScripts, done = std::move(done)](bool ok, const QString &error) {
+              if (ok) {
+                  for (const QString &script : ownScripts)
+                      QFile::remove(script);
+              }
+              if (done)
+                  done(ok, error);
+          },
+          true, leaving);
+}
+
+QString Pm2ProcessesDialog::create(const Pm2Definition &def, Done done)
+{
+    if (m_client->state() != Pm2Client::State::Ready)
+        return tr("pm2 is not ready.");
+    if (const QString problem = Pm2ProcessEditDialog::problemWith(def, takenNames()); !problem.isEmpty())
+        return problem;
+    QString error;
+    if (!writeEntrypoint(def, &error))
+        return error;
+    const QString script = entrypointPath(def.name);
+    track(m_client->startProcess(Pm2App{def.name, script, def.cwd, def.options}),
+          [script, done = std::move(done)](bool ok, const QString &why) {
+              if (!ok)
+                  QFile::remove(script);
+              if (done)
+                  done(ok, why);
+          });
+    return QString();
+}
+
+QString Pm2ProcessesDialog::edit(int pmId, const Pm2Definition &def, Done done)
+{
+    if (m_client->state() != Pm2Client::State::Ready)
+        return tr("pm2 is not ready.");
+    const int row = m_model->rowForId(pmId);
+    if (row < 0)
+        return tr("Process %1 is no longer in pm2.").arg(pmId);
+    const Pm2ProcessInfo now = m_model->processAt(row);
+    const std::optional<Pm2Definition> original = readEntrypoint(now.script);
+    if (!original)
+        return tr("Could not read the entrypoint of '%1' (%2).").arg(now.name, QDir::toNativeSeparators(now.script));
+    QStringList taken = takenNames();
+    taken.removeAll(now.name); // keeping its own name is fine
+    if (const QString problem = Pm2ProcessEditDialog::problemWith(def, taken); !problem.isEmpty())
+        return problem;
+    if (def == *original) {
+        if (done)
+            done(true, QString());
+        return QString();
+    }
+
+    QString error;
+    if (!Pm2ProcessEditDialog::needsRecreate(*original, def)) {
+        // Same script path: pm2 reads the new file on its next start.
+        if (!writeEntrypoint(def, &error))
+            return error;
+        if (now.status != Pm2Status::Stopped)
+            track(m_client->restartProcesses({now.pmId}), std::move(done), false);
+        else if (done)
+            done(true, QString());
+        return QString();
+    }
+
+    if (!writeEntrypoint(def, &error))
+        return error;
+    const QString oldScript = now.script;
+    const QString newScript = entrypointPath(def.name);
+    // A rename that only changes letter case is the same file on Windows and
+    // macOS: removing the "old" one would delete the new entrypoint.
+    const bool twoFiles = QDir::cleanPath(QDir::fromNativeSeparators(oldScript)).compare(newScript, kPathCase) != 0;
+    track(m_client->recreateProcess(now.pmId, Pm2App{def.name, newScript, def.cwd, def.options}),
+          [twoFiles, oldScript, newScript, done = std::move(done)](bool ok, const QString &why) {
+              if (twoFiles)
+                  QFile::remove(ok ? oldScript : newScript);
+              if (done)
+                  done(ok, why);
+          },
+          true, {now.name});
+    return QString();
+}
+
+TerminalDock *Pm2ProcessesDialog::showLogsFor(int pmId)
+{
+    const int row = m_model->rowForId(pmId);
+    if (row < 0 || !m_terminals || Pm2Client::sessionPm2Dir().isEmpty())
+        return nullptr;
+    const Pm2ProcessInfo &p = m_model->processAt(row);
+    const QString cwd = QFileInfo(p.cwd).isDir() ? p.cwd : QDir::homePath();
+    TerminalTask task;
+    task.name = tr("pm2 logs: %1").arg(p.name);
+    task.command = Pm2Protocol::logsCommand(terminalShellKind(m_terminals->resolveShellCommand()),
+                                            Pm2Client::sessionNodePath(), Pm2Client::sessionPm2Dir(), p.pmId);
+    return m_terminals->openTask(cwd, task);
+}
+
+void Pm2ProcessesDialog::resurrectSaved(Done done)
+{
+    // The saved list is what was just started: nothing to save.
+    track(m_client->resurrect(), std::move(done), false);
+}
+
+void Pm2ProcessesDialog::discardSaved(Done done)
+{
+    track(m_client->save(), std::move(done), false);
+}
+
+// --- Buttons ----------------------------------------------------------------------
+
 void Pm2ProcessesDialog::newProcess()
 {
     const QString cwd = m_defaultCwd ? m_defaultCwd() : QDir::homePath();
     Pm2ProcessEditDialog form(std::nullopt, cwd, takenNames(), this);
     if (form.exec() != QDialog::Accepted || m_client->state() != Pm2Client::State::Ready)
         return;
-    const Pm2Definition def = form.definition();
-    QString error;
-    if (!writeEntrypoint(def, &error)) {
+    if (const QString error = create(form.definition()); !error.isEmpty())
         QMessageBox::warning(this, windowTitle(), error);
-        return;
-    }
-    const QString script = entrypointPath(def.name);
-    track(m_client->startProcess(Pm2App{def.name, script, def.cwd, def.options}),
-          [script](bool ok, const QString &) {
-              if (!ok)
-                  QFile::remove(script);
-          });
 }
 
 void Pm2ProcessesDialog::editProcess()
@@ -673,60 +858,24 @@ void Pm2ProcessesDialog::editProcess()
     Pm2ProcessEditDialog form(original, QString(), takenNames(), this);
     if (form.exec() != QDialog::Accepted || m_client->state() != Pm2Client::State::Ready)
         return;
-    const Pm2Definition def = form.definition();
-    if (def == *original)
-        return;
-    // The row may have changed while the form was open.
-    const int row = m_model->rowForId(p.pmId);
-    if (row < 0) {
-        QMessageBox::warning(this, windowTitle(), tr("'%1' is no longer in pm2.").arg(p.name));
-        return;
-    }
-    const Pm2ProcessInfo now = m_model->processAt(row);
-
-    QString error;
-    if (!form.needsRecreate()) {
-        // Same script path: pm2 reads the new file on its next start.
-        if (!writeEntrypoint(def, &error)) {
-            QMessageBox::warning(this, windowTitle(), error);
-            return;
-        }
-        if (now.status != Pm2Status::Stopped)
-            track(m_client->restartProcesses({now.pmId}), {}, false);
-        return;
-    }
-
-    if (!writeEntrypoint(def, &error)) {
+    // The row may have changed while the form was open; edit() re-reads it.
+    if (const QString error = edit(p.pmId, form.definition()); !error.isEmpty())
         QMessageBox::warning(this, windowTitle(), error);
-        return;
-    }
-    const QString oldScript = now.script;
-    const QString newScript = entrypointPath(def.name);
-    // A rename that only changes letter case is the same file on Windows and
-    // macOS: removing the "old" one would delete the new entrypoint.
-    const bool twoFiles = QDir::cleanPath(QDir::fromNativeSeparators(oldScript)).compare(newScript, kPathCase) != 0;
-    track(m_client->recreateProcess(now.pmId, Pm2App{def.name, newScript, def.cwd, def.options}),
-          [twoFiles, oldScript, newScript](bool ok, const QString &) {
-              if (twoFiles)
-                  QFile::remove(ok ? oldScript : newScript);
-          },
-          true, {now.name});
 }
 
 void Pm2ProcessesDialog::startSelected()
 {
-    // pm2 restarts a stopped process by id; that is how `pm2 start <id>` works.
-    track(m_client->restartProcesses(selectedIds(&isNotRunning)));
+    startIds(selectedIds(&isNotRunning));
 }
 
 void Pm2ProcessesDialog::stopSelected()
 {
-    track(m_client->stopProcesses(selectedIds(&isRunning)));
+    stopIds(selectedIds(&isRunning));
 }
 
 void Pm2ProcessesDialog::restartSelected()
 {
-    track(m_client->restartProcesses(selectedIds()));
+    restartIds(selectedIds());
 }
 
 void Pm2ProcessesDialog::deleteSelected()
@@ -736,13 +885,10 @@ void Pm2ProcessesDialog::deleteSelected()
         return;
     QStringList names;
     QList<int> ids;
-    QStringList ownScripts;
     for (const int row : rows) {
         const Pm2ProcessInfo &p = m_model->processAt(row);
         names.append(p.name);
         ids.append(p.pmId);
-        if (Pm2Protocol::isOwnEntrypoint(p.script, Pm2Client::entrypointDir()))
-            ownScripts.append(p.script);
     }
     const QString question = rows.size() == 1
         ? tr("Delete '%1'? pm2 stops it and forgets it.").arg(names.front())
@@ -752,36 +898,15 @@ void Pm2ProcessesDialog::deleteSelected()
         != QMessageBox::Yes) {
         return;
     }
-    // Re-read: the list may have changed while the question was open.
-    QList<int> stillThere;
-    QStringList leaving;
-    for (const int id : ids) {
-        const int row = m_model->rowForId(id);
-        if (row >= 0) {
-            stillThere.append(id);
-            leaving.append(m_model->processAt(row).name);
-        }
-    }
-    track(m_client->deleteProcesses(stillThere), [ownScripts](bool ok, const QString &) {
-        if (!ok)
-            return;
-        for (const QString &script : ownScripts)
-            QFile::remove(script);
-    }, true, leaving);
+    // deleteIds re-reads the rows: the list may have changed while the question was open.
+    deleteIds(ids);
 }
 
 void Pm2ProcessesDialog::showLogs()
 {
     const QList<int> rows = selectedRows();
-    if (rows.size() != 1 || !m_terminals || Pm2Client::sessionPm2Dir().isEmpty())
-        return;
-    const Pm2ProcessInfo &p = m_model->processAt(rows.front());
-    const QString cwd = QFileInfo(p.cwd).isDir() ? p.cwd : QDir::homePath();
-    TerminalTask task;
-    task.name = tr("pm2 logs: %1").arg(p.name);
-    task.command = Pm2Protocol::logsCommand(terminalShellKind(m_terminals->resolveShellCommand()),
-                                            Pm2Client::sessionNodePath(), Pm2Client::sessionPm2Dir(), p.pmId);
-    m_terminals->openTask(cwd, task);
+    if (rows.size() == 1)
+        showLogsFor(m_model->processAt(rows.front()).pmId);
 }
 
 void Pm2ProcessesDialog::openDirectoryInTerminal()
@@ -799,7 +924,7 @@ void Pm2ProcessesDialog::restartAll()
     QList<int> ids;
     for (const Pm2ProcessInfo &p : m_model->processes())
         ids.append(p.pmId);
-    track(m_client->restartProcesses(ids));
+    restartIds(ids);
 }
 
 void Pm2ProcessesDialog::stopAll()
@@ -809,13 +934,12 @@ void Pm2ProcessesDialog::stopAll()
         if (isRunning(p))
             ids.append(p.pmId);
     }
-    track(m_client->stopProcesses(ids));
+    stopIds(ids);
 }
 
 void Pm2ProcessesDialog::resurrect()
 {
-    // The saved list is what was just started: nothing to save.
-    track(m_client->resurrect(), {}, false);
+    resurrectSaved();
 }
 
 void Pm2ProcessesDialog::discardSavedList()
@@ -827,5 +951,5 @@ void Pm2ProcessesDialog::discardSavedList()
         != QMessageBox::Yes) {
         return;
     }
-    track(m_client->save(), {}, false);
+    discardSaved();
 }

@@ -12,7 +12,6 @@
 
 #include "ControlActivityLog.h"
 #include "ControlApi.h"
-#include "ControlIds.h"
 
 #include <QCheckBox>
 #include <QClipboard>
@@ -52,9 +51,6 @@ ControlApiDialog::ControlApiDialog(ControlApi *api, QWidget *parent)
     , m_clearActivity(new QPushButton(tr("Clear"), this))
 {
     setObjectName(QStringLiteral("ControlApiDialog"));
-    // The user's alone: an agent could otherwise open the API to the network
-    // or replace the token (ControlUiTree refuses anything inside it).
-    ids::setIgnored(this);
     setWindowTitle(tr("Connect External Agent"));
     setAttribute(Qt::WA_DeleteOnClose);
     resize(640, 640);
@@ -74,9 +70,9 @@ ControlApiDialog::ControlApiDialog(ControlApi *api, QWidget *parent)
     m_activity->setObjectName(QStringLiteral("listControlApiActivity"));
     m_clearActivity->setObjectName(QStringLiteral("buttonClearControlApiActivity"));
 
-    auto *intro = new QLabel(tr("Let an AI agent running outside NotepadAI operate it through the Control API. "
-                                "Everything it changes goes through the menus, buttons and fields you see, "
-                                "flashes where it happened and is listed below."),
+    auto *intro = new QLabel(tr("Let an AI agent running outside NotepadAI give it commands through the Control API. "
+                                "Whatever a command changes comes to the front and flashes, the status bar "
+                                "names the step, and every step is listed below."),
                              this);
     intro->setObjectName(QStringLiteral("labelControlApiIntro"));
     intro->setWordWrap(true);

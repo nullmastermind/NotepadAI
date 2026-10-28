@@ -58,6 +58,14 @@ public:
     ~TerminalManager() override;
 
     QString resolveShellCommand() const;
+    // The configured shell, resolved to an executable; empty (and `error`, or
+    // a message box without one) when it or the PTY backend is missing.
+    QString localShell(QString *error = nullptr) const;
+    // Every open terminal, oldest first.
+    QList<TerminalDock *> terminalDocks() const;
+    // Closes a terminal without asking: false (and `error`) when it is busy
+    // (TerminalDock::isBusy) and `force` is off; else stops it and closes.
+    bool closeTerminal(TerminalDock *dock, bool force, QString *error);
 
     // Per-workspace task registry. workspacePath must be QDir::cleanPath'd.
     QList<TerminalTask> tasksForWorkspace(const QString &workspacePath) const;
@@ -66,7 +74,8 @@ public:
 
 public slots:
     // Both return the new terminal, or nullptr when it could not be opened.
-    TerminalDock *openTerminal(const QString &cwd);
+    // error: set instead of a message box when the terminal cannot start.
+    TerminalDock *openTerminal(const QString &cwd, QString *error = nullptr);
     // Remote terminal: PTY over an SSH channel on `ctx` (captured at spawn into
     // the dock). `remoteCwd` is a POSIX path on the host; `shell` empty → the
     // remote default ($SHELL). No local PTY probe (the backend is remote).
@@ -77,7 +86,7 @@ public slots:
     // whose arguments the user still has to supply.
     TerminalDock *openTerminalWithInput(remote::ExecutionContext *ctx, const QString &cwd,
                                         const QString &text);
-    void openTask(const QString &workspaceCwd, const TerminalTask &task);
+    TerminalDock *openTask(const QString &workspaceCwd, const TerminalTask &task, QString *error = nullptr);
     // Remote task execution: run `task` on the remote host via an SSH PTY channel.
     // `ctx` must be Connected. `remoteCwd` is the POSIX workspace root on the host.
     void openRemoteTask(remote::ExecutionContext *ctx, const QString &remoteCwd,

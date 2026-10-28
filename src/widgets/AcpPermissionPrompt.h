@@ -24,6 +24,10 @@
 
 #include "AcpProtocol.h"
 
+#include <QHash>
+
+class QPushButton;
+
 class AcpPermissionPrompt : public QFrame
 {
     Q_OBJECT
@@ -33,6 +37,9 @@ public:
                                  QWidget *parent = nullptr);
 
     QString requestId() const { return m_requestId; }
+    const AcpProtocol::AcpPermissionRequest &request() const { return m_request; }
+    // Clicks the button of the option with this id or kind; false when none.
+    bool choose(const QString &optionIdOrKind);
 
 signals:
     void choiceMade(const QString &requestId,
@@ -41,6 +48,8 @@ signals:
 
 private:
     QString m_requestId;
+    AcpProtocol::AcpPermissionRequest m_request;
+    QHash<QString, QPushButton *> m_buttons; // by option id and by kind
 };
 
 #endif // ACP_PERMISSION_PROMPT_H

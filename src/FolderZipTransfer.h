@@ -26,6 +26,7 @@
 #include <QStringList>
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 
@@ -48,6 +49,13 @@ public:
     ~FolderZipTransfer() override;
 
     bool isBusy() const { return m_busy; }
+    // How extraction treats files that already exist. Ask shows the conflict
+    // dialog (the tree's Zip > Upload); the others answer it for a caller that
+    // already knows (the Control API). Refuse cancels and keeps the paths in
+    // lastConflicts(). Applies to the next upload only, then resets to Ask.
+    enum class ConflictPolicy : std::uint8_t { Ask, Overwrite, Skip, Refuse };
+    void setConflictPolicy(ConflictPolicy policy) { m_conflictPolicy = policy; }
+    QStringList lastConflicts() const { return m_lastConflicts; }
     void setRemoteBackend(remote::RemoteFsBackend *backend);
     void reportZipProgress(int current, int total, const QString &currentFile);
 
@@ -104,6 +112,8 @@ private:
     void ensureRemoteParent(const QString &remoteFilePath, const std::function<void(bool)> &cb);
 
     bool m_busy = false;
+    ConflictPolicy m_conflictPolicy = ConflictPolicy::Ask;
+    QStringList m_lastConflicts;
     std::atomic<bool> m_cancelled{false};
     std::shared_ptr<std::atomic<bool>> m_cancelFlag;
     std::shared_ptr<struct ZipProgressSink> m_progressSink;

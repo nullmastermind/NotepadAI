@@ -11,7 +11,6 @@
 #include "ControlStatusIndicator.h"
 
 #include "ControlApi.h"
-#include "ControlIds.h"
 
 #include <QHBoxLayout>
 #include <QToolButton>
@@ -25,8 +24,6 @@ ControlStatusIndicator::ControlStatusIndicator(ControlApi *api, QWidget *parent)
     , m_stop(new QToolButton(this))
 {
     setObjectName(QStringLiteral("controlApiIndicator"));
-    // An agent must not be able to press Stop or open the settings for itself.
-    ids::setIgnored(this);
     m_label->setObjectName(QStringLiteral("controlApiIndicatorButton"));
     m_stop->setObjectName(QStringLiteral("controlApiStopButton"));
     m_label->setAutoRaise(true);
@@ -52,17 +49,21 @@ ControlStatusIndicator::ControlStatusIndicator(ControlApi *api, QWidget *parent)
     refresh();
 }
 
-void ControlStatusIndicator::markActing()
+void ControlStatusIndicator::markActing(const QString &label)
 {
+    constexpr qsizetype kMaxLabelChars = 48;
+    m_actingLabel = label.size() > kMaxLabelChars ? label.left(kMaxLabelChars - 1) + QStringLiteral("…") : label;
     m_actingTimer.start();
-    if (!m_acting)
+    if (m_acting)
+        m_label->setText(tr("Agent: %1").arg(m_actingLabel));
+    else
         setActing(true);
 }
 
 void ControlStatusIndicator::setActing(bool acting)
 {
     m_acting = acting;
-    m_label->setText(acting ? tr("Agent acting") : tr("Agent API"));
+    m_label->setText(acting ? tr("Agent: %1").arg(m_actingLabel) : tr("Agent API"));
     // Static fill while an agent is acting; nothing animates.
     m_label->setStyleSheet(acting
         ? QStringLiteral("QToolButton { background: palette(highlight); color: palette(highlighted-text);"

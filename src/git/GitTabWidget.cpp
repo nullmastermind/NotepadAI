@@ -1237,6 +1237,17 @@ void GitTabWidget::onCommitRequested(const QString &message, bool amend,
     m_controller->commit(message, amend, signoff, trackedOnly);
 }
 
+void GitTabWidget::commitWithMessage(const QString &message, bool amend, bool signoff, bool trackedOnly)
+{
+    if (CommitComposer *composer = m_changesPanel ? m_changesPanel->composer() : nullptr) {
+        composer->setMessage(message);
+        composer->setAmendChecked(amend);
+        composer->setSignoffChecked(signoff);
+        composer->setTrackedOnly(trackedOnly);
+    }
+    onCommitRequested(message, amend, signoff, trackedOnly);
+}
+
 void GitTabWidget::popupAgentCommitMenu()
 {
     if (!m_headlessCommitSessionId.isEmpty()) {
@@ -1446,6 +1457,8 @@ void GitTabWidget::onGitMissing()
 
 void GitTabWidget::onDirtyTreePrompt(const QString &target)
 {
+    if (m_promptsByCaller)
+        return;
     QMessageBox box(QMessageBox::Question, tr("Working tree has changes"),
                     tr("Switch to '%1'? Your working tree has uncommitted changes.").arg(target),
                     QMessageBox::NoButton, this);
@@ -1468,6 +1481,8 @@ void GitTabWidget::onDirtyTreePrompt(const QString &target)
 void GitTabWidget::onPullDivergedPrompt()
 {
     m_pushAfterPull = false;
+    if (m_promptsByCaller)
+        return;
     QMessageBox box(QMessageBox::Question, tr("Branches have diverged"),
                     tr("Fast-forward is not possible. How would you like to reconcile?"),
                     QMessageBox::NoButton, this);
@@ -1488,6 +1503,8 @@ void GitTabWidget::onPullDivergedPrompt()
 
 void GitTabWidget::onPushRejectedPrompt()
 {
+    if (m_promptsByCaller)
+        return;
     QMessageBox box(QMessageBox::Question, tr("Push rejected"),
                     tr("The remote has commits you don't have. Pull first to reconcile, then push."),
                     QMessageBox::NoButton, this);
@@ -1639,19 +1656,54 @@ void GitTabWidget::onAiTriggerRequested()
     }
 
     QString why;
-    if (!gen->canFireGenerate(m_workspaceRoot, composer, &why)) {
+    if (!generateCommitMessage(&why))
         showError(why);
-        return;
-    }
-    if (!m_controller || m_controller->currentRepo().isEmpty()) {
-        showError(tr("No repository selected for AI generation."));
-        return;
-    }
+}
+
+bool GitTabWidget::generateCommitMessage(QString *whyNot)
+{
+    auto fail = [whyNot](const QString &message) {
+        if (whyNot)
+            *whyNot = message;
+        return false;
+    };
+    auto *app = qobject_cast<NotepadNextApplication *>(QCoreApplication::instance());
+    auto *gen = app ? app->getCommitMessageGenerator() : nullptr;
+    CommitComposer *composer = m_changesPanel ? m_changesPanel->composer() : nullptr;
+    if (!gen || !composer)
+        return fail(tr("AI commit messages are not available."));
+
+    QString why;
+    if (!gen->canFireGenerate(m_workspaceRoot, composer, &why))
+        return fail(why);
+    if (!m_controller || m_controller->currentRepo().isEmpty())
+        return fail(tr("No repository selected for AI generation."));
 
     m_pendingAiSubjectHint = composer->subjectLine();
     m_aiAwaitingDiff = true;
     clearError();
     m_controller->requestFullDiff();
+    return true;
+}
+
+QString GitTabWidget::composerMessage() const
+{
+    CommitComposer *composer = m_changesPanel ? m_changesPanel->composer() : nullptr;
+    return composer ? composer->message() : QString();
+}
+
+bool GitTabWidget::selectRepository(const QString &toplevel)
+{
+    if (!m_controller || !m_controller->repoModel() || !m_repoCombo)
+        return false;
+    const int row = m_controller->repoModel()->indexOf(QDir::cleanPath(QDir::fromNativeSeparators(toplevel)));
+    if (row < 0)
+        return false;
+    if (m_repoCombo->currentIndex() == row)
+        m_controller->selectRepo(m_controller->repoModel()->infoAt(row)->toplevel);
+    else
+        m_repoCombo->setCurrentIndex(row); // onRepoSelected, as a pick in the combo
+    return true;
 }
 
 void GitTabWidget::onAiCancelRequested()

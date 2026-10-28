@@ -61,6 +61,23 @@ public:
 
     GitController *controller() const { return m_controller; }
 
+    // Puts `message` and the options in the composer and commits, as the
+    // Commit button does (stages everything when nothing is staged).
+    void commitWithMessage(const QString &message, bool amend, bool signoff, bool trackedOnly);
+    // While on, the dirty-tree / diverged / push-rejected questions are not
+    // shown: the caller (a Control API command) answers through the
+    // controller's prompt signals.
+    void setPromptsAnsweredByCaller(bool on) { m_promptsByCaller = on; }
+    // What the composer's AI button does: generates a commit message into the
+    // composer from the staged (else all) changes. False with the reason when
+    // it cannot start (no provider configured, a generation running, no repo).
+    bool generateCommitMessage(QString *whyNot);
+    // The commit message in the composer.
+    QString composerMessage() const;
+    // Picks a repository (main, submodule or worktree) in the repo combo, as
+    // the user does; false when the combo does not list it.
+    bool selectRepository(const QString &toplevel);
+
 signals:
     void fileActivated(const QString &absPath);
     void diffRequested(const GitStatusEntry &entry);
@@ -142,6 +159,7 @@ private:
     bool m_suppressRepoCombo = false;
     bool m_committing = false;
     bool m_pushAfterPull = false;
+    bool m_promptsByCaller = false;
     QString m_headlessCommitSessionId;
 
     GitController *m_controller = nullptr;

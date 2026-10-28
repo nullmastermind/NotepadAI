@@ -28,8 +28,8 @@ AcpPermissionPrompt::AcpPermissionPrompt(const AcpProtocol::AcpPermissionRequest
                                          QWidget *parent)
     : QFrame(parent)
     , m_requestId(request.requestId)
+    , m_request(request)
 {
-    // Control API: chat:<session>/permissionPrompt/<option kind>.
     setObjectName(QStringLiteral("permissionPrompt"));
     setFrameShape(QFrame::StyledPanel);
     setStyleSheet(QStringLiteral(
@@ -75,6 +75,9 @@ AcpPermissionPrompt::AcpPermissionPrompt(const AcpProtocol::AcpPermissionRequest
                 "QPushButton { background: palette(highlight); "
                 "color: palette(highlighted-text); }"));
         }
+        m_buttons.insert(opt.id, btn);
+        if (!opt.kind.isEmpty() && !m_buttons.contains(opt.kind))
+            m_buttons.insert(opt.kind, btn);
         const QString optionId = opt.id;
         const QString outcome = (opt.kind == QLatin1String("deny"))
                                     ? QStringLiteral("cancelled")
@@ -86,4 +89,13 @@ AcpPermissionPrompt::AcpPermissionPrompt(const AcpProtocol::AcpPermissionRequest
     }
 
     outer->addLayout(btnRow);
+}
+
+bool AcpPermissionPrompt::choose(const QString &optionIdOrKind)
+{
+    QPushButton *btn = m_buttons.value(optionIdOrKind);
+    if (!btn)
+        return false;
+    btn->click();
+    return true;
 }

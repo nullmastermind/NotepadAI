@@ -10,8 +10,6 @@
 
 #include "GrillMeFormWidget.h"
 
-#include "control/ControlIds.h"
-
 #include <QAbstractTextDocumentLayout>
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -446,7 +444,6 @@ void GrillMeFormWidget::buildUi()
 
     m_toggle = new QToolButton(this);
     m_toggle->setObjectName(QStringLiteral("auToggle"));
-    control::ids::setKey(m_toggle, QStringLiteral("toggle"));
     m_toggle->setCheckable(true);
     m_toggle->setChecked(true);
     m_toggle->setText(QStringLiteral("▾"));
@@ -466,7 +463,6 @@ void GrillMeFormWidget::buildUi()
         bodyLayout->addWidget(buildQuestion(i));
     // Anything the user remembers that no question asked.
     m_formNoteEdit = new QPlainTextEdit(m_body);
-    control::ids::setKey(m_formNoteEdit, QStringLiteral("note"));
     m_formNoteEdit->setPlaceholderText(tr("Anything else the agent should know? (optional)"));
     m_formNoteEdit->setTabChangesFocus(true);
     m_formNoteEdit->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -487,7 +483,6 @@ void GrillMeFormWidget::buildUi()
     footer->addWidget(m_progressLabel, 1);
     m_dismissButton = new QPushButton(tr("Dismiss"), m_footer);
     m_dismissButton->setObjectName(QStringLiteral("auGhost"));
-    control::ids::setKey(m_dismissButton, QStringLiteral("dismiss"));
     m_dismissButton->setAutoDefault(false);
     m_dismissButton->setCursor(Qt::PointingHandCursor);
     m_dismissButton->setToolTip(tr("Tell the agent you will not answer this form"));
@@ -498,7 +493,6 @@ void GrillMeFormWidget::buildUi()
     footer->addWidget(m_dismissButton);
     m_submitButton = new QPushButton(tr("Submit  ↵"), m_footer);
     m_submitButton->setObjectName(QStringLiteral("auPrimary"));
-    control::ids::setKey(m_submitButton, QStringLiteral("submit"));
     m_submitButton->setAutoDefault(false);
     m_submitButton->setCursor(Qt::PointingHandCursor);
     m_submitButton->setToolTip(tr("Enter submits · Shift+Enter adds a new line"));
@@ -513,9 +507,6 @@ QWidget *GrillMeFormWidget::buildQuestion(int index)
     Row &row = m_rows[index];
     row.container = new QWidget(m_body);
     row.container->setObjectName(QStringLiteral("auQuestion"));
-    // Control API ids (the object names are style hooks shared by every
-    // question): chat:<session>/grillMeForm/q:<id>/option:<value>/choice...
-    control::ids::setKey(row.container, QStringLiteral("q:") + q.id);
     auto *layout = new QVBoxLayout(row.container);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(6);
@@ -542,7 +533,6 @@ QWidget *GrillMeFormWidget::buildQuestion(int index)
 
     row.noteButton = new QToolButton(row.container);
     row.noteButton->setObjectName(QStringLiteral("auLink"));
-    control::ids::setKey(row.noteButton, QStringLiteral("note"));
     row.noteButton->setCheckable(true);
     row.noteButton->setText(tr("+ Note"));
     row.noteButton->setToolTip(tr("Add a note to this answer"));
@@ -551,7 +541,6 @@ QWidget *GrillMeFormWidget::buildQuestion(int index)
 
     row.clarifyButton = new QToolButton(row.container);
     row.clarifyButton->setObjectName(QStringLiteral("auLink"));
-    control::ids::setKey(row.clarifyButton, QStringLiteral("clarify"));
     row.clarifyButton->setCheckable(true);
     row.clarifyButton->setText(tr("Clarify"));
     row.clarifyButton->setToolTip(tr("Mark as unclear: the agent explains it after you submit"));
@@ -618,7 +607,6 @@ QWidget *GrillMeFormWidget::buildQuestion(int index)
     case QuestionType::Text:
     case QuestionType::Number: {
         row.lineEdit = new QLineEdit(row.container);
-        control::ids::setKey(row.lineEdit, QStringLiteral("answer"));
         row.lineEdit->setPlaceholderText(q.placeholder.isEmpty() ? tr("Type your answer") : q.placeholder);
         if (q.type == QuestionType::Number) {
             auto *validator = new QDoubleValidator(row.lineEdit);
@@ -643,7 +631,6 @@ QWidget *GrillMeFormWidget::buildQuestion(int index)
     }
     case QuestionType::Textarea:
         row.textEdit = new QPlainTextEdit(row.container);
-        control::ids::setKey(row.textEdit, QStringLiteral("answer"));
         row.textEdit->setPlaceholderText(q.placeholder.isEmpty() ? tr("Type your answer") : q.placeholder);
         row.textEdit->setTabChangesFocus(true);
         fitLines(row.textEdit, kTextareaLines);
@@ -654,7 +641,6 @@ QWidget *GrillMeFormWidget::buildQuestion(int index)
     }
 
     row.noteEdit = new QLineEdit(row.container);
-    control::ids::setKey(row.noteEdit, QStringLiteral("noteText"));
     row.noteEdit->setPlaceholderText(tr("Note for the agent"));
     row.noteEdit->hide();
     layout->addWidget(row.noteEdit);
@@ -685,8 +671,6 @@ void GrillMeFormWidget::buildChoice(int index, Row &row, QVBoxLayout *layout)
         QAbstractButton *button = multi ? static_cast<QAbstractButton *>(new QCheckBox)
                                         : static_cast<QAbstractButton *>(new QRadioButton);
         auto *option = new OptionRow(button, row.container);
-        control::ids::setKey(option, QStringLiteral("option:") + opt.value);
-        control::ids::setKey(button, QStringLiteral("choice"));
         option->setLabel(withMark(opt.label, recommended));
         if (!opt.description.trimmed().isEmpty()) {
             auto *desc = new QLabel(option);
@@ -714,7 +698,6 @@ void GrillMeFormWidget::buildDropdown(int index, Row &row, QVBoxLayout *layout)
 {
     const Question &q = m_spec.questions.at(index);
     row.combo = new NoWheelComboBox(row.container);
-    control::ids::setKey(row.combo, QStringLiteral("answer"));
     // Item rules in the style sheet apply only with a styled delegate.
     row.combo->setItemDelegate(new QStyledItemDelegate(row.combo));
     row.combo->addItem(tr("Choose…"), QString()); // index 0 = no answer
@@ -732,7 +715,6 @@ void GrillMeFormWidget::buildDropdown(int index, Row &row, QVBoxLayout *layout)
     connect(row.combo, &QComboBox::currentIndexChanged, this, &GrillMeFormWidget::updateProgress);
     if (q.allowOther) {
         row.otherEdit = new QLineEdit(row.container);
-        control::ids::setKey(row.otherEdit, QStringLiteral("otherText"));
         row.otherEdit->setPlaceholderText(tr("Type your own answer"));
         row.otherEdit->hide();
         layout->addWidget(row.otherEdit);
@@ -765,8 +747,6 @@ void GrillMeFormWidget::buildSegmented(int index, Row &row, QVBoxLayout *layout)
         const bool marked = hasRecommendation && (i == 0) == recommendYes;
         auto *button = new QPushButton(withMark(i == 0 ? yes : no, marked), row.container);
         button->setObjectName(QStringLiteral("auSeg"));
-        control::ids::setKey(button, i == 0 ? (proposal ? QStringLiteral("accept") : QStringLiteral("yes"))
-                                            : (proposal ? QStringLiteral("change") : QStringLiteral("no")));
         button->setCheckable(true);
         button->setAutoDefault(false);
         button->setCursor(Qt::PointingHandCursor);
@@ -783,7 +763,6 @@ void GrillMeFormWidget::buildSegmented(int index, Row &row, QVBoxLayout *layout)
     connect(row.group, &QButtonGroup::idToggled, this, &GrillMeFormWidget::updateProgress);
     if (proposal) {
         row.textEdit = new QPlainTextEdit(row.container);
-        control::ids::setKey(row.textEdit, QStringLiteral("changeText"));
         row.textEdit->setPlaceholderText(tr("What should change?"));
         row.textEdit->setTabChangesFocus(true);
         fitLines(row.textEdit, kTextareaLines);
@@ -802,10 +781,7 @@ void GrillMeFormWidget::buildOther(Row &row, QVBoxLayout *layout, bool checkbox)
     row.otherButton = checkbox ? static_cast<QAbstractButton *>(new QCheckBox(tr("Other")))
                                : static_cast<QAbstractButton *>(new QRadioButton(tr("Other")));
     auto *option = new OptionRow(row.otherButton, row.container);
-    control::ids::setKey(option, QStringLiteral("other"));
-    control::ids::setKey(row.otherButton, QStringLiteral("choice"));
     row.otherEdit = new QLineEdit(option);
-    control::ids::setKey(row.otherEdit, QStringLiteral("text"));
     row.otherEdit->setPlaceholderText(tr("Type your own answer"));
     option->addWidget(row.otherEdit, 1);
     if (row.group)
@@ -1042,6 +1018,43 @@ QVector<Answer> GrillMeFormWidget::answers() const
     for (int i = 0; i < m_spec.questions.size(); ++i)
         out.append(answerAt(i));
     return out;
+}
+
+QStringList GrillMeFormWidget::fillAndSubmit(const QVector<Answer> &answers, const QString &note)
+{
+    if (!isPending())
+        return {};
+    for (const Answer &a : answers) {
+        for (int i = 0; i < m_spec.questions.size(); ++i) {
+            if (m_spec.questions.at(i).id != a.questionId)
+                continue;
+            applyAnswer(i, a);
+            setClarify(i, a.clarify);
+        }
+    }
+    if (!note.isEmpty())
+        setNote(note);
+    QStringList missing;
+    const QVector<Answer> current = this->answers();
+    for (int i = 0; i < m_spec.questions.size(); ++i) {
+        const Question &q = m_spec.questions.at(i);
+        const Answer &a = current.at(i);
+        const bool missingChange = !a.clarify && q.type == QuestionType::Proposal
+            && a.value.toString() == QLatin1String("change") && a.other.isEmpty();
+        if (missingChange || (!a.clarify && q.required && !GrillMeForm::hasAnswer(q, a)))
+            missing.append(q.id);
+    }
+    trySubmit();
+    return missing;
+}
+
+void GrillMeFormWidget::dismiss(const QString &note)
+{
+    if (!isPending())
+        return;
+    if (!note.isEmpty())
+        setNote(note);
+    emit dismissed();
 }
 
 void GrillMeFormWidget::trySubmit()

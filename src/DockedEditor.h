@@ -90,6 +90,10 @@ public:
 
     void closeFocusedTab();
 
+    // Every open tab of every kind (editors, previews, browsers, terminals),
+    // floating ones included, in area order then tab order.
+    QList<ads::CDockWidget *> allTabs() const;
+
     void splitToRight(ScintillaNext *editor);
     void splitToBottom(ScintillaNext *editor);
 

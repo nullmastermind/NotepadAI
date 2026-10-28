@@ -40,6 +40,11 @@ MacroManager::~MacroManager()
     saveSettings();
 }
 
+bool MacroManager::isRecording() const
+{
+    return _isRecording;
+}
+
 void MacroManager::startRecording(ScintillaNext *editor)
 {
     qInfo(Q_FUNC_INFO);

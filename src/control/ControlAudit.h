@@ -14,21 +14,18 @@
 #include <QStringList>
 
 class QMainWindow;
-class QWidget;
 
 namespace control {
 
-// The controllability rule, checked: every action reachable from the window
-// (menus filled as when opened, toolbars, shortcut actions) and every
-// interactive widget under it must have a stable, unique Control API id.
-// Returns one line per problem.
-QStringList auditProblems(QMainWindow *window);
-// Prints the problems to stdout and returns their count.
-int runAudit(QMainWindow *window);
+class CommandRegistry;
 
-// Buttons, inputs, combos, spin boxes, sliders, item views, tab bars; not the
-// parts of other controls (a combo's line edit, a scroll bar, a header).
-bool isInteractiveWidget(const QWidget *widget);
+// The controllability rule, checked (docs/adr/0007): every command and
+// argument is described, enum arguments list their values, every named menu
+// action has a unique id (menu.run), and a menu action marked as opening a
+// dialog names a command that exists. Returns one line per problem.
+QStringList auditProblems(QMainWindow *window, const CommandRegistry &commands);
+// Prints the problems to stdout and returns their count.
+int runAudit(QMainWindow *window, const CommandRegistry &commands);
 
 } // namespace control
 

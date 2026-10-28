@@ -531,14 +531,16 @@ void GitController::createBranch(const QString &name, const QString &base, bool 
     enqueue(op);
 }
 
-void GitController::setUpstream(const QString &remoteBranch)
+void GitController::setUpstream(const QString &remoteBranch, const QString &localBranch)
 {
-    if (m_currentRepo.isEmpty() || m_currentBranch.isEmpty()) return;
+    if (m_currentRepo.isEmpty() || (localBranch.isEmpty() && m_currentBranch.isEmpty())) return;
     Op op;
     op.kind = OpKind::SetUpstream;
     op.argv = { QStringLiteral("-C"), m_currentRepo,
                 QStringLiteral("branch"), QStringLiteral("--set-upstream-to"),
                 remoteBranch };
+    if (!localBranch.isEmpty())
+        op.argv.append(localBranch);
     op.timeoutMs = kTimeoutShort;
     op.humanName = tr_("Setting upstream");
     enqueue(op);

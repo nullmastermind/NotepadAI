@@ -9,7 +9,6 @@
  */
 
 #include <QtTest>
-#include <QDialog>
 
 #include "control/ControlEvents.h"
 
@@ -22,7 +21,6 @@ class TestControlEvents : public QObject
 private slots:
     void nothingHappensWithoutListeners();
     void subscribersGetNumberedFrames();
-    void windowsOpeningAndClosingAreReported();
     void aWaiterIsDroppedOnceSatisfied();
 };
 
@@ -31,9 +29,7 @@ void TestControlEvents::nothingHappensWithoutListeners()
     ControlEvents hub;
     QSignalSpy frames(&hub, &ControlEvents::frameReady);
     QVERIFY(!control::events::wanted());
-    control::events::publish(QStringLiteral("chat.turnEnded"), {{QStringLiteral("id"), QStringLiteral("chat:a")}});
-    QDialog dialog;
-    dialog.show();
+    control::events::publish(QStringLiteral("chat.turnEnded"), {{QStringLiteral("session"), QStringLiteral("a")}});
     QCOMPARE(frames.size(), 0);
 }
 
@@ -58,25 +54,6 @@ void TestControlEvents::subscribersGetNumberedFrames()
     QCOMPARE(frames.size(), 2);
 }
 
-void TestControlEvents::windowsOpeningAndClosingAreReported()
-{
-    ControlEvents hub;
-    hub.setSubscribers(1);
-    QSignalSpy frames(&hub, &ControlEvents::frameReady);
-    QDialog dialog;
-    dialog.setObjectName(QStringLiteral("SettingsDialog"));
-    dialog.setWindowTitle(QStringLiteral("Settings"));
-    dialog.show();
-    QTRY_VERIFY(!frames.isEmpty());
-    const QByteArray opened = frames.at(0).at(0).toByteArray();
-    QVERIFY(opened.startsWith("event: window.opened\n"));
-    QVERIFY(opened.contains("\"id\":\"SettingsDialog\""));
-    QVERIFY(opened.contains("\"title\":\"Settings\""));
-
-    dialog.hide();
-    QVERIFY(frames.last().at(0).toByteArray().startsWith("event: window.closed\n"));
-}
-
 void TestControlEvents::aWaiterIsDroppedOnceSatisfied()
 {
     ControlEvents hub;
@@ -91,13 +68,13 @@ void TestControlEvents::aWaiterIsDroppedOnceSatisfied()
     });
     // A pending wait is a listener: events flow while it waits.
     QVERIFY(control::events::wanted());
-    control::events::publish(QStringLiteral("focus.changed"), {});
-    control::events::publish(QStringLiteral("chat.turnEnded"), {{QStringLiteral("id"), QStringLiteral("chat:a")}});
-    control::events::publish(QStringLiteral("chat.turnEnded"), {{QStringLiteral("id"), QStringLiteral("chat:b")}});
+    control::events::publish(QStringLiteral("tab.opened"), {});
+    control::events::publish(QStringLiteral("chat.turnEnded"), {{QStringLiteral("session"), QStringLiteral("a")}});
+    control::events::publish(QStringLiteral("chat.turnEnded"), {{QStringLiteral("session"), QStringLiteral("b")}});
     QCOMPARE(calls, 2);
-    QCOMPARE(seen.value(QStringLiteral("id")).toString(), QStringLiteral("chat:a"));
+    QCOMPARE(seen.value(QStringLiteral("session")).toString(), QStringLiteral("a"));
     QVERIFY(!control::events::wanted());
 }
 
-QTEST_MAIN(TestControlEvents)
+QTEST_GUILESS_MAIN(TestControlEvents)
 #include "test_control_events.moc"

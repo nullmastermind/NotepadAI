@@ -16,10 +16,13 @@
 #include <QStringList>
 
 #include <functional>
+#include <optional>
 
 #include "Pm2Client.h"
+#include "Pm2Entrypoint.h"
 
 class Pm2ProcessModel;
+class TerminalDock;
 class QFrame;
 class QLabel;
 class QMenu;
@@ -46,14 +49,44 @@ public:
                        QWidget *parent = nullptr);
     ~Pm2ProcessesDialog() override;
 
+    using Done = std::function<void(bool ok, const QString &error)>;
+
+    // --- What the buttons do, without asking (the Control API runs these) ---
+    // The helper is ready and the process list has arrived.
+    bool isReady() const;
+    // The helper failed for good (Node missing, pm2 unusable) until retried.
+    bool hasFailed() const;
+    // What the banner says while not ready (connecting, installing, the error).
+    QString statusText() const;
+    const QVector<Pm2ProcessInfo> &processes() const;
+    // Processes pm2 saved that it does not run (Resurrect starts them).
+    QStringList savedNotRunning() const { return m_notRunning; }
+    // The definition of a process NotepadAI created; nullopt for others.
+    std::optional<Pm2Definition> definitionOf(int pmId) const;
+    // Selects these processes' rows, so the table shows what a command acts on.
+    void selectIds(const QList<int> &ids);
+    void startIds(const QList<int> &ids, Done done = {});
+    void stopIds(const QList<int> &ids, Done done = {});
+    void restartIds(const QList<int> &ids, Done done = {});
+    void deleteIds(const QList<int> &ids, Done done = {});
+    // Checked like the New / Edit form; returns the problem, or empty once sent.
+    QString create(const Pm2Definition &def, Done done = {});
+    QString edit(int pmId, const Pm2Definition &def, Done done = {});
+    // `pm2 logs` in a terminal task; null when pm2's directory is unknown.
+    TerminalDock *showLogsFor(int pmId);
+    void resurrectSaved(Done done = {});
+    void discardSaved(Done done = {});
+
+signals:
+    // Readiness, the list or a banner state changed.
+    void statusChanged();
+
 protected:
     void showEvent(QShowEvent *event) override;
     void hideEvent(QHideEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    using Done = std::function<void(bool ok, const QString &error)>;
-
     void onStateChanged(Pm2Client::State state);
     void onList(const QList<Pm2ProcessInfo> &processes, const QStringList &dumpNames, bool hasDump);
     void onCommandFinished(int requestId, bool ok, const QString &error);

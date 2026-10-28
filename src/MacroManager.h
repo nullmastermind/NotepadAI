@@ -39,6 +39,9 @@ public:
     void saveCurrentMacro(const QString &macroName);
     bool hasCurrentUnsavedMacro() const;
     Macro *getCurrentMacro() const { return currentMacro; }
+    // Writes the macro list now (the Control API's macro edits; it is also
+    // written at exit).
+    void saveSettings() const;
 
 public slots:
     void startRecording(ScintillaNext *editor);
@@ -46,7 +49,6 @@ public slots:
 
 private slots:
     void loadSettings();
-    void saveSettings() const;
 
 signals:
     void recordingStarted();

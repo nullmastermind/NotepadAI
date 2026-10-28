@@ -137,45 +137,80 @@ QString TerminalManager::resolveShellCommand() const
 #endif
 }
 
-TerminalDock *TerminalManager::openTerminal(const QString &cwd)
+QString TerminalManager::localShell(QString *error) const
 {
     // Fail fast if the platform PTY backend is unavailable (e.g. Windows
     // pre-1809 without ConPTY). Probing here avoids creating an empty dock
     // that would otherwise be left attached after the error dialog is dismissed.
+    QString problem;
+    QString shell;
     {
         QScopedPointer<IPtyProcess> probe(PtyQt::createPtyProcess(IPtyProcess::AutoPty));
         if (!probe || !probe->isAvailable()) {
 #ifdef Q_OS_WIN
-            QMessageBox::critical(
-                m_mainWindow,
-                tr("Terminal"),
-                tr("Cannot open terminal: ConPTY is unavailable. The embedded terminal requires Windows 10 build 17763 (version 1809) or later."));
+            problem = tr("Cannot open terminal: ConPTY is unavailable. The embedded terminal requires Windows 10 build 17763 (version 1809) or later.");
 #else
-            QMessageBox::critical(
-                m_mainWindow,
-                tr("Terminal"),
-                tr("Cannot open terminal: the platform PTY backend is unavailable."));
+            problem = tr("Cannot open terminal: the platform PTY backend is unavailable.");
 #endif
-            return nullptr;
         }
     }
-
-    const QString configured = resolveShellCommand();
-    QString shell = configured;
-    if (!shell.isEmpty() && !shell.contains(QLatin1Char('/')) && !shell.contains(QLatin1Char('\\'))) {
-        const QString resolved = QStandardPaths::findExecutable(shell);
-        if (!resolved.isEmpty()) {
-            shell = resolved;
+    if (problem.isEmpty()) {
+        const QString configured = resolveShellCommand();
+        shell = configured;
+        if (!shell.isEmpty() && !shell.contains(QLatin1Char('/')) && !shell.contains(QLatin1Char('\\'))) {
+            const QString resolved = QStandardPaths::findExecutable(shell);
+            if (!resolved.isEmpty())
+                shell = resolved;
+        }
+        if (shell.isEmpty() || !QFileInfo::exists(shell)) {
+            problem = tr("Cannot launch terminal: shell '%1' was not found. Set Terminal/ShellCommand in Preferences.").arg(configured);
+            shell.clear();
         }
     }
+    if (!problem.isEmpty()) {
+        if (error)
+            *error = problem;
+        else
+            QMessageBox::critical(m_mainWindow, tr("Terminal"), problem);
+    }
+    return shell;
+}
 
-    if (shell.isEmpty() || !QFileInfo::exists(shell)) {
-        QMessageBox::critical(
-            m_mainWindow,
-            tr("Terminal"),
-            tr("Cannot launch terminal: shell '%1' was not found. Set Terminal/ShellCommand in Preferences.").arg(configured));
+QList<TerminalDock *> TerminalManager::terminalDocks() const
+{
+    QList<TerminalDock *> out;
+    out.reserve(m_docks.size());
+    for (const QPointer<TerminalDock> &d : m_docks) {
+        if (d)
+            out.append(d);
+    }
+    return out;
+}
+
+bool TerminalManager::closeTerminal(TerminalDock *dock, bool force, QString *error)
+{
+    if (!force && dock->isBusy()) {
+        if (error)
+            *error = tr("A process is still running in this terminal.");
+        return false;
+    }
+    dock->killProcess();
+    ads::CDockWidget *dw = dock->hostDockWidget();
+    const bool removed = forgetDock(dock);
+    if (dw)
+        dw->closeDockWidget();
+    else
+        dock->deleteLater();
+    if (removed)
+        applyWorkspaceFilter(m_filterActiveRoot, m_filterOpenRoots);
+    return true;
+}
+
+TerminalDock *TerminalManager::openTerminal(const QString &cwd, QString *error)
+{
+    const QString shell = localShell(error);
+    if (shell.isEmpty())
         return nullptr;
-    }
 
     auto *dock = new TerminalDock(shell, cwd, m_mainWindow);
 
@@ -228,42 +263,11 @@ static QStringList parseEnvText(const QString &envText)
     return result;
 }
 
-void TerminalManager::openTask(const QString &workspaceCwd, const TerminalTask &task)
+TerminalDock *TerminalManager::openTask(const QString &workspaceCwd, const TerminalTask &task, QString *error)
 {
-    {
-        QScopedPointer<IPtyProcess> probe(PtyQt::createPtyProcess(IPtyProcess::AutoPty));
-        if (!probe || !probe->isAvailable()) {
-#ifdef Q_OS_WIN
-            QMessageBox::critical(
-                m_mainWindow,
-                tr("Terminal"),
-                tr("Cannot open terminal: ConPTY is unavailable. The embedded terminal requires Windows 10 build 17763 (version 1809) or later."));
-#else
-            QMessageBox::critical(
-                m_mainWindow,
-                tr("Terminal"),
-                tr("Cannot open terminal: the platform PTY backend is unavailable."));
-#endif
-            return;
-        }
-    }
-
-    const QString configured = resolveShellCommand();
-    QString shell = configured;
-    if (!shell.isEmpty() && !shell.contains(QLatin1Char('/')) && !shell.contains(QLatin1Char('\\'))) {
-        const QString resolved = QStandardPaths::findExecutable(shell);
-        if (!resolved.isEmpty()) {
-            shell = resolved;
-        }
-    }
-
-    if (shell.isEmpty() || !QFileInfo::exists(shell)) {
-        QMessageBox::critical(
-            m_mainWindow,
-            tr("Terminal"),
-            tr("Cannot launch terminal: shell '%1' was not found. Set Terminal/ShellCommand in Preferences.").arg(configured));
-        return;
-    }
+    const QString shell = localShell(error);
+    if (shell.isEmpty())
+        return nullptr;
 
     // Resolve cwd: relative → join with workspace, absolute → use directly, empty → workspace
     QString resolvedCwd = workspaceCwd;
@@ -290,6 +294,7 @@ void TerminalManager::openTask(const QString &workspaceCwd, const TerminalTask &
 
     configureDock(dock);
     placeInEditor(dock);
+    return dock;
 }
 
 void TerminalManager::openRemoteTask(remote::ExecutionContext *ctx,

@@ -8,154 +8,117 @@
  * (at your option) any later version.
  */
 
-// The Control API end to end: real HTTP requests against a real window,
-// the way an external agent drives NotepadAI.
+// The Control API end to end (docs/adr/0007): real HTTP requests running
+// commands against a test window, the way an external agent drives NotepadAI.
 
 #include <QtTest>
-#include <QDialog>
-#include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QJsonDocument>
-#include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
-#include <QMenuBar>
+#include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
 #include <QNetworkReply>
-#include <QPushButton>
-#include <QSplitter>
 #include <QTcpSocket>
-#include <QVBoxLayout>
 
+#include "control/ControlActivityLog.h"
 #include "control/ControlApi.h"
 #include "control/ControlEvents.h"
-#include "control/ControlIds.h"
-#include "control/ControlPicker.h"
 
+using control::Arg;
+using control::ArgType;
+using control::Command;
+using control::CommandContext;
 using control::ControlApi;
 
 namespace {
 
+// Two tabified panels; the name field lives in the one behind.
 class Window : public QMainWindow
 {
 public:
     Window()
     {
         setObjectName(QStringLiteral("MainWindow"));
-        QMenu *file = menuBar()->addMenu(QStringLiteral("&File"));
-        file->setObjectName(QStringLiteral("menuFile"));
-
-        hello = file->addAction(QStringLiteral("Hello"));
-        hello->setObjectName(QStringLiteral("actionHello"));
-        connect(hello, &QAction::triggered, this, [this] { ++hellos; });
-
-        QAction *disabled = file->addAction(QStringLiteral("Disabled"));
-        disabled->setObjectName(QStringLiteral("actionDisabled"));
-        disabled->setEnabled(false);
-
-        QAction *pick = file->addAction(QStringLiteral("Open Folder…"));
-        pick->setObjectName(QStringLiteral("actionPickFolder"));
-        connect(pick, &QAction::triggered, this,
-                [this] { picked = control::picker::getExistingDirectory(this, QStringLiteral("Pick")); });
-
-        // Hidden in this state; its visible twin does the same.
-        QAction *openOld = file->addAction(QStringLiteral("Open Project…"));
-        openOld->setObjectName(QStringLiteral("actionOpenProject"));
-        openOld->setVisible(false);
-        QAction *openNew = file->addAction(QStringLiteral("New Project Folder…"));
-        openNew->setObjectName(QStringLiteral("actionOpenProjectNew"));
-        control::ids::setAlternative(openOld, QStringLiteral("actionOpenProjectNew"));
-
-        // A context menu run with exec(), as the app's tree and tab menus are.
-        QAction *popup = file->addAction(QStringLiteral("Menu…"));
-        popup->setObjectName(QStringLiteral("actionPopup"));
-        connect(popup, &QAction::triggered, this, [this] {
-            QMenu menu(this);
-            menu.setObjectName(QStringLiteral("contextMenu"));
-            menu.addAction(QStringLiteral("Rename"))->setObjectName(QStringLiteral("actionRename"));
-            menuOpen = true;
-            menu.exec(mapToGlobal(QPoint(10, 10)));
-            menuOpen = false;
-        });
-
-        QAction *settings = file->addAction(QStringLiteral("Settings…"));
-        settings->setObjectName(QStringLiteral("actionSettings"));
-        connect(settings, &QAction::triggered, this, [this] {
-            QDialog dialog(this);
-            dialog.setObjectName(QStringLiteral("SettingsDialog"));
-            auto *layout = new QVBoxLayout(&dialog);
-            auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-            buttons->setObjectName(QStringLiteral("buttonBox"));
-            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-            layout->addWidget(buttons);
-            dialogOpen = true;
-            dialogResult = dialog.exec();
-            dialogOpen = false;
-            if (dialogResult == QDialog::Accepted) {
-                auto *applied = new QWidget(this, Qt::Window);
-                applied->setObjectName(QStringLiteral("SettingsApplied"));
-                applied->setAttribute(Qt::WA_DeleteOnClose);
-                applied->show();
-            }
-        });
-
-        auto *central = new QWidget(this);
-        auto *layout = new QVBoxLayout(central);
-        name = new QLineEdit(central);
-        name->setObjectName(QStringLiteral("editName"));
-        password = new QLineEdit(central);
-        password->setObjectName(QStringLiteral("editPassword"));
-        password->setEchoMode(QLineEdit::Password);
-        status = new QLabel(QStringLiteral("idle"), central);
-        status->setObjectName(QStringLiteral("labelStatus"));
-        // Stands in for the Control API's own settings and Stop chip.
-        auto *chrome = new QWidget(central);
-        chrome->setObjectName(QStringLiteral("controlChrome"));
-        control::ids::setIgnored(chrome);
-        auto *stop = new QPushButton(QStringLiteral("Stop"), chrome);
-        stop->setObjectName(QStringLiteral("buttonStop"));
-        connect(stop, &QPushButton::clicked, this, [this] { ++stops; });
-        (new QVBoxLayout(chrome))->addWidget(stop);
-        layout->addWidget(name);
-        layout->addWidget(password);
-        layout->addWidget(status);
-        layout->addWidget(chrome);
-        // Two panes with a handle between them.
-        auto *split = new QSplitter(Qt::Horizontal, central);
-        split->setObjectName(QStringLiteral("split"));
-        splitLeft = new QWidget(split);
-        splitLeft->setObjectName(QStringLiteral("splitLeft"));
-        auto *splitRight = new QWidget(split);
-        splitRight->setObjectName(QStringLiteral("splitRight"));
-        layout->addWidget(split, 1);
-        setCentralWidget(central);
-
-        // Two tabbed panels, like workspace panels.
-        for (QDockWidget **panel : {&panelA, &panelB}) {
-            *panel = new QDockWidget(panel == &panelA ? QStringLiteral("alpha") : QStringLiteral("beta"), this);
-            (*panel)->setObjectName(panel == &panelA ? QStringLiteral("panelA") : QStringLiteral("panelB"));
-            (*panel)->setWidget(new QWidget(*panel));
-            addDockWidget(Qt::LeftDockWidgetArea, *panel);
-        }
+        resize(800, 600);
+        setCentralWidget(new QWidget(this));
+        panelA = new QDockWidget(QStringLiteral("Files"), this);
+        panelA->setObjectName(QStringLiteral("panelA"));
+        panelA->setWidget(new QWidget(panelA));
+        panelB = new QDockWidget(QStringLiteral("Settings"), this);
+        panelB->setObjectName(QStringLiteral("panelB"));
+        name = new QLineEdit(panelB);
+        panelB->setWidget(name);
+        addDockWidget(Qt::LeftDockWidgetArea, panelA);
+        addDockWidget(Qt::LeftDockWidgetArea, panelB);
         tabifyDockWidget(panelA, panelB);
+        panelA->raise();
     }
 
-    QAction *hello = nullptr;
-    QLineEdit *name = nullptr;
-    QLineEdit *password = nullptr;
-    QLabel *status = nullptr;
     QDockWidget *panelA = nullptr;
-    QWidget *splitLeft = nullptr;
     QDockWidget *panelB = nullptr;
-    int hellos = 0;
-    int stops = 0;
-    QString picked;
-    bool dialogOpen = false;
-    bool menuOpen = false;
-    int dialogResult = -1;
+    QLineEdit *name = nullptr;
+    QString password;
 };
+
+// A tabified panel behind its tab is moved off-screen, not hidden.
+bool inFront(const QDockWidget *dock)
+{
+    const QRect g = dock->geometry();
+    return dock->isVisible() && g.right() >= 0 && g.bottom() >= 0;
+}
+
+Arg arg(const QString &name, ArgType type, bool required, bool secret = false)
+{
+    Arg a;
+    a.name = name;
+    a.type = type;
+    a.required = required;
+    a.secret = secret;
+    a.description = name;
+    return a;
+}
+
+void registerTestCommands(ControlApi *api, Window *w)
+{
+    Command set;
+    set.name = QStringLiteral("test.setName");
+    set.summary = QStringLiteral("Set the name");
+    set.args = {arg(QStringLiteral("text"), ArgType::String, true), arg(QStringLiteral("password"), ArgType::String, false, true)};
+    set.handler = [w](const CommandContext &ctx) {
+        w->name->setText(ctx.str(QStringLiteral("text")));
+        w->password = ctx.str(QStringLiteral("password"));
+        ctx.reveal(w->name);
+        ctx.ok({{QStringLiteral("name"), w->name->text()}});
+    };
+    api->commands().add(set);
+
+    Command read;
+    read.name = QStringLiteral("test.read");
+    read.summary = QStringLiteral("Read the name");
+    read.changes = false;
+    read.args = {arg(QStringLiteral("upper"), ArgType::Bool, false)};
+    read.handler = [w](const CommandContext &ctx) {
+        const QString n = w->name->text();
+        ctx.ok({{QStringLiteral("name"), ctx.flag(QStringLiteral("upper")) ? n.toUpper() : n}});
+    };
+    api->commands().add(read);
+
+    Command slow;
+    slow.name = QStringLiteral("test.slow");
+    slow.summary = QStringLiteral("Answer later");
+    slow.handler = [w](const CommandContext &ctx) {
+        QTimer::singleShot(100, w, [ctx] { ctx.ok({{QStringLiteral("late"), true}}); });
+    };
+    api->commands().add(slow);
+
+    Command forget;
+    forget.name = QStringLiteral("test.forget");
+    forget.summary = QStringLiteral("Forget to answer");
+    forget.handler = [](const CommandContext &) {};
+    api->commands().add(forget);
+}
 
 struct Response
 {
@@ -163,7 +126,6 @@ struct Response
     int status = 0;
     QByteArray body;
     QJsonObject json;
-    std::function<void()> then; // runs when answered, possibly inside a nested event loop
 };
 
 } // namespace
@@ -178,25 +140,21 @@ private slots:
 
     void everyRequestNeedsTheToken();
     void aRequestWithoutTheTokenIsRefusedBeforeItsBody();
-    void triggerClicksTheActionAndReportsEffects();
-    void aUserCouldNotClickItSoNeitherCanTheAgent();
-    void theControlApisOwnControlsAreTheUsersAlone();
-    void aHiddenActionNamesItsVisibleTwin();
-    void aPanelIsSelectedAndClosedLikeItsTabAndTitleBar();
-    void aPaneIsResizedLikeDraggingItsEdge();
-    void aModalDialogAnswersWhileOpenAndIsAnsweredThroughTheApi();
-    void nothingOutsideAnOpenMenuRunsUnderIt();
-    void aDirectCommandFillsThePicker();
-    void typeThenReadAField();
-    void theLogKeepsWhatEachStepWasGiven();
-    void waitForTextAndTimeOut();
+    void commandsDescribeThemselves();
+    void aCommandRunsShowsWhatItChangedAndIsLogged();
+    void invalidArgumentsAreRefusedBeforeTheCommandRuns();
+    void readsAnswerGetAndAreSilent();
+    void anUnknownCommandNamesItsDomain();
+    void aCommandMayAnswerLaterButMustAnswer();
+    void aDialogTheAppOpensDuringACommandIsCancelledAndNamed();
+    void theLogMasksSecrets();
+    void waitPollsAReadCommandUntilItMatches();
     void waitForAnEvent();
+    void theSkillEndsWithTheCommandReference();
+    void theOldUiEndpointsAreGone();
     void screenshotIsAPng();
 
 private:
-    // Sends a request; `out` is filled (and `out->then` runs) when it is answered.
-    void send(const QByteArray &method, const QString &path, const QJsonObject &body, Response *out,
-              bool withToken = true);
     Response request(const QByteArray &method, const QString &path, const QJsonObject &body = {},
                      bool withToken = true);
 
@@ -209,7 +167,9 @@ void TestControlApi::init()
 {
     m_window = new Window;
     m_window->show();
+    QVERIFY(QTest::qWaitForWindowExposed(m_window));
     m_api = new ControlApi(ControlApi::Host{}, m_window);
+    registerTestCommands(m_api, m_window);
     m_api->setEnabled(true);
     QVERIFY2(m_api->isListening(), qPrintable(m_api->lastError()));
     QVERIFY(m_api->tokenIsSessionOnly());
@@ -224,8 +184,8 @@ void TestControlApi::cleanup()
     delete m_window;
 }
 
-void TestControlApi::send(const QByteArray &method, const QString &path, const QJsonObject &body, Response *out,
-                          bool withToken)
+Response TestControlApi::request(const QByteArray &method, const QString &path, const QJsonObject &body,
+                                 bool withToken)
 {
     QNetworkRequest req(QUrl(QStringLiteral("http://127.0.0.1:%1%2").arg(m_api->port()).arg(path)));
     if (withToken)
@@ -237,22 +197,14 @@ void TestControlApi::send(const QByteArray &method, const QString &path, const Q
         req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
         reply = m_net->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     }
-    connect(reply, &QNetworkReply::finished, this, [reply, out] {
-        out->status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        out->body = reply->readAll();
-        out->json = QJsonDocument::fromJson(out->body).object();
-        out->done = true;
-        reply->deleteLater();
-        if (out->then)
-            out->then();
-    });
-}
-
-Response TestControlApi::request(const QByteArray &method, const QString &path,
-                                   const QJsonObject &body, bool withToken)
-{
     Response r;
-    send(method, path, body, &r, withToken);
+    connect(reply, &QNetworkReply::finished, this, [reply, &r] {
+        r.status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        r.body = reply->readAll();
+        r.json = QJsonDocument::fromJson(r.body).object();
+        r.done = true;
+        reply->deleteLater();
+    });
     QElapsedTimer t;
     t.start();
     while (!r.done && t.elapsed() < 15000)
@@ -264,10 +216,14 @@ void TestControlApi::everyRequestNeedsTheToken()
 {
     QCOMPARE(request("GET", QStringLiteral("/instance"), {}, false).status, 401);
     QCOMPARE(request("GET", QStringLiteral("/skill"), {}, false).status, 401);
+    QCOMPARE(request("POST", QStringLiteral("/commands/test.setName"), {{QStringLiteral("text"), QStringLiteral("x")}}, false)
+                 .status,
+             401);
+    QVERIFY(m_window->name->text().isEmpty());
     const Response r = request("GET", QStringLiteral("/instance"));
     QCOMPARE(r.status, 200);
-    QVERIFY(r.json.value(QStringLiteral("ok")).toBool());
     QCOMPARE(r.json.value(QStringLiteral("apiVersion")).toInt(), ControlApi::kApiVersion);
+    QCOMPARE(r.json.value(QStringLiteral("commands")).toInt(), 4);
 }
 
 void TestControlApi::aRequestWithoutTheTokenIsRefusedBeforeItsBody()
@@ -277,7 +233,7 @@ void TestControlApi::aRequestWithoutTheTokenIsRefusedBeforeItsBody()
     socket.setProxy(QNetworkProxy::NoProxy);
     socket.connectToHost(QHostAddress::LocalHost, m_api->port());
     QVERIFY(socket.waitForConnected(5000));
-    socket.write(QByteArray("POST /trigger HTTP/1.1\r\nHost: 127.0.0.1:") + QByteArray::number(m_api->port())
+    socket.write(QByteArray("POST /commands/test.setName HTTP/1.1\r\nHost: 127.0.0.1:") + QByteArray::number(m_api->port())
                  + "\r\nContent-Type: application/json\r\nContent-Length: 4000000\r\n\r\n");
     QByteArray answer;
     QElapsedTimer t;
@@ -289,277 +245,213 @@ void TestControlApi::aRequestWithoutTheTokenIsRefusedBeforeItsBody()
     QVERIFY2(answer.startsWith("HTTP/1.1 401"), answer.constData());
 }
 
-void TestControlApi::triggerClicksTheActionAndReportsEffects()
+void TestControlApi::commandsDescribeThemselves()
 {
-    const Response r = request("POST", QStringLiteral("/actions/trigger"), {{QStringLiteral("id"), QStringLiteral("actionHello")}});
-    QCOMPARE(r.status, 200);
-    QVERIFY(r.json.value(QStringLiteral("completed")).toBool());
-    QCOMPARE(m_window->hellos, 1);
-    QVERIFY(r.json.value(QStringLiteral("effects")).isObject());
+    const Response all = request("GET", QStringLiteral("/commands"));
+    QCOMPARE(all.status, 200);
+    const QJsonArray commands = all.json.value(QStringLiteral("commands")).toArray();
+    QCOMPARE(commands.size(), 4);
+    const QJsonObject set = commands.at(0).toObject();
+    QCOMPARE(set.value(QStringLiteral("name")).toString(), QStringLiteral("test.setName"));
+    QCOMPARE(set.value(QStringLiteral("changes")).toBool(), true);
+    const QJsonObject text = set.value(QStringLiteral("args")).toArray().at(0).toObject();
+    QCOMPARE(text.value(QStringLiteral("name")).toString(), QStringLiteral("text"));
+    QCOMPARE(text.value(QStringLiteral("type")).toString(), QStringLiteral("string"));
+    QCOMPARE(text.value(QStringLiteral("required")).toBool(), true);
 
-    // The step is in the activity log the user reads.
-    const Response log = request("GET", QStringLiteral("/log"));
-    const QJsonArray entries = log.json.value(QStringLiteral("entries")).toArray();
-    QVERIFY(!entries.isEmpty());
-    QVERIFY(QJsonDocument(entries).toJson().contains("actionHello"));
+    QCOMPARE(request("GET", QStringLiteral("/commands?domain=test")).json.value(QStringLiteral("commands")).toArray().size(), 4);
+    QCOMPARE(request("GET", QStringLiteral("/commands?domain=files")).json.value(QStringLiteral("commands")).toArray().size(), 0);
 }
 
-void TestControlApi::aUserCouldNotClickItSoNeitherCanTheAgent()
+void TestControlApi::aCommandRunsShowsWhatItChangedAndIsLogged()
 {
-    const Response r = request("POST", QStringLiteral("/actions/trigger"), {{QStringLiteral("id"), QStringLiteral("actionDisabled")}});
-    QCOMPARE(r.status, 409);
-    QVERIFY(!r.json.value(QStringLiteral("error")).toString().isEmpty());
-    QCOMPARE(request("POST", QStringLiteral("/ui/click"), {{QStringLiteral("id"), QStringLiteral("MainWindow/nope")}}).status,
-             404);
-}
+    QVERIFY(inFront(m_window->panelA));
+    QVERIFY(!inFront(m_window->panelB));
+    QSignalSpy ran(m_api, &ControlApi::commandRan);
 
-void TestControlApi::theControlApisOwnControlsAreTheUsersAlone()
-{
-    const Response r = request("POST", QStringLiteral("/ui/click"),
-                               {{QStringLiteral("id"), QStringLiteral("MainWindow/controlChrome/buttonStop")}});
-    QCOMPARE(r.status, 409);
-    QCOMPARE(m_window->stops, 0);
-    const Response tree = request("GET", QStringLiteral("/ui?root=MainWindow"));
-    QCOMPARE(tree.status, 200);
-    QVERIFY(!tree.body.contains("buttonStop"));
-}
-
-void TestControlApi::aHiddenActionNamesItsVisibleTwin()
-{
-    const Response r = request("POST", QStringLiteral("/actions/trigger"),
-                               {{QStringLiteral("id"), QStringLiteral("actionOpenProject")}});
-    QCOMPARE(r.status, 409);
-    QVERIFY2(r.json.value(QStringLiteral("error")).toString().contains(QLatin1String("actionOpenProjectNew")),
-             r.body.constData());
-}
-
-void TestControlApi::aPanelIsSelectedAndClosedLikeItsTabAndTitleBar()
-{
-    m_window->panelA->raise(); // tabs switch only once the window is shown
-    using control::ids::isBehindTab;
-    QTRY_VERIFY(!isBehindTab(m_window->panelA) && isBehindTab(m_window->panelB));
-    // The panel behind is listed, out of view; the tab bar over the panels is not a control of its own.
-    const Response tree = request("GET", QStringLiteral("/ui?root=MainWindow&depth=1"));
-    QVERIFY2(!tree.body.contains("QTabBar"), tree.body.constData());
-    bool listedOutOfView = false;
-    for (const QJsonValue &v : tree.json.value(QStringLiteral("nodes")).toArray().at(0).toObject().value(QStringLiteral("children")).toArray()) {
-        const QJsonObject n = v.toObject();
-        if (n.value(QStringLiteral("id")).toString() == QLatin1String("MainWindow/panelB"))
-            listedOutOfView = !n.value(QStringLiteral("visible")).toBool(true) && !n.value(QStringLiteral("current")).toBool(true);
-    }
-    QVERIFY2(listedOutOfView, tree.body.constData());
-
-    const Response select = request("POST", QStringLiteral("/ui/select"), {{QStringLiteral("id"), QStringLiteral("MainWindow/panelB")}});
-    QCOMPARE(select.status, 200);
-    QTRY_VERIFY(isBehindTab(m_window->panelA) && !isBehindTab(m_window->panelB));
-
-    const Response close = request("POST", QStringLiteral("/ui/close"), {{QStringLiteral("id"), QStringLiteral("MainWindow/panelB")}});
-    QCOMPARE(close.status, 200);
-    QVERIFY(!m_window->panelB->toggleViewAction()->isChecked());
-    QCOMPARE(request("POST", QStringLiteral("/ui/close"), {{QStringLiteral("id"), QStringLiteral("MainWindow/panelB")}}).status,
-             409);
-}
-
-void TestControlApi::aPaneIsResizedLikeDraggingItsEdge()
-{
-    m_window->resize(1000, 700);
-    QTRY_VERIFY(m_window->splitLeft->width() > 0);
-    auto resize = [this](const QString &id, const QJsonObject &args) {
-        return request("POST", QStringLiteral("/ui/do"),
-                       {{QStringLiteral("id"), id}, {QStringLiteral("op"), QStringLiteral("resize")},
-                        {QStringLiteral("args"), args}});
-    };
-
-    // A splitter child: its handle moves, the neighbour takes the rest.
-    const QString left = control::ids::nodeId(m_window->splitLeft).id;
-    const Response pane = resize(left, {{QStringLiteral("width"), 150}});
-    QCOMPARE(pane.status, 200);
-    QTRY_COMPARE(m_window->splitLeft->width(), 150);
-
-    // A main window's panel, even one behind its tab: the group's separator moves.
-    QTRY_VERIFY(control::ids::isBehindTab(m_window->panelA));
-    const Response panel = resize(QStringLiteral("MainWindow/panelA"), {{QStringLiteral("width"), 300}});
-    QCOMPARE(panel.status, 200);
-    QTRY_VERIFY2(qAbs(m_window->panelB->width() - 300) <= 4, qPrintable(QString::number(m_window->panelB->width())));
-
-    // The central area has no edge of its own: the panel beside it gives way.
-    const Response central = resize(QStringLiteral("MainWindow/editName"), {{QStringLiteral("width"), 600}});
-    QCOMPARE(central.status, 200);
-    QTRY_VERIFY2(qAbs(m_window->centralWidget()->width() - 600) <= 4,
-                 qPrintable(QString::number(m_window->centralWidget()->width())));
-
-    // No edge sets the splitter child's height, and nothing up to the window does either.
-    QCOMPARE(resize(left, {{QStringLiteral("height"), 100}}).status, 422);
-    QCOMPARE(resize(left, {}).status, 422);
-}
-
-void TestControlApi::aModalDialogAnswersWhileOpenAndIsAnsweredThroughTheApi()
-{
-    // The trigger is answered while exec() runs, so every next step is sent
-    // from the previous answer: this test's own code resumes only once the
-    // dialog has closed.
-    Response trigger;
-    Response blocked;
-    Response click;
-    bool openWhenAnswered = false;
-    trigger.then = [&] {
-        openWhenAnswered = m_window->dialogOpen;
-        // Behind the dialog, the window cannot be clicked.
-        send("POST", QStringLiteral("/ui/click"), {{QStringLiteral("id"), QStringLiteral("MainWindow/editName")}},
-             &blocked);
-    };
-    blocked.then = [&] {
-        // The agent clicks OK by its role id.
-        send("POST", QStringLiteral("/ui/click"),
-             {{QStringLiteral("id"), QStringLiteral("SettingsDialog/buttonBox/button:ok")}}, &click);
-    };
-
-    // A broken chain would leave exec() running forever: close it so the test fails instead.
-    QTimer::singleShot(12000, this, [] {
-        if (QWidget *modal = QApplication::activeModalWidget())
-            modal->close();
-    });
-    send("POST", QStringLiteral("/actions/trigger"), {{QStringLiteral("id"), QStringLiteral("actionSettings")}}, &trigger);
-    QTRY_VERIFY_WITH_TIMEOUT(click.done && !m_window->dialogOpen, 15000);
-
-    QVERIFY(openWhenAnswered);
-    QCOMPARE(trigger.status, 200);
-    QVERIFY(!trigger.json.value(QStringLiteral("completed")).toBool());
-    const QJsonObject effects = trigger.json.value(QStringLiteral("effects")).toObject();
-    QCOMPARE(effects.value(QStringLiteral("modal")).toString(), QStringLiteral("SettingsDialog"));
-    QCOMPARE(blocked.status, 409);
-    QCOMPARE(click.status, 200);
-    QCOMPARE(m_window->dialogResult, int(QDialog::Accepted));
-    // OK answers once what follows the dialog's exec() has run, so the
-    // window it opens is among its effects.
-    const QJsonArray opened = click.json.value(QStringLiteral("effects")).toObject().value(QStringLiteral("opened")).toArray();
-    QVERIFY2(QJsonDocument(opened).toJson().contains("SettingsApplied"), QJsonDocument(click.json).toJson().constData());
-}
-
-void TestControlApi::nothingOutsideAnOpenMenuRunsUnderIt()
-{
-    // While the menu's exec() runs, a command elsewhere could close its owner
-    // under it; only the menu itself and Escape are answered.
-    Response open;
-    Response type;
-    Response trigger;
-    Response escape;
-    open.then = [&] {
-        send("POST", QStringLiteral("/ui/type"),
-             {{QStringLiteral("id"), QStringLiteral("MainWindow/editName")}, {QStringLiteral("text"), QStringLiteral("x")}},
-             &type);
-    };
-    type.then = [&] {
-        send("POST", QStringLiteral("/actions/trigger"), {{QStringLiteral("id"), QStringLiteral("actionHello")}}, &trigger);
-    };
-    trigger.then = [&] { send("POST", QStringLiteral("/ui/key"), {{QStringLiteral("keys"), QStringLiteral("Escape")}}, &escape); };
-    QTimer::singleShot(12000, this, [] {
-        if (QWidget *popup = QApplication::activePopupWidget())
-            popup->close();
-    });
-    send("POST", QStringLiteral("/actions/trigger"), {{QStringLiteral("id"), QStringLiteral("actionPopup")}}, &open);
-    QTRY_VERIFY_WITH_TIMEOUT(escape.done && !m_window->menuOpen, 15000);
-
-    QCOMPARE(open.json.value(QStringLiteral("effects")).toObject().value(QStringLiteral("popup")).toString(),
-             QStringLiteral("contextMenu"));
-    QCOMPARE(type.status, 409);
-    QCOMPARE(trigger.status, 409);
-    QCOMPARE(m_window->hellos, 0);
-    QVERIFY(m_window->name->text().isEmpty());
-    QCOMPARE(escape.status, 200);
-}
-
-void TestControlApi::aDirectCommandFillsThePicker()
-{
-    const Response r = request("POST", QStringLiteral("/actions/trigger"),
-                               {{QStringLiteral("id"), QStringLiteral("actionPickFolder")},
-                                {QStringLiteral("value"), QStringLiteral("C:/work/app")}});
-    QCOMPARE(r.status, 200);
-    QVERIFY(r.json.value(QStringLiteral("valueUsed")).toBool());
-    QCOMPARE(m_window->picked, QStringLiteral("C:/work/app"));
-    QVERIFY(!control::picker::isArmed()); // nothing left for the next picker
-}
-
-void TestControlApi::typeThenReadAField()
-{
-    QCOMPARE(request("POST", QStringLiteral("/ui/type"),
-                     {{QStringLiteral("id"), QStringLiteral("MainWindow/editName")}, {QStringLiteral("text"), QStringLiteral("hello")}})
-                 .status,
-             200);
-    QCOMPARE(m_window->name->text(), QStringLiteral("hello"));
-    const Response read = request("GET", QStringLiteral("/ui/read?id=MainWindow/editName"));
-    QCOMPARE(read.json.value(QStringLiteral("text")).toString(), QStringLiteral("hello"));
-}
-
-void TestControlApi::theLogKeepsWhatEachStepWasGiven()
-{
-    QCOMPARE(request("POST", QStringLiteral("/ui/type"),
-                     {{QStringLiteral("id"), QStringLiteral("MainWindow/editName")}, {QStringLiteral("text"), QStringLiteral("hello")}})
-                 .status,
-             200);
-    QCOMPARE(request("POST", QStringLiteral("/ui/type"),
-                     {{QStringLiteral("id"), QStringLiteral("MainWindow/editPassword")}, {QStringLiteral("text"), QStringLiteral("hunter2")}})
-                 .status,
-             200);
-    QCOMPARE(m_window->password->text(), QStringLiteral("hunter2"));
-
-    const Response log = request("GET", QStringLiteral("/log"));
-    QVERIFY2(!log.body.contains("hunter2"), log.body.constData());
-    QJsonObject typedName;
-    QJsonObject typedPassword;
-    for (const QJsonValue &v : log.json.value(QStringLiteral("entries")).toArray()) {
-        const QJsonObject e = v.toObject();
-        if (e.value(QStringLiteral("target")).toString() == QLatin1String("MainWindow/editName"))
-            typedName = e.value(QStringLiteral("args")).toObject();
-        else if (e.value(QStringLiteral("target")).toString() == QLatin1String("MainWindow/editPassword"))
-            typedPassword = e.value(QStringLiteral("args")).toObject();
-    }
-    QCOMPARE(typedName.value(QStringLiteral("text")).toString(), QStringLiteral("hello"));
-    QCOMPARE(typedPassword.value(QStringLiteral("text")).toString(), QStringLiteral("••••"));
-}
-
-void TestControlApi::waitForTextAndTimeOut()
-{
-    QTimer::singleShot(150, m_window, [this] { m_window->status->setText(QStringLiteral("build done")); });
-    const Response r = request("POST", QStringLiteral("/wait"),
-                               {{QStringLiteral("id"), QStringLiteral("MainWindow/labelStatus")},
-                                {QStringLiteral("text"), QStringLiteral("done")},
-                                {QStringLiteral("timeout"), 10}});
+    const Response r = request("POST", QStringLiteral("/commands/test.setName"), {{QStringLiteral("text"), QStringLiteral("Ada")}});
     QCOMPARE(r.status, 200);
     QVERIFY(r.json.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(r.json.value(QStringLiteral("name")).toString(), QStringLiteral("Ada"));
+    QCOMPARE(m_window->name->text(), QStringLiteral("Ada"));
+    // The user sees it: the panel holding the field came to the front.
+    QTRY_VERIFY(inFront(m_window->panelB));
+    // The indicator names it, the log keeps it with its arguments.
+    QCOMPARE(ran.size(), 1);
+    // The command and its leading arguments, short enough for the indicator.
+    QCOMPARE(ran.at(0).at(0).toString(), QStringLiteral("test.setName \"Ada\""));
+    const control::ControlActivityLog *log = m_api->activityLog();
+    QCOMPARE(log->size(), 1);
+    QCOMPARE(log->at(0).op, QStringLiteral("test.setName"));
+    QVERIFY(log->at(0).ok);
+    QCOMPARE(log->at(0).args.value(QStringLiteral("text")).toString(), QStringLiteral("Ada"));
+}
 
-    const Response late = request("POST", QStringLiteral("/wait"),
-                                  {{QStringLiteral("id"), QStringLiteral("MainWindow/labelStatus")},
-                                   {QStringLiteral("text"), QStringLiteral("never")},
-                                   {QStringLiteral("timeout"), 0.3}});
-    QCOMPARE(late.status, 408);
+void TestControlApi::invalidArgumentsAreRefusedBeforeTheCommandRuns()
+{
+    const Response unknown = request("POST", QStringLiteral("/commands/test.setName"), {{QStringLiteral("txt"), QStringLiteral("x")}});
+    QCOMPARE(unknown.status, 400);
+    QVERIFY(unknown.json.value(QStringLiteral("error")).toString().contains(QStringLiteral("text*")));
+    const Response wrongType = request("POST", QStringLiteral("/commands/test.setName"), {{QStringLiteral("text"), 5}});
+    QCOMPARE(wrongType.status, 400);
+    QVERIFY(m_window->name->text().isEmpty());
+    // Refusals are logged as failed steps.
+    QCOMPARE(m_api->activityLog()->size(), 2);
+    QVERIFY(!m_api->activityLog()->at(0).ok);
 
-    // Any of several states: the answer names the one that held.
+    const Response notJson = request("POST", QStringLiteral("/commands/test.setName"), {});
+    QCOMPARE(notJson.status, 400);
+}
+
+void TestControlApi::readsAnswerGetAndAreSilent()
+{
+    m_window->name->setText(QStringLiteral("grace"));
+    QSignalSpy ran(m_api, &ControlApi::commandRan);
+    const Response get = request("GET", QStringLiteral("/commands/test.read?upper=true"));
+    QCOMPARE(get.status, 200);
+    QCOMPARE(get.json.value(QStringLiteral("name")).toString(), QStringLiteral("GRACE"));
+    const Response post = request("POST", QStringLiteral("/commands/test.read"), {});
+    QCOMPARE(post.json.value(QStringLiteral("name")).toString(), QStringLiteral("grace"));
+    QCOMPARE(ran.size(), 0);
+    QCOMPARE(m_api->activityLog()->size(), 0);
+    QVERIFY(inFront(m_window->panelA)); // nothing was brought forward
+
+    // A changing command is never run by GET; the 405 describes it.
+    const Response wrong = request("GET", QStringLiteral("/commands/test.setName?text=x"));
+    QCOMPARE(wrong.status, 405);
+    QCOMPARE(wrong.json.value(QStringLiteral("command")).toObject().value(QStringLiteral("name")).toString(),
+             QStringLiteral("test.setName"));
+    QCOMPARE(m_window->name->text(), QStringLiteral("grace"));
+}
+
+void TestControlApi::anUnknownCommandNamesItsDomain()
+{
+    const Response r = request("POST", QStringLiteral("/commands/test.nope"), {});
+    QCOMPARE(r.status, 404);
+    const QString error = r.json.value(QStringLiteral("error")).toString();
+    QVERIFY(error.contains(QStringLiteral("test.setName")));
+    QVERIFY(error.contains(QStringLiteral("test.read")));
+}
+
+void TestControlApi::aCommandMayAnswerLaterButMustAnswer()
+{
+    const Response later = request("POST", QStringLiteral("/commands/test.slow"), {});
+    QCOMPARE(later.status, 200);
+    QVERIFY(later.json.value(QStringLiteral("late")).toBool());
+    const Response forgot = request("POST", QStringLiteral("/commands/test.forget"), {});
+    QCOMPARE(forgot.status, 500);
+}
+
+void TestControlApi::aDialogTheAppOpensDuringACommandIsCancelledAndNamed()
+{
+    // As closing a CSV preview brings forward the text editor of the same
+    // file, which asks to reload it: the command must still answer.
+    Command prompt;
+    prompt.name = QStringLiteral("test.prompt");
+    prompt.summary = QStringLiteral("Ask the user something on the way");
+    prompt.handler = [w = m_window](const CommandContext &ctx) {
+        const auto answer = QMessageBox::question(w, QStringLiteral("Reload"),
+                                                  QStringLiteral("data.csv changed on disk. Reload it?"),
+                                                  QMessageBox::Yes | QMessageBox::No);
+        ctx.ok({{QStringLiteral("reloaded"), answer == QMessageBox::Yes}});
+    };
+    m_api->commands().add(prompt);
+
+    const Response r = request("POST", QStringLiteral("/commands/test.prompt"), {});
+    QCOMPARE(r.status, 200);
+    QCOMPARE(r.json.value(QStringLiteral("reloaded")).toBool(), false); // cancelled: nothing changed
+    const QJsonArray dialogs = r.json.value(QStringLiteral("dismissedDialogs")).toArray();
+    QCOMPARE(dialogs.size(), 1);
+    QCOMPARE(dialogs.at(0).toObject().value(QStringLiteral("title")).toString(), QStringLiteral("Reload"));
+    QCOMPARE(dialogs.at(0).toObject().value(QStringLiteral("text")).toString(),
+             QStringLiteral("data.csv changed on disk. Reload it?"));
+    QVERIFY(!QApplication::activeModalWidget());
+
+    // A command that opens nothing says nothing about dialogs.
+    const Response plain = request("POST", QStringLiteral("/commands/test.setName"), {{QStringLiteral("text"), QStringLiteral("x")}});
+    QVERIFY(!plain.json.contains(QStringLiteral("dismissedDialogs")));
+}
+
+void TestControlApi::theLogMasksSecrets()
+{
+    QCOMPARE(request("POST", QStringLiteral("/commands/test.setName"),
+                     {{QStringLiteral("text"), QStringLiteral("root")}, {QStringLiteral("password"), QStringLiteral("hunter2")}})
+                 .status,
+             200);
+    QCOMPARE(m_window->password, QStringLiteral("hunter2"));
+    const Response log = request("GET", QStringLiteral("/log"));
+    QVERIFY2(!log.body.contains("hunter2"), log.body.constData());
+    const QJsonObject args = log.json.value(QStringLiteral("entries")).toArray().last().toObject().value(QStringLiteral("args")).toObject();
+    QCOMPARE(args.value(QStringLiteral("text")).toString(), QStringLiteral("root"));
+    QCOMPARE(args.value(QStringLiteral("password")).toString(), QStringLiteral("••••"));
+}
+
+void TestControlApi::waitPollsAReadCommandUntilItMatches()
+{
+    QTimer::singleShot(250, m_window, [this] { m_window->name->setText(QStringLiteral("build done")); });
+    const Response r = request("POST", QStringLiteral("/wait"),
+                               {{QStringLiteral("command"), QStringLiteral("test.read")},
+                                {QStringLiteral("contains"), QJsonObject{{QStringLiteral("name"), QStringLiteral("done")}}},
+                                {QStringLiteral("timeout"), 10}});
+    QCOMPARE(r.status, 200);
+    QCOMPARE(r.json.value(QStringLiteral("result")).toObject().value(QStringLiteral("name")).toString(),
+             QStringLiteral("build done"));
+
     const Response either = request("POST", QStringLiteral("/wait"),
-                                    {{QStringLiteral("id"), QStringLiteral("MainWindow/labelStatus")},
-                                     {QStringLiteral("state"), QJsonArray{QStringLiteral("gone"), QStringLiteral("visible")}},
+                                    {{QStringLiteral("command"), QStringLiteral("test.read")},
+                                     {QStringLiteral("args"), QJsonObject{{QStringLiteral("upper"), true}}},
+                                     {QStringLiteral("until"), QJsonObject{{QStringLiteral("name"),
+                                                                            QJsonArray{QStringLiteral("X"), QStringLiteral("BUILD DONE")}}}},
                                      {QStringLiteral("timeout"), 5}});
     QCOMPARE(either.status, 200);
-    QCOMPARE(either.json.value(QStringLiteral("state")).toString(), QStringLiteral("visible"));
+
+    const Response late = request("POST", QStringLiteral("/wait"),
+                                  {{QStringLiteral("command"), QStringLiteral("test.read")},
+                                   {QStringLiteral("until"), QJsonObject{{QStringLiteral("name"), QStringLiteral("never")}}},
+                                   {QStringLiteral("timeout"), 0.3}});
+    QCOMPARE(late.status, 408);
+    // The last result tells the agent where things stand.
+    QCOMPARE(late.json.value(QStringLiteral("last")).toObject().value(QStringLiteral("name")).toString(),
+             QStringLiteral("build done"));
+
+    // Only reads can be waited on, and the condition is required.
     QCOMPARE(request("POST", QStringLiteral("/wait"),
-                     {{QStringLiteral("id"), QStringLiteral("MainWindow/labelStatus")},
-                      {QStringLiteral("state"), QJsonArray{QStringLiteral("idle"), QStringLiteral("asleep")}}})
+                     {{QStringLiteral("command"), QStringLiteral("test.setName")},
+                      {QStringLiteral("until"), QJsonObject{{QStringLiteral("name"), QStringLiteral("x")}}}})
                  .status,
              400);
+    QCOMPARE(request("POST", QStringLiteral("/wait"), {{QStringLiteral("command"), QStringLiteral("test.read")}}).status, 400);
     QVERIFY(!control::events::wanted()); // nothing left listening
 }
 
 void TestControlApi::waitForAnEvent()
 {
-    QTimer::singleShot(100, this, [] { control::events::publish(QStringLiteral("chat.turnEnded"), {{QStringLiteral("id"), QStringLiteral("chat:b")}}); });
-    QTimer::singleShot(200, this, [] { control::events::publish(QStringLiteral("chat.turnEnded"), {{QStringLiteral("id"), QStringLiteral("chat:a")}}); });
+    QTimer::singleShot(100, this, [] { control::events::publish(QStringLiteral("chat.turnEnded"), {{QStringLiteral("session"), QStringLiteral("b")}}); });
+    QTimer::singleShot(200, this, [] { control::events::publish(QStringLiteral("chat.turnEnded"), {{QStringLiteral("session"), QStringLiteral("a")}}); });
     const Response r = request("POST", QStringLiteral("/wait"),
                                {{QStringLiteral("event"), QStringLiteral("chat.*")},
-                                {QStringLiteral("match"), QJsonObject{{QStringLiteral("id"), QStringLiteral("chat:a")}}},
+                                {QStringLiteral("match"), QJsonObject{{QStringLiteral("session"), QStringLiteral("a")}}},
                                 {QStringLiteral("timeout"), 10}});
     QCOMPARE(r.status, 200);
     QCOMPARE(r.json.value(QStringLiteral("event")).toString(), QStringLiteral("chat.turnEnded"));
-    QCOMPARE(r.json.value(QStringLiteral("data")).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("chat:a"));
+    QCOMPARE(r.json.value(QStringLiteral("data")).toObject().value(QStringLiteral("session")).toString(), QStringLiteral("a"));
+}
+
+void TestControlApi::theSkillEndsWithTheCommandReference()
+{
+    const Response r = request("GET", QStringLiteral("/skill"));
+    QCOMPARE(r.status, 200);
+    QVERIFY(r.body.startsWith("---\nname: notepadai-control"));
+    QVERIFY(r.body.contains("## Command reference"));
+    QVERIFY(r.body.contains("- `test.read` (read): Read the name"));
+    QVERIFY(!r.body.contains(m_api->token().toUtf8()));
+}
+
+void TestControlApi::theOldUiEndpointsAreGone()
+{
+    QCOMPARE(request("GET", QStringLiteral("/ui")).status, 404);
+    QCOMPARE(request("POST", QStringLiteral("/ui/click"), {{QStringLiteral("id"), QStringLiteral("x")}}).status, 404);
+    QCOMPARE(request("POST", QStringLiteral("/actions/trigger"), {{QStringLiteral("id"), QStringLiteral("x")}}).status, 404);
 }
 
 void TestControlApi::screenshotIsAPng()

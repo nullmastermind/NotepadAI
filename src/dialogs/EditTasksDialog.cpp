@@ -17,7 +17,6 @@
  */
 
 #include "EditTasksDialog.h"
-#include "control/ControlPicker.h"
 
 #include <QDialogButtonBox>
 #include <QDir>
@@ -331,7 +330,7 @@ void EditTasksDialog::onBrowseCwdClicked()
             startDir = current;
     }
 
-    const QString dir = control::picker::getExistingDirectory(this, tr("Select Working Directory"), startDir);
+    const QString dir = QFileDialog::getExistingDirectory(this, tr("Select Working Directory"), startDir);
     if (dir.isEmpty())
         return;
 

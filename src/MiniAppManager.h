@@ -50,6 +50,14 @@ public:
 
     int runningCount() const { return m_instances.size(); }
 
+    // --- Control API (docs/adr/0007): what the tab context menu does ---
+    // The mini app running in `dw`, if any.
+    MiniAppInstance *instanceFor(const ads::CDockWidget *dw) const;
+    // Mini app and quick-browser tabs: the ones with Pin / Unpin.
+    bool isPinnableTab(const ads::CDockWidget *dw) const;
+    static bool isTabPinned(const ads::CDockWidget *dw);
+    void setTabPinned(ads::CDockWidget *dw, bool pinned) { setDockTabPinned(dw, pinned); }
+
 signals:
     void instanceCountChanged(int count);
 

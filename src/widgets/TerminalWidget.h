@@ -117,6 +117,8 @@ public:
     void selectAll();
     // Types `paths` as shell-quoted words (drag and drop of files or tabs).
     void pasteDroppedPaths(const QStringList &paths);
+    // Pastes like Ctrl+V: sanitised, bracketed when the shell asked for it.
+    void pasteText(const QString &text);
 
     bool isProcessRunning() const;
     qint64 ptyPid() const;
@@ -224,7 +226,6 @@ private:
     bool terminalCtrl(Qt::KeyboardModifiers mods) const;
     bool appCommand(Qt::KeyboardModifiers mods) const;
     bool handleTerminalShortcut(QKeyEvent *event);
-    void pasteText(const QString &text);
     qint64 lineIdForAbsoluteRow(int absoluteRow) const { return m_linesDropped + absoluteRow; }
     int absoluteRowForLineId(qint64 id) const { return static_cast<int>(id - m_linesDropped); }
     void noteLinesDropped(int count);

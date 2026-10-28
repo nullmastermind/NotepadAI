@@ -94,7 +94,7 @@ void parseCommandLine(QCommandLineParser &parser, const QStringList &args)
         {"new-window", "Forces a fresh independent window instead of forwarding to an existing instance"},
         {"data-dir", "Use a custom data directory for settings, sessions, and history", "path"}
     });
-    // Hidden: ctest ControlApiAudit (docs/adr/0006).
+    // Hidden: ctest ControlApiAudit (docs/adr/0007).
     QCommandLineOption audit(QStringLiteral("control-api-audit"));
     audit.setFlags(QCommandLineOption::HiddenFromHelp);
     parser.addOption(audit);

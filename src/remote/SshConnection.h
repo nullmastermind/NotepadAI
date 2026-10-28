@@ -77,6 +77,10 @@ public:
     void connectToHost();
     void acceptHostKey();
     void rejectHostKey();
+    // The fingerprint of the host key awaiting acceptHostKey()/rejectHostKey(),
+    // empty when none; changed: it differs from the one accepted before.
+    QString pendingHostKeyFingerprint() const { return m_pendingFingerprint; }
+    bool pendingHostKeyChanged() const { return m_pendingChanged; }
     void disconnectFromHost();
 
     // Open a new logical channel. Returns an owned proxy immediately; the actual
@@ -188,7 +192,9 @@ private:
     SshProfile m_profile;
     ai::CredentialStore *m_credentialStore;
     SshHostKeyStore m_hostKeyStore;
-    QByteArray m_pendingHostKey;          // key awaiting user accept (then persisted)
+    QByteArray m_pendingHostKey;
+    QString m_pendingFingerprint;
+    bool m_pendingChanged = false;          // key awaiting user accept (then persisted)
     QThread *m_thread = nullptr;
     SshSessionWorker *m_worker = nullptr; // lives on m_thread; deleted via thread teardown
     State m_state = State::Idle;

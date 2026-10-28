@@ -22,7 +22,6 @@
 #include "AcpAgentDefinition.h"
 #include "AcpAgentIcons.h"
 #include "AcpAgentRegistry.h"
-#include "control/ControlIds.h"
 
 #include <QAction>
 #include <QFont>
@@ -61,7 +60,6 @@ inline void fillAcpAgentPickerMenu(QMenu *menu,
         return;
     for (const AcpAgentDefinition &agent : agents) {
         QAction *action = menu->addAction(acpAgentIcon(agent, menu->palette()), agent.name);
-        control::ids::setKey(action, QStringLiteral("agent:") + agent.id);
         if (agent.id == defaultId) {
             QFont f = action->font();
             f.setBold(true);

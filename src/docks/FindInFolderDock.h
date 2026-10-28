@@ -2,6 +2,8 @@
 #define FINDINFOLDEROCK_H
 
 #include <QDockWidget>
+
+#include "FolderSearchEngine.h"
 #include <QVector>
 
 #include <memory>
@@ -25,7 +27,15 @@ public:
 
     void setFolder(const QString &folderPath, const QString &workspaceRoot);
 
+    // Runs a search as if typed into the panel (options set on its buttons).
+    void search(const QString &query, bool caseSensitive, bool wholeWord, bool regex);
+    QString folder() const { return m_folderPath; }
+    bool isSearching() const;
+    // The results the panel lists, at most `maxMatches` matches.
+    QVector<FolderSearchFileBatch> results(int maxMatches) const;
+
 signals:
+    void searchFinished(int totalFiles, int totalMatches);
     void resultActivated(const QString &filePath, int lineNumber, int matchStart, int matchEnd);
     void resultClicked(const QString &filePath, int lineNumber, int matchStart, int matchEnd);
 

@@ -44,6 +44,10 @@ public:
     // or a pm2 option changed); its restart count goes back to 0.
     bool needsRecreate() const;
 
+    // What is wrong with `def` (the form's own check), empty when it can be saved.
+    static QString problemWith(const Pm2Definition &def, const QStringList &takenNames);
+    static bool needsRecreate(const Pm2Definition &original, const Pm2Definition &def);
+
 private:
     void updateState();
     void browseCwd();

@@ -405,6 +405,25 @@ void CsvPreviewWidget::insertColumnAt(int col)
     projectSelection(/*repaint=*/true);
 }
 
+void CsvPreviewWidget::changeDelimiter()
+{
+    if (!m_doc) return;
+
+    // A delimiter change moves field boundaries, so any pending overlay edits
+    // (keyed by row/col) no longer map to meaningful cells — discard them.
+    // The sort/filter view is likewise invalid (columns change): reset the
+    // strip texts, sort indicator, and the model's view order before reindex.
+    // reindex() → startIndexing() runs cancelAndJoinDocumentReaders() (cancel +
+    // JOIN copy/find/view + generation bump) before mutating the index, so no
+    // separate cancel is needed here — and setDelimiter() does not unmap.
+    if (m_model) m_model->clearOverlay();
+    resetSortFilterState();
+    m_undoStack->clear(); // commands reference now-stale coordinates
+    const QChar d = m_delimiterCombo->currentData().toChar();
+    m_doc->setDelimiter(d.toLatin1());
+    reindex();
+}
+
 void CsvPreviewWidget::buildToolbar()
 {
     auto *bar = new QFrame(this);
@@ -420,22 +439,8 @@ void CsvPreviewWidget::buildToolbar()
     m_delimiterCombo->addItem(tr("Tab  \\t"), QChar('\t'));
     m_delimiterCombo->addItem(tr("Pipe  |"), QChar('|'));
     layout->addWidget(m_delimiterCombo);
-    connect(m_delimiterCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int) {
-        if (!m_doc) return;
-        // A delimiter change moves field boundaries, so any pending overlay edits
-        // (keyed by row/col) no longer map to meaningful cells — discard them.
-        // The sort/filter view is likewise invalid (columns change): reset the
-        // strip texts, sort indicator, and the model's view order before reindex.
-        // reindex() → startIndexing() runs cancelAndJoinDocumentReaders() (cancel +
-        // JOIN copy/find/view + generation bump) before mutating the index, so no
-        // separate cancel is needed here — and setDelimiter() does not unmap.
-        if (m_model) m_model->clearOverlay();
-        resetSortFilterState();
-        m_undoStack->clear(); // commands reference now-stale coordinates
-        const QChar d = m_delimiterCombo->currentData().toChar();
-        m_doc->setDelimiter(d.toLatin1());
-        reindex();
-    });
+    connect(m_delimiterCombo, QOverload<int>::of(&QComboBox::activated), this,
+            [this](int) { changeDelimiter(); });
 
     m_headerToggle = new QCheckBox(tr("First row as header"), bar);
     m_headerToggle->setChecked(true);
@@ -846,6 +851,7 @@ void CsvPreviewWidget::onIndexingFinished()
 
     // Re-evaluate the conflict guard now that content is live.
     conflictActive(true);
+    emit indexed();
 }
 
 void CsvPreviewWidget::reindex()
@@ -1466,22 +1472,24 @@ bool CsvPreviewWidget::conflictActive(bool refresh)
     return conflict;
 }
 
-void CsvPreviewWidget::saveToDisk()
+QString CsvPreviewWidget::saveToDisk()
 {
     // Persist when there is ANY pending edit — overlay cells OR structural inserts.
     if (!m_model || !m_doc || (!m_model->hasOverlay() && !m_model->hasStructuralEdits()))
-        return;
+        return QString();
     // Re-check the conflict guard at the moment of save (gate == handler).
     if (conflictActive(true)) {
-        showNotice(tr("Save blocked — the file is open in an editor with unsaved changes."));
-        return;
+        const QString blocked = tr("Save blocked — the file is open in an editor with unsaved changes.");
+        showNotice(blocked);
+        return blocked;
     }
 
     const QString tmpPath = m_path; // QSaveFile writes a temp in the same dir then renames
     QSaveFile out(tmpPath);
     if (!out.open(QIODevice::WriteOnly)) {
-        showNotice(tr("Could not open the file for writing."));
-        return;
+        const QString error = tr("Could not open the file for writing.");
+        showNotice(error);
+        return error;
     }
 
     // Decide the save strategy ONCE at save start. The verbatim byte-slice
@@ -1631,7 +1639,7 @@ void CsvPreviewWidget::saveToDisk()
         m_doc->remap(); // restore the mapping so the preview keeps working
         m_model->documentReloaded();
 #endif
-        return;
+        return tr("Failed to save the file.");
     }
 
     // Re-open + re-index on the worker so byte offsets match the new on-disk
@@ -1663,6 +1671,7 @@ void CsvPreviewWidget::saveToDisk()
         showNotice(tr("Saved."));
     });
     startIndexing();
+    return QString();
 }
 
 // ---------------------------------------------------------------------------
@@ -2674,13 +2683,251 @@ void CsvPreviewWidget::onViewRecomputeFinished()
     }
     updateSortFilterAvailability();
     projectSelection(false);
+    emit viewRecomputed();
 }
 
+// ---------------------------------------------------------------------------
+// Control API (docs/adr/0007): the grid's menu and toolbar operations with
+// their answers as arguments. Each runs the same member the menu item does.
+// ---------------------------------------------------------------------------
 
+namespace {
+QString notEditable(const CsvTableModel *model)
+{
+    if (!model)
+        return QCoreApplication::translate("CsvPreviewWidget", "the file is still loading");
+    if (model->isReadOnly())
+        return QCoreApplication::translate("CsvPreviewWidget",
+                                           "the file is open in an editor with unsaved changes; the grid is read-only "
+                                           "until that editor is saved or reverted");
+    return QString();
+}
 
+QString structuralBlocked(const CsvTableModel *model)
+{
+    if (QString e = notEditable(model); !e.isEmpty())
+        return e;
+    if (model->viewActive())
+        return QCoreApplication::translate("CsvPreviewWidget",
+                                           "rows and columns cannot change while a sort or filter is active; clear them first");
+    return QString();
+}
+} // namespace
 
+QChar CsvPreviewWidget::delimiter() const
+{
+    return m_doc ? QChar::fromLatin1(m_doc->delimiter()) : QChar();
+}
 
+QString CsvPreviewWidget::encodingName() const
+{
+    return m_doc ? QString::fromLatin1(m_doc->codecDisplayName()) : QString();
+}
 
+bool CsvPreviewWidget::isModified() const
+{
+    return m_model && (m_model->hasOverlay() || m_model->hasStructuralEdits());
+}
 
+bool CsvPreviewWidget::sortFilterAvailable() const
+{
+    return m_model && m_model->canSortFilter();
+}
 
+bool CsvPreviewWidget::viewRecomputing() const
+{
+    return m_viewWatcher && m_viewWatcher->isRunning();
+}
 
+QString CsvPreviewWidget::cellText(quint64 viewRow, int col) const
+{
+    if (!m_model || viewRow >= viewRowCount())
+        return QString();
+    return m_model->absoluteCell(m_model->viewRowToDataRow(static_cast<int>(viewRow)), col);
+}
+
+QString CsvPreviewWidget::setCell(quint64 viewRow, int col, const QString &value)
+{
+    conflictActive(true);
+    if (QString e = notEditable(m_model); !e.isEmpty())
+        return e;
+    if (viewRow >= viewRowCount() || col < 0 || col >= m_model->columnCount())
+        return tr("no cell at row %1, column %2").arg(viewRow).arg(col);
+    // The cell editor's path: the model index in the current window.
+    if (viewRow < m_model->windowBase() || viewRow >= m_model->windowBase() + m_model->windowSize())
+        rebaseTo(viewRow);
+    const QModelIndex index = m_model->index(m_model->toProxyRow(viewRow), col);
+    if (!m_model->setData(index, value, Qt::EditRole))
+        return tr("the cell could not be edited");
+    setAnchorCaret(viewRow, col);
+    clampCaretVisible();
+    projectSelection(true);
+    return QString();
+}
+
+QString CsvPreviewWidget::insertRows(quint64 at, int count)
+{
+    conflictActive(true);
+    if (QString e = structuralBlocked(m_model); !e.isEmpty())
+        return e;
+    for (int i = 0; i < count; ++i)
+        insertRowAt(at);
+    return QString();
+}
+
+QString CsvPreviewWidget::deleteRows(QList<quint64> rows)
+{
+    conflictActive(true);
+    if (QString e = structuralBlocked(m_model); !e.isEmpty())
+        return e;
+    const quint64 total = m_model->dataRowCount();
+    for (quint64 r : rows) {
+        if (r >= total)
+            return tr("there is no row %1 (%2 rows)").arg(r).arg(total);
+    }
+    // Bottom-up runs of consecutive rows, each deleted like a row-header
+    // selection, so the indices of the rows still to delete do not move.
+    std::sort(rows.begin(), rows.end(), std::greater<>());
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+    qsizetype i = 0;
+    while (i < rows.size()) {
+        const quint64 hi = rows.at(i);
+        quint64 lo = hi;
+        while (i + 1 < rows.size() && rows.at(i + 1) + 1 == lo)
+            lo = rows.at(++i);
+        ++i;
+        m_anchorRow = lo;
+        m_caretRow = hi;
+        m_anchorCol = 0;
+        m_caretCol = qMax(0, m_model->columnCount() - 1);
+        m_hasSelection = true;
+        deleteSelectedRows();
+    }
+    return QString();
+}
+
+QString CsvPreviewWidget::insertColumns(int at, int count)
+{
+    conflictActive(true);
+    if (QString e = structuralBlocked(m_model); !e.isEmpty())
+        return e;
+    for (int i = 0; i < count; ++i)
+        insertColumnAt(at);
+    return QString();
+}
+
+QString CsvPreviewWidget::deleteColumns(QList<int> cols)
+{
+    conflictActive(true);
+    if (QString e = structuralBlocked(m_model); !e.isEmpty())
+        return e;
+    const int total = m_model->virtualColumnCount();
+    for (int c : cols) {
+        if (c < 0 || c >= total)
+            return tr("there is no column %1 (%2 columns)").arg(c).arg(total);
+    }
+    std::sort(cols.begin(), cols.end(), std::greater<>());
+    cols.erase(std::unique(cols.begin(), cols.end()), cols.end());
+    qsizetype i = 0;
+    while (i < cols.size()) {
+        const int hi = cols.at(i);
+        int lo = hi;
+        while (i + 1 < cols.size() && cols.at(i + 1) + 1 == lo)
+            lo = cols.at(++i);
+        ++i;
+        m_anchorCol = lo;
+        m_caretCol = hi;
+        m_anchorRow = m_caretRow = m_model->windowBase();
+        m_hasSelection = true;
+        deleteSelectedColumns();
+    }
+    return QString();
+}
+
+QString CsvPreviewWidget::renameColumn(int col, const QString &name)
+{
+    conflictActive(true);
+    if (QString e = notEditable(m_model); !e.isEmpty())
+        return e;
+    if (!m_model->headerMode())
+        return tr("the first row is not a header; turn \"First row as header\" on first");
+    if (!m_model->setHeaderText(col, name))
+        return tr("there is no column %1").arg(col);
+    return QString();
+}
+
+QString CsvPreviewWidget::clearCells(const QList<QPair<quint64, int>> &cells)
+{
+    conflictActive(true);
+    if (QString e = notEditable(m_model); !e.isEmpty())
+        return e;
+    const quint64 rows = viewRowCount();
+    for (const auto &[row, col] : cells) {
+        if (row >= rows || col < 0 || col >= m_model->columnCount())
+            return tr("no cell at row %1, column %2").arg(row).arg(col);
+    }
+    // One undo step, each cell cleared like Delete on a one-cell selection.
+    m_undoStack->beginMacro(tr("Clear Cells"));
+    for (const auto &[row, col] : cells) {
+        m_anchorRow = m_caretRow = row;
+        m_anchorCol = m_caretCol = col;
+        m_hasSelection = true;
+        clearSelectedCells();
+    }
+    m_undoStack->endMacro();
+    return QString();
+}
+
+QString CsvPreviewWidget::sortBy(int col, bool active, Qt::SortOrder order)
+{
+    if (!m_model)
+        return notEditable(m_model);
+    if (!m_model->canSortFilter())
+        return tr("sort and filter are unavailable for files larger than %1 rows").arg(CsvTableModel::kWindowSize);
+    if (col < 0 || col >= m_model->columnCount())
+        return tr("there is no column %1").arg(col);
+    applySort(col, active, order);
+    return QString();
+}
+
+QString CsvPreviewWidget::setFilter(int col, const QString &text)
+{
+    if (!m_model)
+        return notEditable(m_model);
+    if (!m_model->canSortFilter())
+        return tr("sort and filter are unavailable for files larger than %1 rows").arg(CsvTableModel::kWindowSize);
+    if (col < 0 || col >= m_filterFields.size())
+        return tr("there is no column %1").arg(col);
+    // Typing into the column's filter field, without the debounce.
+    m_filterFields.at(col)->setText(text);
+    m_filterDebounce->stop();
+    recomputeView();
+    return QString();
+}
+
+void CsvPreviewWidget::clearFilters()
+{
+    clearAllFilters();
+}
+
+QString CsvPreviewWidget::setDelimiterChar(QChar delimiter)
+{
+    const int index = m_delimiterCombo->findData(delimiter);
+    if (index < 0)
+        return tr("the delimiter must be one of , ; tab |");
+    if (!m_doc)
+        return notEditable(nullptr);
+    m_delimiterCombo->setCurrentIndex(index);
+    changeDelimiter();
+    return QString();
+}
+
+void CsvPreviewWidget::setHeaderRow(bool on)
+{
+    m_headerToggle->setChecked(on);
+}
+
+QString CsvPreviewWidget::save()
+{
+    return saveToDisk();
+}

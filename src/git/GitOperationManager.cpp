@@ -657,6 +657,14 @@ void GitOperationManager::handleEditorFile(QTcpSocket *conn, const QString &file
 
     bool isTodoFile = content.contains("pick ") || content.contains("# Rebase ");
 
+    if (m_editorScript) {
+        const bool saved = m_editorScript(filePath, isTodoFile);
+        conn->write(saved ? "0\n" : "1\n");
+        conn->flush();
+        conn->disconnectFromHost();
+        return;
+    }
+
     if (isTodoFile) {
         emit interactiveRebaseRequested(filePath);
     } else {
