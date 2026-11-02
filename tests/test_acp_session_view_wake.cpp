@@ -274,6 +274,9 @@ private slots:
     void afterUserSend_selectorChange_staysInThisSession();
     void goalAndHostPrompts_doNotEndTheDraft();
     void agentReportedModel_savedWhileDraft_notAfterUserSend();
+    void savedEffort_ofSavedModel_restoredAfterModelSwitch();
+    void savedModel_sameProviderAsCurrent_restored();
+    void savedModelWithEffortSuffix_restoresItsBaseModel();
     void restart_startsANewDraft();
     void afterUserSend_selectorTooltipsSaySessionOnly();
 
@@ -721,6 +724,122 @@ void TestAcpSessionViewWake::agentReportedModel_savedWhileDraft_notAfterUserSend
     userSends(*s.view, QStringLiteral("go"));
     announceModels(*s.model, QStringLiteral("opus")); // ... and again, mid-conversation
     QCOMPARE(defaultModel(registry), QStringLiteral("sonnet"));
+}
+
+namespace {
+
+AcpProtocol::AcpConfigOption configOption(const QString &id, const QString &category,
+                                          const QString &current, const QStringList &values)
+{
+    AcpProtocol::AcpConfigOption opt;
+    opt.id = id;
+    opt.name = id;
+    opt.category = category;
+    opt.currentValue = current;
+    for (const QString &v : values)
+        opt.options.append({v, v});
+    return opt;
+}
+
+// omp 18.15's catalog: the thinking levels depend on the model, and a model
+// switch reports thinking "off" until a level is set.
+QList<AcpProtocol::AcpConfigOption> ompOptions(const QString &model, const QString &thinking)
+{
+    const bool reasoning = model == QLatin1String("local-ccr/composer");
+    return {configOption(QStringLiteral("model"), QStringLiteral("model"), model,
+                         {QStringLiteral("meta/muse"), QStringLiteral("local-ccr/composer"),
+                          QStringLiteral("local-ccr/abliterated-model-large-v2-1")}),
+            configOption(QStringLiteral("thinking"), QStringLiteral("thought_level"), thinking,
+                         reasoning ? QStringList{QStringLiteral("off"), QStringLiteral("auto"),
+                                                 QStringLiteral("high"), QStringLiteral("xhigh")}
+                                   : QStringList{QStringLiteral("off"), QStringLiteral("auto")})};
+}
+
+// The `session/set_config_option` values the view sent, as "configId=value".
+QStringList configSets(const QByteArray &written)
+{
+    QStringList out;
+    for (const QByteArray &line : written.split('\n')) {
+        const QJsonObject msg = QJsonDocument::fromJson(line).object();
+        if (msg.value(QStringLiteral("method")).toString() != QLatin1String("session/set_config_option"))
+            continue;
+        const QJsonObject p = msg.value(QStringLiteral("params")).toObject();
+        out << p.value(QStringLiteral("configId")).toString() + QLatin1Char('=')
+                   + p.value(QStringLiteral("value")).toString();
+    }
+    return out;
+}
+
+} // namespace
+
+// The saved effort is only offered by the saved model: restoring the model
+// must not save the "off" the agent reports for it, and the effort follows.
+void TestAcpSessionViewWake::savedEffort_ofSavedModel_restoredAfterModelSwitch()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    const QString agent = QStringLiteral("test-agent");
+    registry.setAgentPreference(agent, QStringLiteral("model"), QStringLiteral("local-ccr/composer"));
+    registry.setAgentPreference(agent, QStringLiteral("thinking"), QStringLiteral("high"));
+    Session s(&registry);
+    s.channel->written.clear();
+
+    s.model->onInitialized({}, {}, {}, {}, {}, {}, ompOptions(QStringLiteral("meta/muse"), QStringLiteral("off")));
+    QCOMPARE(configSets(s.channel->written), QStringList{QStringLiteral("model=local-ccr/composer")});
+
+    s.model->onConfigOptionsUpdated(ompOptions(QStringLiteral("local-ccr/composer"), QStringLiteral("off")));
+
+    QCOMPARE(registry.agentPreference(agent, QStringLiteral("thinking")), QStringLiteral("high"));
+    QCOMPARE(configSets(s.channel->written),
+             (QStringList{QStringLiteral("model=local-ccr/composer"), QStringLiteral("thinking=high")}));
+}
+
+// pi-acp and omp model ids are "provider/model"; pi-acp also reports the
+// current one in its models block. A saved model from the same provider as the
+// agent's default is still another model.
+void TestAcpSessionViewWake::savedModel_sameProviderAsCurrent_restored()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    registry.setAgentPreference(QStringLiteral("test-agent"), QStringLiteral("model"),
+                                QStringLiteral("local-ccr/composer"));
+    Session s(&registry);
+    s.channel->written.clear();
+
+    const QString current = QStringLiteral("local-ccr/abliterated-model-large-v2-1");
+    QList<AcpProtocol::AcpModelInfo> models;
+    for (const QString &id : {QStringLiteral("meta/muse"), QStringLiteral("local-ccr/composer"), current})
+        models.append({id, id, {}});
+    s.model->onInitialized({}, {}, {}, {}, models, current, ompOptions(current, QStringLiteral("off")));
+
+    QCOMPARE(configSets(s.channel->written), QStringList{QStringLiteral("model=local-ccr/composer")});
+}
+
+// Codex lists base models as choices; an id saved as "model/effort" names the
+// base model, which is restored only when it is not already current.
+void TestAcpSessionViewWake::savedModelWithEffortSuffix_restoresItsBaseModel()
+{
+    ApplicationSettings settings;
+    AcpAgentRegistry registry(&settings);
+    registry.setAgentPreference(QStringLiteral("test-agent"), QStringLiteral("model"),
+                                QStringLiteral("gpt-5.5/high"));
+    const QStringList models{QStringLiteral("gpt-5.5"), QStringLiteral("gpt-6")};
+    {
+        Session s(&registry);
+        s.channel->written.clear();
+        s.model->onInitialized({}, {}, {}, {}, {}, {},
+                               {configOption(QStringLiteral("model"), QStringLiteral("model"),
+                                             QStringLiteral("gpt-5.5"), models)});
+        QCOMPARE(configSets(s.channel->written), QStringList{});
+    }
+    registry.setAgentPreference(QStringLiteral("test-agent"), QStringLiteral("model"),
+                                QStringLiteral("gpt-5.5/high"));
+    Session s(&registry);
+    s.channel->written.clear();
+    s.model->onInitialized({}, {}, {}, {}, {}, {},
+                           {configOption(QStringLiteral("model"), QStringLiteral("model"),
+                                         QStringLiteral("gpt-6"), models)});
+    QCOMPARE(configSets(s.channel->written), QStringList{QStringLiteral("model=gpt-5.5")});
 }
 
 // Restarting a session discards its conversation: it is a draft again.

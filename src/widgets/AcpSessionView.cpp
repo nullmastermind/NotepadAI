@@ -1144,6 +1144,7 @@ void AcpSessionView::rebind(AcpSessionModel *model, AcpConnection *connection)
     m_model = model;
     m_connection = connection;
     m_savedPrefsApplied = false;
+    m_pendingEffort = {};
     // The conversation is gone: a restarted session is a draft again.
     m_draft = true;
     m_carry = {};
@@ -1288,6 +1289,7 @@ void AcpSessionView::rebindConnection(AcpConnection *connection)
         disconnect(m_registry, nullptr, this, nullptr);
     m_connection = connection;
     m_savedPrefsApplied = false;
+    m_pendingEffort = {};
     ++m_scheduledRev;
     m_parked = {};
     m_resumeBlocked = false;
@@ -2653,6 +2655,7 @@ void AcpSessionView::onMetadataChanged()
     // Once the agent's catalogs have arrived, push any saved per-agent
     // selections back into the session (one-shot per session).
     applySavedPreferences();
+    applyPendingEffort();
 
     // After the initial restore, persist any agent-side config changes
     // (e.g. Codex CLI's config_option_update for model/mode/effort) so the
@@ -2674,7 +2677,7 @@ void AcpSessionView::onMetadataChanged()
             if (!curMode.isEmpty())
                 m_registry->setAgentPreference(agentId, QStringLiteral("mode"), curMode);
 
-            if (!m_effortConfigOptionId.isEmpty()) {
+            if (!m_effortConfigOptionId.isEmpty() && m_pendingEffort.effort.isEmpty()) {
                 for (const auto &opt : m_model->configOptions()) {
                     if (opt.id == m_effortConfigOptionId) {
                         const QString val = opt.currentValue.toString();
@@ -2708,7 +2711,8 @@ void AcpSessionView::sendAdvisorCommand(bool on)
     if (!m_connection || !m_model || !m_modelCombo) return;
     const int idx = m_modelCombo->currentIndex();
     submitSlashCommand(AcpProtocol::advisorCommandText(
-        on, m_modelCombo->itemData(idx).toString(), m_modelCombo->itemText(idx)));
+        on, m_model->availableCommands(), m_modelCombo->itemData(idx).toString(),
+        m_modelCombo->itemText(idx)));
 }
 
 // Same routing as typing the command and pressing Send: queued while a turn
@@ -3748,6 +3752,7 @@ void AcpSessionView::onModelComboChanged(int index)
     if (id.isEmpty()) return;
     const QString prefKey = m_modelConfigOptionId.isEmpty()
         ? QStringLiteral("model") : m_modelConfigOptionId;
+    m_pendingEffort = {}; // the user's pick replaces the restore
     if (!m_connection->isSessionReady()) {
         // Agent not started yet (restored session): applied once it is.
         m_carry.model = id;
@@ -3764,8 +3769,10 @@ void AcpSessionView::onModelComboChanged(int index)
     if (m_registry && m_draft) {
         m_registry->setAgentPreference(m_connection->definition().id, prefKey, id);
     }
-    // The advisor tracks the selected model's level: re-point it.
-    if (m_advisorBtn && m_advisorBtn->isVisible() && m_advisorBtn->isChecked())
+    // The advisor tracks the selected model's level: re-point it. An on/off
+    // advisor (omp) names no model, so there is nothing to re-point.
+    if (m_advisorBtn && m_advisorBtn->isVisible() && m_advisorBtn->isChecked() && m_model
+        && !AcpProtocol::advisorIsToggle(m_model->availableCommands()))
         sendAdvisorCommand(true);
 }
 
@@ -3792,6 +3799,7 @@ void AcpSessionView::onEffortComboChanged(int index)
     if (m_updatingSelectors || !m_connection || index < 0) return;
     if (m_effortConfigOptionId.isEmpty()) return;
     const QString val = m_effortCombo->itemData(index).toString();
+    m_pendingEffort = {};
     if (m_connection->isSessionReady()) {
         m_connection->setConfigOption(m_effortConfigOptionId, val);
     } else {
@@ -3846,26 +3854,32 @@ void AcpSessionView::applySavedPreferences()
     const QString savedModel = want.model;
     const QString savedModelBase = baseModelId(savedModel);
     const QString currentModelBase = baseModelId(m_model->currentModelId());
-    if (!savedModel.isEmpty() && savedModelBase != currentModelBase) {
-        if (!m_modelConfigOptionId.isEmpty()) {
-            for (const auto &opt : m_model->configOptions()) {
-                if (opt.id != m_modelConfigOptionId) continue;
-                for (const auto &ch : opt.options) {
-                    if (ch.value == savedModel || ch.value == savedModelBase) {
-                        m_connection->setConfigOption(m_modelConfigOptionId, ch.value);
-                        break;
-                    }
-                }
-                break;
+    QString modelSent;
+    if (!savedModel.isEmpty() && !m_modelConfigOptionId.isEmpty()) {
+        // A choice equal to the saved id wins: omp ids are "provider/model",
+        // where the part before the slash is no model. Only a saved Codex
+        // "model/effort" id falls back to its base model.
+        for (const auto &opt : m_model->configOptions()) {
+            if (opt.id != m_modelConfigOptionId) continue;
+            const auto has = [&opt](const QString &v) {
+                return std::any_of(opt.options.cbegin(), opt.options.cend(),
+                                   [&v](const auto &ch) { return ch.value == v; });
+            };
+            const QString target = has(savedModel) ? savedModel
+                : has(savedModelBase)              ? savedModelBase
+                                                   : QString();
+            if (!target.isEmpty() && target != opt.currentValue.toString()) {
+                modelSent = target;
+                m_connection->setConfigOption(m_modelConfigOptionId, target);
             }
-        } else {
-            for (const auto &m : m_model->availableModels()) {
-                if (m.id == savedModel || baseModelId(m.id) == savedModelBase) {
-                    m_connection->setModel(m.id.contains(QLatin1Char('/'))
-                                               ? baseModelId(m.id)
-                                               : m.id);
-                    break;
-                }
+            break;
+        }
+    } else if (!savedModel.isEmpty() && savedModelBase != currentModelBase) {
+        for (const auto &m : m_model->availableModels()) {
+            if (m.id == savedModel || baseModelId(m.id) == savedModelBase) {
+                modelSent = m.id.contains(QLatin1Char('/')) ? baseModelId(m.id) : m.id;
+                m_connection->setModel(modelSent);
+                break;
             }
         }
     }
@@ -3881,22 +3895,53 @@ void AcpSessionView::applySavedPreferences()
         }
     }
 
-    // Effort / reasoning level: keyed by the matched config-option id.
+    // Effort / reasoning level: keyed by the matched config-option id. A level
+    // the current model lacks may be the restored model's: wait for its switch.
     if (!m_effortConfigOptionId.isEmpty()) {
         const QString savedEffort = want.effort;
         if (!savedEffort.isEmpty()) {
             for (const auto &opt : m_model->configOptions()) {
                 if (opt.id != m_effortConfigOptionId) continue;
                 if (opt.currentValue.toString() == savedEffort) break;
-                for (const auto &ch : opt.options) {
-                    if (ch.value == savedEffort) {
-                        m_connection->setConfigOption(m_effortConfigOptionId, savedEffort);
-                        break;
-                    }
-                }
+                const bool offered = std::any_of(opt.options.cbegin(), opt.options.cend(),
+                                                 [&](const auto &ch) { return ch.value == savedEffort; });
+                if (offered)
+                    m_connection->setConfigOption(m_effortConfigOptionId, savedEffort);
+                else if (!modelSent.isEmpty())
+                    m_pendingEffort = {savedEffort, modelSent, false};
                 break;
             }
         }
+    }
+}
+
+void AcpSessionView::applyPendingEffort()
+{
+    if (m_pendingEffort.effort.isEmpty() || !m_connection || !m_model) return;
+    const QString current = m_model->currentModelId();
+    const bool modelLanded = current == m_pendingEffort.model
+        || baseModelId(current) == m_pendingEffort.model;
+    const auto &opts = m_model->configOptions();
+    const auto opt = std::find_if(opts.cbegin(), opts.cend(), [this](const auto &o) {
+        return !m_effortConfigOptionId.isEmpty() && o.id == m_effortConfigOptionId;
+    });
+    if (opt == opts.cend()) {
+        if (modelLanded) m_pendingEffort = {};
+        return;
+    }
+    if (opt->currentValue.toString() == m_pendingEffort.effort) {
+        m_pendingEffort = {}; // landed: what the agent reports is the default again
+        return;
+    }
+    if (m_pendingEffort.sent) return;
+    const bool offered = std::any_of(opt->options.cbegin(), opt->options.cend(), [this](const auto &ch) {
+        return ch.value == m_pendingEffort.effort;
+    });
+    if (offered) {
+        m_connection->setConfigOption(m_effortConfigOptionId, m_pendingEffort.effort);
+        m_pendingEffort.sent = true;
+    } else if (modelLanded) {
+        m_pendingEffort = {}; // the restored model does not offer it either
     }
 }
 

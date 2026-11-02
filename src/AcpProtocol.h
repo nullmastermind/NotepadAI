@@ -419,8 +419,15 @@ bool commandsIncludeAdvisor(const QList<AcpCommandInfo> &commands);
 QString advisorModelFor(const QString &modelValue, const QString &modelLabel = {});
 // "/advisor <advisor model>" when on, "/advisor off" when off.
 QString advisorCommandText(bool on, const QString &modelValue, const QString &modelLabel = {});
-// Reads a typed `/advisor` command: "off" -> false, a model argument -> true.
-// Bare `/advisor` (status query) and any other text -> nullopt.
+// True when the advertised `/advisor` is an on/off switch rather than a model
+// pick: its hint lists "on" (omp: "[on|off|status|dump [raw]|configure]").
+bool advisorIsToggle(const QList<AcpCommandInfo> &commands);
+// The command in the form the agent advertises: "/advisor on" / "/advisor off"
+// for a toggle, else advisorCommandText(on, modelValue, modelLabel).
+QString advisorCommandText(bool on, const QList<AcpCommandInfo> &commands,
+                           const QString &modelValue, const QString &modelLabel = {});
+// Reads a typed `/advisor` command: "off" -> false, "on" or a model -> true.
+// Bare `/advisor`, omp's status/dump/configure and any other text -> nullopt.
 std::optional<bool> parseAdvisorCommand(const QString &text);
 // Prepend `goal` when missing. O(n) over a few dozen commands; no heap if present.
 void ensureHostGoalCommand(QList<AcpCommandInfo> &commands);

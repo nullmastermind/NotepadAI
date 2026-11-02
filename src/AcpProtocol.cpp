@@ -978,7 +978,9 @@ bool commandsIncludeGoal(const QList<AcpCommandInfo> &commands)
     return false;
 }
 
-bool commandsIncludeAdvisor(const QList<AcpCommandInfo> &commands)
+namespace {
+
+const AcpCommandInfo *findAdvisorCommand(const QList<AcpCommandInfo> &commands)
 {
     for (const AcpCommandInfo &cmd : commands) {
         QStringView v{cmd.name};
@@ -986,7 +988,35 @@ bool commandsIncludeAdvisor(const QList<AcpCommandInfo> &commands)
         while (!v.isEmpty() && v.front() == QLatin1Char('/'))
             v = v.mid(1);
         if (v.compare(QLatin1String("advisor"), Qt::CaseInsensitive) == 0)
+            return &cmd;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+bool commandsIncludeAdvisor(const QList<AcpCommandInfo> &commands)
+{
+    return findAdvisorCommand(commands) != nullptr;
+}
+
+bool advisorIsToggle(const QList<AcpCommandInfo> &commands)
+{
+    const AcpCommandInfo *cmd = findAdvisorCommand(commands);
+    if (!cmd) return false;
+    // "[on|off|status|dump [raw]|configure]": alternatives split by | [ ] and spaces.
+    const QStringView hint{cmd->inputHint};
+    qsizetype start = -1;
+    for (qsizetype i = 0; i <= hint.size(); ++i) {
+        const bool sep = i == hint.size() || hint[i] == QLatin1Char('|') || hint[i] == QLatin1Char('[')
+            || hint[i] == QLatin1Char(']') || hint[i].isSpace();
+        if (!sep) {
+            if (start < 0) start = i;
+            continue;
+        }
+        if (start >= 0 && hint.mid(start, i - start).compare(QLatin1String("on"), Qt::CaseInsensitive) == 0)
             return true;
+        start = -1;
     }
     return false;
 }
@@ -1016,6 +1046,14 @@ QString advisorCommandText(bool on, const QString &modelValue, const QString &mo
               : QStringLiteral("/advisor off");
 }
 
+QString advisorCommandText(bool on, const QList<AcpCommandInfo> &commands,
+                           const QString &modelValue, const QString &modelLabel)
+{
+    if (advisorIsToggle(commands))
+        return on ? QStringLiteral("/advisor on") : QStringLiteral("/advisor off");
+    return advisorCommandText(on, modelValue, modelLabel);
+}
+
 std::optional<bool> parseAdvisorCommand(const QString &text)
 {
     QStringView v = QStringView{text}.trimmed();
@@ -1029,6 +1067,19 @@ std::optional<bool> parseAdvisorCommand(const QString &text)
     v = v.trimmed();
     if (v.isEmpty())
         return std::nullopt;
+    // omp's queries and setup leave the advisor as it is.
+    QStringView verb = v;
+    for (qsizetype i = 0; i < v.size(); ++i) {
+        if (v[i].isSpace()) {
+            verb = v.left(i);
+            break;
+        }
+    }
+    for (const QLatin1String query : {QLatin1String("status"), QLatin1String("dump"),
+                                      QLatin1String("configure")}) {
+        if (verb.compare(query, Qt::CaseInsensitive) == 0)
+            return std::nullopt;
+    }
     return v.compare(QLatin1String("off"), Qt::CaseInsensitive) != 0;
 }
 

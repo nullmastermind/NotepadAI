@@ -419,6 +419,8 @@ private:
     // continues on a new agent process. Called once per session after
     // metadata first populates the available catalogs.
     void applySavedPreferences();
+    // Sets m_pendingEffort once the agent's catalog offers it.
+    void applyPendingEffort();
     // Remember the model's current model / mode / effort for applySavedPreferences.
     void captureSelection();
     // The model and effort the agent reports now.
@@ -638,6 +640,18 @@ private:
     // The session's own selection to re-apply on its next agent process
     // (Switch agent, restored session); consumed by applySavedPreferences.
     Selection m_carry;
+    // A restored effort the agent does not offer yet: omp lists thinking levels
+    // per model, so it waits for the restored model's switch to land, then is
+    // set (applyPendingEffort). Meanwhile the effort the agent reports is its
+    // reset, never saved as a default. Dropped when the restored model lacks it
+    // or the user picks a model or effort.
+    struct PendingEffort
+    {
+        QString effort;
+        QString model; // the model id the restore sent
+        bool sent = false;
+    };
+    PendingEffort m_pendingEffort;
     // Restored session: the first prompt waits here while its agent resumes.
     struct ParkedSend
     {
