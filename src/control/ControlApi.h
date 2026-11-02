@@ -65,7 +65,7 @@ class ControlApi : public QObject
 
 public:
     static constexpr int kApiVersion = 2;
-    static constexpr int kSkillVersion = 4;
+    static constexpr int kSkillVersion = 5;
     static constexpr quint16 kDefaultPort = 47821;
     // The keychain entry holding the token.
     static constexpr char kTokenSecretKey[] = "control-api-token";

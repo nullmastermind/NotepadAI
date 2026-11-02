@@ -136,6 +136,11 @@ private:
 // Text of a JSON value for messages: a string as itself, else compact JSON.
 QString argText(const QJsonValue &value);
 
+// Byte offset of the first backslash inside a JSON string that starts no valid
+// escape (\" \\ \/ \b \f \n \r \t \u), else -1. Qt's parser keeps such text and
+// drops the backslash ("C:\Users" reads "C:Users"), so callers refuse it.
+qsizetype invalidJsonEscape(QByteArrayView json);
+
 // The tab id of an ADS dock widget (docs/adr/0007): assigned on first use,
 // kept for the dock's lifetime; 0 for null.
 int tabIdOf(QObject *dockWidget);

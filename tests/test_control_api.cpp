@@ -143,6 +143,7 @@ private slots:
     void commandsDescribeThemselves();
     void aCommandRunsShowsWhatItChangedAndIsLogged();
     void invalidArgumentsAreRefusedBeforeTheCommandRuns();
+    void aBackslashThatEscapesNothingIsRefused();
     void readsAnswerGetAndAreSilent();
     void anUnknownCommandNamesItsDomain();
     void aCommandMayAnswerLaterButMustAnswer();
@@ -157,6 +158,9 @@ private slots:
 private:
     Response request(const QByteArray &method, const QString &path, const QJsonObject &body = {},
                      bool withToken = true);
+    // POSTs `body` byte for byte, as a hand-written curl -d would.
+    Response postRaw(const QString &path, const QByteArray &body);
+    Response wait(QNetworkReply *reply);
 
     Window *m_window = nullptr;
     ControlApi *m_api = nullptr;
@@ -197,6 +201,19 @@ Response TestControlApi::request(const QByteArray &method, const QString &path, 
         req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
         reply = m_net->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     }
+    return wait(reply);
+}
+
+Response TestControlApi::postRaw(const QString &path, const QByteArray &body)
+{
+    QNetworkRequest req(QUrl(QStringLiteral("http://127.0.0.1:%1%2").arg(m_api->port()).arg(path)));
+    req.setRawHeader("Authorization", "Bearer " + m_api->token().toLatin1());
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    return wait(m_net->post(req, body));
+}
+
+Response TestControlApi::wait(QNetworkReply *reply)
+{
     Response r;
     connect(reply, &QNetworkReply::finished, this, [reply, &r] {
         r.status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -301,6 +318,25 @@ void TestControlApi::invalidArgumentsAreRefusedBeforeTheCommandRuns()
 
     const Response notJson = request("POST", QStringLiteral("/commands/test.setName"), {});
     QCOMPARE(notJson.status, 400);
+}
+
+// A Windows path written into JSON without escaping its backslashes: Qt's
+// parser would read "C:\Users\0x317" as "C:Users0x317" (CONTROL_REPORT.md).
+void TestControlApi::aBackslashThatEscapesNothingIsRefused()
+{
+    const Response bad = postRaw(QStringLiteral("/commands/test.setName"),
+                                 R"({"text":"$env:D=\"C:\Users\0x317\.claude-sub\"; claude"})");
+    QCOMPARE(bad.status, 400);
+    QVERIFY2(bad.json.value(QStringLiteral("error")).toString().contains(QStringLiteral("\\U")), bad.body.constData());
+    QVERIFY(m_window->name->text().isEmpty());
+
+    // Outside strings a backslash is a plain syntax error, still refused.
+    QCOMPARE(postRaw(QStringLiteral("/commands/test.setName"), R"({"text":"x"}\)").status, 400);
+
+    const Response good = postRaw(QStringLiteral("/commands/test.setName"),
+                                  R"({"text":"$env:D=\"C:\\Users\\0x317\\.claude-sub\"; a\/b \u00e9 \\\"x"})");
+    QCOMPARE(good.status, 200);
+    QCOMPARE(m_window->name->text(), QStringLiteral("$env:D=\"C:\\Users\\0x317\\.claude-sub\"; a/b \u00e9 \\\"x"));
 }
 
 void TestControlApi::readsAnswerGetAndAreSilent()

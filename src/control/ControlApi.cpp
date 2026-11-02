@@ -492,6 +492,15 @@ void ControlApi::onRequest(quint64 id, const http::Request &request)
     const Reply reply(m_server, id);
     QJsonObject body;
     if (!request.body.isEmpty()) {
+        if (const qsizetype at = invalidJsonEscape(request.body); at >= 0) {
+            const QString escape = QString::fromUtf8(request.body.mid(at, 2));
+            reply.error(400, QStringLiteral("body is not JSON: \"%1\" at byte %2 is no escape. Write a backslash "
+                                            "inside a JSON string as \\\\ (\"C:\\\\Users\"), or build the body "
+                                            "with a JSON encoder")
+                                 .arg(escape)
+                                 .arg(at));
+            return;
+        }
         QJsonParseError err{};
         const QJsonDocument doc = QJsonDocument::fromJson(request.body, &err);
         if (err.error != QJsonParseError::NoError || !doc.isObject()) {

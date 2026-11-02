@@ -23,6 +23,7 @@ api -G --data-urlencode "tab=3" "$NOTEPADAI_URL/commands/editor.read"   # read c
 ```
 
 - Responses are JSON with `"ok": true|false`. A failure has `"error"`: what went wrong and what to do.
+- Bodies are strict JSON: a backslash inside a string is `\\`, so a Windows path is `"C:\\Users\\me"`. `"C:\Users"` is refused with `400`; nothing is typed or saved.
 - `400`: an argument is wrong (unknown, missing, wrong type, a value not allowed); the error lists what the command takes.
 - `401`: the token is wrong or was regenerated. Ask the user for a new connection prompt; never guess.
 - `403`: the `Host` must be the address in `NOTEPADAI_URL`. Never send an `Origin` header.
@@ -34,7 +35,7 @@ api -G --data-urlencode "tab=3" "$NOTEPADAI_URL/commands/editor.read"   # read c
 - Never write the token into a file, a commit or this skill.
 - `GET /skill/version` returns `skillVersion`. Fetch `/skill` again when it is higher than the one below.
 
-Skill version: 4 (API version 2).
+Skill version: 5 (API version 2).
 
 ## Endpoints
 

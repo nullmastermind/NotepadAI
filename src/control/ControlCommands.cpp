@@ -18,6 +18,7 @@
 #include <QVariant>
 
 #include <cmath>
+#include <cstring>
 
 namespace control {
 
@@ -82,7 +83,10 @@ QJsonValue fromQuery(const Arg &arg, const QString &text)
     case ArgType::Array:
     case ArgType::Object:
     case ArgType::Any: {
-        const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8());
+        const QByteArray utf8 = text.toUtf8();
+        if (invalidJsonEscape(utf8) >= 0)
+            return text; // kept verbatim, never with its backslashes dropped
+        const QJsonDocument doc = QJsonDocument::fromJson(utf8);
         if (doc.isArray())
             return doc.array();
         if (doc.isObject())
@@ -94,6 +98,36 @@ QJsonValue fromQuery(const Arg &arg, const QString &text)
 }
 
 } // namespace
+
+qsizetype invalidJsonEscape(QByteArrayView json)
+{
+    const char *const begin = json.data();
+    const char *const end = begin + json.size();
+    bool inString = false;
+    for (const char *p = begin; p < end; ++p) {
+        if (!inString) {
+            // Only a quote opens a string; skip to it.
+            p = static_cast<const char *>(std::memchr(p, '"', size_t(end - p)));
+            if (!p)
+                return -1;
+            inString = true;
+            continue;
+        }
+        if (*p == '"') {
+            inString = false;
+        } else if (*p == '\\') {
+            if (++p == end)
+                return p - 1 - begin;
+            switch (*p) {
+            case '"': case '\\': case '/': case 'b': case 'f': case 'n': case 'r': case 't': case 'u':
+                break;
+            default:
+                return p - 1 - begin;
+            }
+        }
+    }
+    return -1;
+}
 
 QString argText(const QJsonValue &value)
 {
