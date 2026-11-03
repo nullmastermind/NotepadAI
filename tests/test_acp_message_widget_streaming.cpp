@@ -42,6 +42,7 @@ private slots:
     void thought_short_body_has_no_scrollbar();
     void thought_follows_bottom_until_reader_scrolls_up();
     void thought_reopened_after_streaming_starts_at_top();
+    void thought_closed_renders_nothing_until_opened();
     void system_goalAchieved_heightIncludesBadge();
     void system_goalAchieved_keepsBottomMargin();
 };
@@ -467,6 +468,41 @@ void TestAcpMessageWidgetStreaming::thought_reopened_after_streaming_starts_at_t
     QVERIFY(!w.isCollapsed());
     QTRY_VERIFY(b->verticalScrollBar()->maximum() > 0);
     QCOMPARE(b->verticalScrollBar()->value(), 0);
+}
+
+void TestAcpMessageWidgetStreaming::thought_closed_renders_nothing_until_opened()
+{
+    AcpMessageWidget w(QStringLiteral("thought"));
+    w.resize(420, 40);
+    w.appendChunk(longThought(5'000));
+    fireRerender(w);
+    auto *b = w.findChild<QTextBrowser *>();
+    QVERIFY(b);
+    QVERIFY(!b->document()->isEmpty());
+
+    // Closing drops the rendered body; text that streams in meanwhile is kept
+    // but not rendered.
+    w.markStreamingDone();
+    QVERIFY(b->document()->isEmpty());
+    w.appendChunk(QStringLiteral(" late tail"));
+    fireRerender(w);
+    QVERIFY(b->document()->isEmpty());
+    const int closedH = w.height();
+
+    auto *header = w.findChild<QToolButton *>();
+    QVERIFY(header);
+    header->setChecked(true);
+    QCOMPARE(b->toPlainText(), (longThought(5'000) + QStringLiteral(" late tail")).trimmed());
+    QVERIFY(w.height() > closedH);
+
+    // A thought built closed (restored transcript) never renders until opened.
+    AcpMessageWidget restored(QStringLiteral("thought"));
+    restored.resize(420, 40);
+    restored.markStreamingDone();
+    restored.setText(longThought(5'000));
+    auto *rb = restored.findChild<QTextBrowser *>();
+    QVERIFY(rb);
+    QVERIFY(rb->document()->isEmpty());
 }
 
 void TestAcpMessageWidgetStreaming::system_goalAchieved_heightIncludesBadge()

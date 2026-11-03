@@ -141,6 +141,13 @@ public:
     const QVector<AcpMessage> &messages() const { return m_messages; }
     const QHash<QString, AcpProtocol::AcpToolCall> &toolCalls() const { return m_toolCalls; }
     const QVector<AcpTimelineEntry> &timeline() const { return m_timeline; }
+    // Thought message still receiving chunks (main agent or goal judge).
+    bool isStreamingThought(int messageIndex) const
+    {
+        return messageIndex >= 0
+            && (messageIndex == m_streamingThoughtMessageIndex
+                || messageIndex == m_streamingGoalJudgeThoughtIndex);
+    }
     // Tool calls a subagent made, in arrival order, keyed by the Agent/Task
     // tool call that spawned it. They live in toolCalls() but get no timeline
     // entry (a call attributed late keeps the one it already had; readers skip

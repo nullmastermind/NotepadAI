@@ -1611,6 +1611,15 @@ QWidget *AcpSessionView::createEntryWidget(const AcpTimelineEntry &entry, const 
         } else if (msg.fromGoalJudge) {
             w->setGoalTint(true);
         }
+        if (w->role() == QLatin1String("thought")) {
+            // Rebuilt transcripts and expanded folds show past thoughts closed
+            // (their text renders only when opened); the one still streaming
+            // stays open and settles at the next event.
+            if (m_model->isStreamingThought(entry.messageIndex))
+                m_activeThought = w;
+            else
+                w->markStreamingDone();
+        }
         w->setContent(msg.content);
         applyMessageMarker(w, entry.messageIndex);
         m_messageWidgets.insert(entry.messageIndex, w);
@@ -2294,6 +2303,7 @@ void AcpSessionView::appendMessageWidget(int idx)
     }
     w->setContent(msg.content);
     applyMessageMarker(w, idx);
+    settleActiveThought(w);
     insertTimelineWidget(w);
     m_messageWidgets.insert(idx, w);
     attachResponseActions(idx, w);
@@ -2305,14 +2315,16 @@ void AcpSessionView::appendMessageWidget(int idx)
         refreshResponseActions(false);
     }
 
-    // If a thought was streaming and an assistant message starts, collapse it.
-    if (msg.role == QLatin1String("assistant") && !m_activeThought.isNull()) {
-        m_activeThought->markStreamingDone();
-        m_activeThought.clear();
-    }
-
     maybeTruncateTranscript();
     scrollToBottomDeferred();
+}
+
+void AcpSessionView::settleActiveThought(const QWidget *next)
+{
+    if (m_activeThought.isNull() || m_activeThought == next)
+        return;
+    m_activeThought->markStreamingDone();
+    m_activeThought.clear();
 }
 
 void AcpSessionView::onMessageAppended(int idx)
@@ -2336,10 +2348,8 @@ void AcpSessionView::onMessageChunkAppended(int idx, const QString &chunk)
     if (w) {
         if (!built)
             w->appendChunk(chunk);
-        if (w->role() == QLatin1String("assistant") && !m_activeThought.isNull()) {
-            m_activeThought->markStreamingDone();
-            m_activeThought.clear();
-        }
+        if (w->role() == QLatin1String("assistant"))
+            settleActiveThought(w);
         scrollToBottomDeferred();
     }
 }
@@ -2359,10 +2369,8 @@ void AcpSessionView::onMessageReplaced(int idx, const QString &fullText)
             return;
         }
         w->setText(fullText);
-        if (w->role() == QLatin1String("assistant") && !m_activeThought.isNull()) {
-            m_activeThought->markStreamingDone();
-            m_activeThought.clear();
-        }
+        if (w->role() == QLatin1String("assistant"))
+            settleActiveThought(w);
         scrollToBottomDeferred();
     }
 }
@@ -2418,6 +2426,7 @@ void AcpSessionView::onToolCallAddedOrUpdated(const QString &toolCallId)
         if (isGoalJudgeToolId(toolCallId))
             card->setGoalTint(true);
         wireToolCallCard(card);
+        settleActiveThought(card);
         insertTimelineWidget(card);
         m_toolCallCards.insert(toolCallId, card);
         m_currentGroupCards.append(card);
@@ -2784,6 +2793,7 @@ void AcpSessionView::onTurnEnded(int groupId)
 {
     Q_UNUSED(groupId);
     notePrewalkTurnEnded();
+    settleActiveThought();
     // An adapter that never reports completion: the turn end is the signal.
     if (!m_grillMeCandidates.isEmpty() && m_model) {
         const QSet<QString> candidates = std::exchange(m_grillMeCandidates, {});
@@ -2851,6 +2861,7 @@ void AcpSessionView::onPermissionRequested(const AcpProtocol::AcpPermissionReque
         return;
     }
     auto *prompt = new AcpPermissionPrompt(req, m_transcriptHost);
+    settleActiveThought(prompt);
     insertTimelineWidget(prompt);
     m_activePermissionPrompt = prompt;
     connect(prompt, &AcpPermissionPrompt::choiceMade,

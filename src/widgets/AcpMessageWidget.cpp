@@ -524,6 +524,9 @@ void AcpMessageWidget::rerender()
     if (m_role == QLatin1String("assistant")) {
         // One pipeline for chat and preview: see MarkdownView::rerender().
         m_markdown->setMarkdownSource(GoalAgent::nativeGoalDisplayText(m_text));
+    } else if (m_thoughtHeader && m_collapsed) {
+        // A closed thought shows only its header: its body is not rendered at
+        // all (applyCollapsed dropped it) and opening it renders m_text.
     } else {
         // thought + system + other: raw text (thought italic comes from the
         // QTextBrowser stylesheet). Do not setMarkdown — reasoning streams
@@ -902,6 +905,18 @@ void AcpMessageWidget::applyCollapsed(bool collapsed)
     m_collapsed = collapsed;
     if (m_browser) {
         m_browser->setVisible(!collapsed);
+    }
+    if (m_thoughtHeader && m_browser) {
+        if (collapsed) {
+            // Free the hidden body (text layout, blocks): a long session holds
+            // many closed thoughts. m_text keeps the source for copy and reopen.
+            if (m_plainShown > 0 || !m_browser->document()->isEmpty())
+                m_browser->document()->setPlainText(QString());
+            m_plainShown = 0;
+            m_plainRebuild = true;
+        } else {
+            rerender(); // render what was skipped while closed
+        }
     }
     refitBrowserHeight();
     // A finished thought opened later reads from its start.

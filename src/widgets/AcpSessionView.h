@@ -276,6 +276,10 @@ private:
     void rebuildTintedIcons();
     void hydrateFromModel();
     void appendMessageWidget(int idx);
+    // The streaming thought is over once anything follows it in the timeline
+    // (a message, a tool call, a permission prompt) or the turn ends: collapse
+    // it, which also drops its rendered text (AcpMessageWidget renders lazily).
+    void settleActiveThought(const QWidget *next = nullptr);
     // Insert a widget into the transcript timeline at the tail, just above
     // the inline heartbeat indicator (if present) and the trailing stretch.
     // The plan widget is a viewport footer outside the scroll area.

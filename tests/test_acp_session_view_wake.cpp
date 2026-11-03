@@ -20,6 +20,8 @@
 #include <QScrollArea>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QTextBrowser>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <memory>
@@ -176,6 +178,31 @@ QStringList transcript(AcpSessionView &view)
     return out;
 }
 
+QByteArray thoughtText(const QString &text)
+{
+    return update(QStringLiteral("agent_thought_chunk"),
+                  {{QStringLiteral("content"), QJsonObject{{QStringLiteral("type"), QStringLiteral("text")},
+                                                           {QStringLiteral("text"), text}}}});
+}
+
+// Thought bubbles in transcript order.
+QList<AcpMessageWidget *> thoughts(AcpSessionView &view)
+{
+    QList<AcpMessageWidget *> out;
+    for (auto *scroll : view.findChildren<QScrollArea *>()) {
+        auto *layout = scroll->widget() ? qobject_cast<QVBoxLayout *>(scroll->widget()->layout()) : nullptr;
+        if (!layout)
+            continue;
+        for (int i = 0; i < layout->count(); ++i) {
+            auto *m = qobject_cast<AcpMessageWidget *>(layout->itemAt(i)->widget());
+            if (m && m->role() == QLatin1String("thought"))
+                out << m;
+        }
+        break;
+    }
+    return out;
+}
+
 // The visible status line text naming background work, empty when none shows.
 QString statusLine(AcpSessionView &view)
 {
@@ -279,6 +306,7 @@ private slots:
     void savedModelWithEffortSuffix_restoresItsBaseModel();
     void restart_startsANewDraft();
     void afterUserSend_selectorTooltipsSaySessionOnly();
+    void thought_collapsesWhenTheNextEventArrives();
 
 private:
     QTemporaryDir m_settingsDir;
@@ -880,6 +908,39 @@ void TestAcpSessionViewWake::afterUserSend_selectorTooltipsSaySessionOnly()
 
     QVERIFY(combo->toolTip().contains(QStringLiteral("Applies to this session only")));
     QVERIFY(combo->toolTip().contains(draftTip)); // still says what the selector is
+}
+
+// A thought is open while it streams. The next event (here a tool call) closes
+// it, and a closed thought keeps no rendered text until it is opened again.
+void TestAcpSessionViewWake::thought_collapsesWhenTheNextEventArrives()
+{
+    Session s;
+    s.prompt(QStringLiteral("check the auth logic"));
+    s.channel->pushStdout(thoughtText(QStringLiteral("Planning the first step.\nRead the server.")));
+    QTRY_COMPARE(thoughts(*s.view).size(), 1);
+    AcpMessageWidget *first = thoughts(*s.view).first();
+    auto *body = first->findChild<QTextBrowser *>();
+    QVERIFY(body);
+    QVERIFY(!first->isCollapsed());
+    QTRY_VERIFY(body->toPlainText().contains(QStringLiteral("Planning the first step.")));
+
+    s.channel->pushStdout(toolStart(QStringLiteral("Bash"), QStringLiteral("toolu_1")));
+    QTRY_VERIFY(first->isCollapsed());
+    QVERIFY(body->document()->isEmpty());
+    QCOMPARE(first->plainText(), QStringLiteral("Planning the first step.\nRead the server."));
+
+    // The next thought streams open; the closed one stays closed.
+    s.channel->pushStdout(thoughtText(QStringLiteral("Read ControlServer.cpp fully.")));
+    QTRY_COMPARE(thoughts(*s.view).size(), 2);
+    QVERIFY(!thoughts(*s.view).at(1)->isCollapsed());
+    QVERIFY(first->isCollapsed());
+
+    // Opening the closed one renders it again.
+    auto *header = first->findChild<QToolButton *>();
+    QVERIFY(header);
+    header->click();
+    QVERIFY(!first->isCollapsed());
+    QCOMPARE(body->toPlainText(), QStringLiteral("Planning the first step.\nRead the server."));
 }
 
 QTEST_MAIN(TestAcpSessionViewWake)
