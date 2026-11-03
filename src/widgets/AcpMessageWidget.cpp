@@ -78,6 +78,12 @@ constexpr int kThoughtBrowserPadLeft = 4;
 constexpr int kUserBubblePadH = 14;
 constexpr int kUserBubbleGap = 32; // space kept free to the left of a full-width user bubble
 constexpr int kThoughtItalicRightSlack = 4;
+// An expanded thought taller than this many lines stops growing and scrolls
+// inside the bubble, so a long reasoning stream does not push the rest of the
+// transcript away. Exception to ui-dna's "bubbles size to content" rule.
+constexpr int kThoughtMaxLines = 12;
+// Same "at the bottom" tolerance as the transcript (ui-dna).
+constexpr int kThoughtFollowSlackPx = 8;
 
 // A word that cannot wrap (a path, a URL) must not set the bubble's minimum
 // width. A bubble whose minimum is wider than the transcript gets laid out by
@@ -148,7 +154,11 @@ void configureBubbleBrowser(QTextBrowser *b)
 qreal layoutDocumentHeight(QTextDocument *doc, int textWidth)
 {
     if (!doc) return 0.0;
-    doc->setTextWidth(textWidth);
+    // setTextWidth relayouts the whole document even when the width is the
+    // same (QTextDocument::setPageSize -> documentChanged(0, 0, length)). A
+    // streaming bubble refits several times per tick: only re-wrap on a change.
+    if (doc->textWidth() != textWidth)
+        doc->setTextWidth(textWidth);
     QAbstractTextDocumentLayout *layout = doc->documentLayout();
     if (!layout) return doc->size().height();
     qreal h = layout->documentSize().height();
@@ -213,12 +223,30 @@ AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
                 .arg(kThoughtBrowserPadLeft));
         m_browser->setOpenExternalLinks(true);
         configureBubbleBrowser(m_browser);
+        // Streaming appends through a cursor: keep them off the undo stack.
+        m_browser->document()->setUndoRedoEnabled(false);
         // QTextDocument paragraphs carry an implicit ~12px bottom margin even
         // with documentMargin=0; zero it out so the bubble doesn't sprout
         // phantom whitespace below the last line.
         m_browser->document()->setDefaultStyleSheet(
             QStringLiteral("p, body { margin: 0; padding: 0; }"));
         m_layout->addWidget(m_browser);
+
+        // A long body is capped at kThoughtMaxLines and scrolls inside the bubble
+        // (refitBrowserHeight turns the scrollbar on). While the reader is at the
+        // bottom, new text keeps the view at the bottom; scrolling up stops that
+        // until they scroll back down.
+        QScrollBar *vbar = m_browser->verticalScrollBar();
+        connect(vbar, &QScrollBar::rangeChanged, this, [this, vbar](int, int max) {
+            if (m_thoughtFollow)
+                vbar->setValue(max);
+        });
+        connect(vbar, &QScrollBar::valueChanged, this, [this, vbar](int value) {
+            m_thoughtFollow = value >= vbar->maximum() - kThoughtFollowSlackPx;
+        });
+        // The scrollbar appearing narrows the viewport and QTextEdit re-wraps the
+        // document at the viewport width, without the italic slack: refit after.
+        m_browser->viewport()->installEventFilter(this);
 
         connect(m_thoughtHeader, &QToolButton::toggled, this, [this](bool checked) {
             // Header checked = expanded. Keep m_collapsed in lockstep so height
@@ -241,6 +269,7 @@ AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
         } else {
             m_browser = new QTextBrowser(this);
             m_browser->setOpenExternalLinks(true);
+            m_browser->document()->setUndoRedoEnabled(false); // see the thought role
         }
         m_browser->setStyleSheet(QStringLiteral("QTextBrowser { background: transparent; border: none; }"));
         configureBubbleBrowser(m_browser);
@@ -326,6 +355,7 @@ void AcpMessageWidget::appendChunk(const QString &chunk)
 void AcpMessageWidget::setText(const QString &fullText)
 {
     m_text = fullText;
+    m_plainRebuild = true;
     // Wholesale replacements are usually terminal states (compaction done,
     // model rewrote in place) — render immediately so the user sees the
     // settled state rather than waiting for the debounce.
@@ -393,6 +423,7 @@ void AcpMessageWidget::setContent(const QVector<AcpProtocol::AcpContentBlock> &c
         }
     }
     m_text = joined;
+    m_plainRebuild = true;
     rerender();
 }
 
@@ -491,15 +522,30 @@ void AcpMessageWidget::rerender()
         // an empty trailing block that adds a full line-height of phantom
         // whitespace below the visible text. Strip trailing whitespace so the
         // document size matches what the user actually reads.
-        QString text = m_text;
-        while (!text.isEmpty() && (text.endsWith(QLatin1Char('\n'))
-                                   || text.endsWith(QLatin1Char('\r'))
-                                   || text.endsWith(QLatin1Char(' '))
-                                   || text.endsWith(QLatin1Char('\t')))) {
-            text.chop(1);
+        // Held-back whitespace is shown once text follows it, so "\r\n" never
+        // splits across two renders.
+        qsizetype end = m_text.size();
+        while (end > 0) {
+            const QChar c = m_text.at(end - 1);
+            if (c != QLatin1Char('\n') && c != QLatin1Char('\r') && c != QLatin1Char(' ')
+                && c != QLatin1Char('\t'))
+                break;
+            --end;
         }
-        m_browser->document()->setPlainText(text);
-        MarkdownView::normalizeBlockMargins(m_browser->document());
+        // Plain-text blocks carry no margins (only HTML gets paragraph margins),
+        // so no normalizeBlockMargins pass: it rewrote every block per tick.
+        QTextDocument *doc = m_browser->document();
+        if (m_plainRebuild || end < m_plainShown) {
+            doc->setPlainText(m_text.left(end));
+        } else if (end > m_plainShown) {
+            // m_text only grew since the last render: add the new tail. Same block
+            // splitting as setPlainText (both go through QTextCursor::insertText).
+            QTextCursor cur(doc);
+            cur.movePosition(QTextCursor::End);
+            cur.insertText(m_text.mid(m_plainShown, end - m_plainShown));
+        }
+        m_plainShown = end;
+        m_plainRebuild = false;
     }
     refitBrowserHeight();
     scheduleRefit();
@@ -620,7 +666,38 @@ void AcpMessageWidget::refitBrowserHeight()
     // QTextDocument under-reports height for freshly-set multi-line text
     // until the layout engine has run, which clips an expanded thought down
     // to roughly its first line.
-    const int browserH = qMax(0, static_cast<int>(std::ceil(layoutDocumentHeight(doc, textW))));
+    auto measure = [doc](int width) {
+        return qMax(0, static_cast<int>(std::ceil(layoutDocumentHeight(doc, qMax(0, width)))));
+    };
+    int browserH = 0;
+    if (m_thoughtHeader) {
+        // Capped: the body is kThoughtMaxLines tall and wraps beside the
+        // scrollbar. Measure at the width the current state uses, so a streaming
+        // tick never re-wraps the document (each width change is a full
+        // relayout). Narrower text is never shorter, so neither switch can flip
+        // straight back.
+        const int cap = static_cast<int>(
+            std::ceil(QFontMetricsF(doc->defaultFont()).lineSpacing() * kThoughtMaxLines));
+        const int barW = m_browser->verticalScrollBar()->sizeHint().width();
+        bool capped = m_thoughtCapped;
+        browserH = measure(capped ? textW - barW : textW);
+        if (!capped && browserH > cap) {
+            capped = true;
+            measure(textW - barW);
+        } else if (capped && browserH <= cap) {
+            capped = false; // the text was replaced by a shorter one
+            browserH = measure(textW);
+        }
+        if (capped)
+            browserH = cap;
+        if (capped != m_thoughtCapped) {
+            m_thoughtCapped = capped;
+            m_browser->setVerticalScrollBarPolicy(capped ? Qt::ScrollBarAsNeeded
+                                                         : Qt::ScrollBarAlwaysOff);
+        }
+    } else {
+        browserH = measure(textW);
+    }
     m_browser->setFixedHeight(browserH);
     bubbleH += browserH;
     // Stylesheet border is inside the widget and shrinks the layout box.
@@ -676,6 +753,11 @@ bool AcpMessageWidget::eventFilter(QObject *watched, QEvent *event)
 {
     if (event->type() == QEvent::Resize && watched == parentWidget()) {
         updateGeometry();
+        return false;
+    }
+    if (event->type() == QEvent::Resize && m_thoughtHeader && m_browser
+        && watched == m_browser->viewport()) {
+        scheduleRefit(); // queued: runs after QTextEdit's own re-wrap
         return false;
     }
     return QFrame::eventFilter(watched, event);
@@ -798,6 +880,7 @@ void AcpMessageWidget::setChatFont(const QFont &font)
 void AcpMessageWidget::markStreamingDone()
 {
     if (m_role != QLatin1String("thought")) return;
+    m_streamingDone = true;
     if (m_thoughtHeader) {
         m_thoughtHeader->setChecked(false);
     }
@@ -811,6 +894,11 @@ void AcpMessageWidget::applyCollapsed(bool collapsed)
         m_browser->setVisible(!collapsed);
     }
     refitBrowserHeight();
+    // A finished thought opened later reads from its start.
+    if (!collapsed && m_streamingDone && m_thoughtHeader && m_browser) {
+        m_thoughtFollow = false;
+        m_browser->verticalScrollBar()->setValue(0);
+    }
     // Body may have been laid out at a stale width while hidden; re-measure
     // once the expanded geometry settles so the thought doesn't clip on
     // first expand / tab show.

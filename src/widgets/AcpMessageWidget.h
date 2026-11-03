@@ -167,6 +167,20 @@ private:
     // streamed chunk re-parses the whole document and the UI thread stalls.
     QTimer *m_rerenderTimer = nullptr;
 
+    // Plain-text roles (thought, system): m_text.left(m_plainShown) is what the
+    // document holds. While m_text only grows (appendChunk), a re-render inserts
+    // just the new tail, so a streaming tick costs O(chunk), not O(length): a
+    // full rebuild per 80 ms tick starved the UI thread on long thoughts.
+    // m_plainRebuild forces setPlainText (first render, setText/setContent).
+    qsizetype m_plainShown = 0;
+    bool m_plainRebuild = true;
+
+    // Thought role: body capped at kThoughtMaxLines with its own scrollbar;
+    // m_thoughtFollow keeps it at the bottom while the reader is there.
+    bool m_thoughtCapped = false;
+    bool m_thoughtFollow = true;
+    bool m_streamingDone = false;
+
     // User role: image thumbnails kept alongside their original pixmap so we
     // can rescale to bubble width on resize without quality loss.
     struct UserImage { QLabel *label; QPixmap original; };
