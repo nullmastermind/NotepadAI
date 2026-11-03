@@ -84,6 +84,15 @@ constexpr int kThoughtItalicRightSlack = 4;
 constexpr int kThoughtMaxLines = 12;
 // Same "at the bottom" tolerance as the transcript (ui-dna).
 constexpr int kThoughtFollowSlackPx = 8;
+// Slim scrollbar for the capped thought body: no arrows, no track, a faint
+// rounded handle that darkens under the mouse. Translucent grey reads on both
+// light and dark themes. refitBrowserHeight wraps the text beside its width.
+constexpr const char *kThoughtScrollBarStyle =
+    "QScrollBar:vertical { background: transparent; width: 6px; margin: 0; border: none; }"
+    "QScrollBar::handle:vertical { background: rgba(128, 128, 128, 80); border-radius: 3px; min-height: 24px; }"
+    "QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed { background: rgba(128, 128, 128, 160); }"
+    "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; border: none; background: none; }"
+    "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }";
 
 // A word that cannot wrap (a path, a URL) must not set the bubble's minimum
 // width. A bubble whose minimum is wider than the transcript gets laid out by
@@ -237,6 +246,7 @@ AcpMessageWidget::AcpMessageWidget(QString role, QWidget *parent)
         // bottom, new text keeps the view at the bottom; scrolling up stops that
         // until they scroll back down.
         QScrollBar *vbar = m_browser->verticalScrollBar();
+        vbar->setStyleSheet(QString::fromLatin1(kThoughtScrollBarStyle));
         connect(vbar, &QScrollBar::rangeChanged, this, [this, vbar](int, int max) {
             if (m_thoughtFollow)
                 vbar->setValue(max);

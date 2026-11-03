@@ -389,6 +389,10 @@ void TestAcpMessageWidgetStreaming::thought_long_body_caps_and_scrolls()
     QVERIFY(w.height() < cap + 3 * lineSpacing(b));
     QCOMPARE(b->verticalScrollBarPolicy(), Qt::ScrollBarAsNeeded);
     QTRY_VERIFY(b->verticalScrollBar()->maximum() > 0);
+    // A slim bar, not the style's default (arrows, ~16 px).
+    QTRY_VERIFY(b->verticalScrollBar()->isVisible());
+    QVERIFY2(b->verticalScrollBar()->width() <= 8,
+             qPrintable(QStringLiteral("bar width=%1").arg(b->verticalScrollBar()->width())));
     // Text wraps beside the scrollbar, keeping the italic slack.
     QTRY_VERIFY2(b->document()->textWidth() <= b->viewport()->width() - 2,
                  qPrintable(QStringLiteral("textWidth=%1 viewport=%2")
