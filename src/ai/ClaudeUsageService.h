@@ -103,7 +103,7 @@ public:
     // Shown only once a response arrived and the user is signed in; an error
     // keeps it visible so the message is reachable.
     bool buttonVisible() const;
-    std::optional<claudeusage::NamedWindow> headline() const { return claudeusage::tightestWindow(m_usage); }
+    std::optional<claudeusage::NamedWindow> headline() const { return claudeusage::shortestWindow(m_usage); }
     // Outcome of the latest refresh: error text, last success, cooldown end.
     const claudeusage::Health &health() const { return m_health; }
 

@@ -76,7 +76,7 @@ private slots:
     void reset_in_boundaries();
     void reset_at_same_day_vs_other_day();
     void percent_text();
-    void windows_order_and_tightest();
+    void windows_order_and_shortest();
     void http_error_messages();
 
     void retry_after_delta_seconds();
@@ -310,7 +310,7 @@ void TestClaudeUsage::percent_text()
     QCOMPARE(percentText(26.0, PercentMode::Remaining), QStringLiteral("74% left"));
 }
 
-void TestClaudeUsage::windows_order_and_tightest()
+void TestClaudeUsage::windows_order_and_shortest()
 {
     Usage u;
     u.status = Status::Ok;
@@ -321,14 +321,21 @@ void TestClaudeUsage::windows_order_and_tightest()
     QCOMPARE(list.size(), 2);
     QCOMPARE(list[0].label, QStringLiteral("5-hour"));
     QCOMPARE(list[1].label, QStringLiteral("Fable weekly"));
-    QCOMPARE(tightestWindow(u)->key, WindowKey::Session);
+    QCOMPARE(shortestWindow(u)->key, WindowKey::Session);
 
-    u.weekly = RateWindow{26.0, kWeeklyMinutes, std::nullopt};
+    // The shortest window wins even when a longer one is more consumed.
+    u.weekly = RateWindow{56.0, kWeeklyMinutes, std::nullopt};
     QCOMPARE(windowsOf(u)[1].label, QStringLiteral("Weekly"));
-    // Ties keep the earlier (display-order) window.
-    QCOMPARE(tightestWindow(u)->key, WindowKey::Session);
+    QCOMPARE(shortestWindow(u)->key, WindowKey::Session);
+    QCOMPARE(shortestWindow(u)->label, QStringLiteral("5-hour"));
 
-    QVERIFY(!tightestWindow(Usage{}));
+    // No 5-hour window (some accounts): weekly is the shortest.
+    u.session.reset();
+    QCOMPARE(shortestWindow(u)->key, WindowKey::Weekly);
+    u.weekly.reset();
+    QCOMPARE(shortestWindow(u)->key, WindowKey::FableWeekly);
+
+    QVERIFY(!shortestWindow(Usage{}));
     QVERIFY(windowsOf(Usage{}).isEmpty());
 }
 

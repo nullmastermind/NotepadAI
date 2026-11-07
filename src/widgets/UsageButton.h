@@ -11,9 +11,9 @@
 namespace ai { class ClaudeUsageAccounts; }
 class UsagePopover;
 
-// Menu-bar chip "[Claude glyph] 26%": per signed-in account, the Claude window
-// closest to its limit ("26% · 70%" with several accounts), text tinted warning /
-// danger from 80% / 95% on the hottest account. Hidden until the first response
+// Menu-bar chip "[Claude glyph] 26%": per signed-in account, its shortest Claude
+// window (5-hour, else weekly; "26% · 70%" with several accounts), text tinted
+// warning / danger from 80% / 95% on the hottest shown window. Hidden until the first response
 // and while every account is signed out. Click opens the UsagePopover.
 class UsageButton : public QToolButton
 {

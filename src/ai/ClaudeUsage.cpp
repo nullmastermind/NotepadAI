@@ -271,14 +271,16 @@ QVector<NamedWindow> windowsOf(const Usage &usage)
     return out;
 }
 
-std::optional<NamedWindow> tightestWindow(const Usage &usage)
+std::optional<NamedWindow> shortestWindow(const Usage &usage)
 {
-    std::optional<NamedWindow> best;
-    for (const NamedWindow &w : windowsOf(usage)) {
-        if (!best || w.window.usedPercent > best->window.usedPercent)
-            best = w;
-    }
-    return best;
+    // Same order as windowsOf (shortest first), without building the vector.
+    if (usage.session)
+        return NamedWindow{WindowKey::Session, QStringLiteral("5-hour"), *usage.session};
+    if (usage.weekly)
+        return NamedWindow{WindowKey::Weekly, QStringLiteral("Weekly"), *usage.weekly};
+    if (usage.fableWeekly)
+        return NamedWindow{WindowKey::FableWeekly, QStringLiteral("Fable weekly"), *usage.fableWeekly};
+    return std::nullopt;
 }
 
 std::optional<qint64> parseRetryAfter(const QByteArray &header, qint64 nowMs)

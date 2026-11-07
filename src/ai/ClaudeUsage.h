@@ -97,8 +97,9 @@ QString percentText(double usedPercent, PercentMode mode);
 
 // Windows the provider reported, in display order (5-hour, weekly, Fable weekly).
 QVector<NamedWindow> windowsOf(const Usage &usage);
-// The most-consumed window - the one that will stall an agent first.
-std::optional<NamedWindow> tightestWindow(const Usage &usage);
+// The shortest window the account reports (5-hour, else weekly, else Fable
+// weekly): the one whose usage moves during a working session.
+std::optional<NamedWindow> shortestWindow(const Usage &usage);
 
 // Fetch health, kept apart from the last good `Usage` so a failed refresh never
 // discards numbers that were already shown.

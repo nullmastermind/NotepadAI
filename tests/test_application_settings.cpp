@@ -34,7 +34,7 @@ private slots:
     void initTestCase();
     void init();
 
-    void theme_defaultIsSystem();
+    void theme_defaultIsDark();
     void theme_setAndGetRoundTrip();
     void theme_emitsChangedSignal();
     void theme_persistsAcrossInstances();
@@ -69,10 +69,10 @@ void TestApplicationSettings::init()
     s.sync();
 }
 
-void TestApplicationSettings::theme_defaultIsSystem()
+void TestApplicationSettings::theme_defaultIsDark()
 {
     ApplicationSettings s;
-    QCOMPARE(s.theme(), ApplicationSettings::System);
+    QCOMPARE(s.theme(), ApplicationSettings::Dark);
 }
 
 void TestApplicationSettings::theme_setAndGetRoundTrip()
