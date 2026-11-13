@@ -107,6 +107,10 @@ public:
     // the registry at request time so the latest policy is always observed.
     void setAutoApprovePolicyProvider(std::function<QString()> provider);
     void setMcpServers(const QJsonArray &servers);
+    // Session name sent with the next session/new or session/resume (Claude
+    // Code only: `_meta.claudeCode.options.extraArgs.name` -> `--name`, the
+    // name ListAgents shows). A live session is renamed with `/rename`.
+    void setSessionName(const QString &name) { m_sessionName = name; }
     // An MCP server named `name` is among those set for new sessions.
     bool hasMcpServer(QLatin1String name) const;
 
@@ -279,6 +283,7 @@ private:
     void sendInitialize();
     void sendNewSession();
     void sendResumeSession();
+    void insertSessionNameMeta(QJsonObject &params) const;
     // Shared tail of session/new and session/resume: catalogs, initialized(),
     // flush of prompts queued meanwhile.
     void finishSessionSetup(const QJsonObject &result, const char *method);
@@ -382,6 +387,7 @@ private:
     QString m_currentModel;
     QList<AcpProtocol::AcpConfigOption> m_configOptions;
     QJsonArray m_mcpServers;
+    QString m_sessionName;
 
     QHash<QString, std::function<void(const QString &outcome, const QString &optionId)>> m_pendingPermissions;
     // Tool calls reported but not yet in a final state. Wake-up turns have no

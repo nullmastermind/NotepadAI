@@ -39,6 +39,8 @@
 #include <QCoreApplication>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QInputDialog>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
@@ -990,6 +992,50 @@ void AiAgentDock::closeSlot(int index)
     tryCloseSlot(index);
 }
 
+bool AiAgentDock::renameSession(const QString &sessionId, const QString &name)
+{
+    Slot *slot = slotById(sessionId);
+    if (!slot || !slot->model)
+        return false;
+    const QString clean = name.simplified();
+    if (slot->model->sessionName() == clean)
+        return true;
+    // The model hands the name to the connection for the next session/new or
+    // session/resume (AcpAgentManager::wireConnectionToModel).
+    slot->model->setSessionName(clean);
+    pushStripSnapshots();
+    emit slotsChanged();
+
+    // A live Claude Code session takes the name now. Dormant / not yet started
+    // sessions get it as `--name`; clearing leaves the agent's current name
+    // (Claude Code has no "unname").
+    AcpConnection *conn = slot->connection;
+    if (!clean.isEmpty() && conn && slot->view && !slot->agentExited && conn->isSessionReady()
+        && !conn->isDormant() && AcpSwitchAgent::isClaudeCodeAgent(conn->definition())) {
+        slot->view->sendSlashCommand(AcpProtocol::renameCommandText(clean));
+    }
+    return true;
+}
+
+void AiAgentDock::promptRenameSession(const QString &sessionId)
+{
+    const Slot *slot = slotById(sessionId);
+    if (!slot || !slot->model)
+        return;
+    const QString current = slot->model->sessionName();
+    const bool claude = slot->connection && AcpSwitchAgent::isClaudeCodeAgent(slot->connection->definition());
+    const QString label = claude ? tr("Session name (other Claude Code sessions see it in ListAgents):")
+                                 : tr("Session name:");
+    bool ok = false;
+    // Never keep the Slot across the dialog: a scheduled task can add or
+    // detach slots in its nested loop. Re-fetched by id in renameSession.
+    const QString name = QInputDialog::getText(this, tr("Rename Session"), label, QLineEdit::Normal,
+                                               current, &ok);
+    if (!ok)
+        return;
+    renameSession(sessionId, name);
+}
+
 bool AiAgentDock::tryCloseSlot(int index)
 {
     if (index < 0 || index >= m_slots.size())
@@ -1184,6 +1230,20 @@ void AiAgentDock::ensureStrip()
     });
     connect(m_strip, &AiDockSessionStrip::closeRequested, this, &AiAgentDock::closeSlot);
     connect(m_strip, &AiDockSessionStrip::moveRequested, this, &AiAgentDock::moveSlot);
+    connect(m_strip, &AiDockSessionStrip::contextMenuRequested, this, [this](int index, const QPoint &globalPos) {
+        // By id, taken before the menu's nested loop can reorder or close
+        // sessions. Non-blocking popup: the strip may be rebuilt meanwhile.
+        const QString id = sessionIdAt(index);
+        if (id.isEmpty())
+            return;
+        auto *menu = new QMenu(this);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        connect(menu->addAction(tr("Rename…")), &QAction::triggered, this, [this, id]() {
+            // Queued past the menu's close: the prompt is modal.
+            QMetaObject::invokeMethod(this, [this, id]() { promptRenameSession(id); }, Qt::QueuedConnection);
+        });
+        menu->popup(globalPos);
+    });
     connect(m_strip, &QObject::destroyed, this, [this]() {
         m_strip = nullptr;
         m_tabBarForStrip = nullptr;
@@ -1332,6 +1392,7 @@ void AiAgentDock::pushStripSnapshots()
         snap.busySinceMs = slot.busySinceMs;
         snap.activity = slot.hasActivity;
         snap.lastUserPreview = lastUserPreviewFor(slot.model);
+        snap.name = slot.model ? slot.model->sessionName() : QString();
         snaps.append(std::move(snap));
     }
     m_strip->setSlots(m_slots.size(), m_current, snaps);

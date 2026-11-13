@@ -538,6 +538,10 @@ void AcpAgentManager::wireConnectionToModel(AcpConnection *conn, AcpSessionModel
         if (conn->isSessionReady())
             model->setAcpSessionId(conn->sessionId());
     });
+    // The session name rides on the next session/new or session/resume (a
+    // live session is renamed by AiAgentDock::renameSession with `/rename`).
+    conn->setSessionName(model->sessionName());
+    connect(model, &AcpSessionModel::sessionNameChanged, conn, &AcpConnection::setSessionName);
     connect(conn, &AcpConnection::messageChunk,
             model, qOverload<const QString &, const QString &>(&AcpSessionModel::onMessageChunk));
     connect(conn, &AcpConnection::thoughtChunk,
@@ -774,6 +778,9 @@ void AcpAgentManager::startSwitchTarget(const QString &sessionId, bool resume, c
     AcpConnection *conn = newConnection(target, nullptr); // local only (blockReason)
     if (resume)
         conn->setResumeSessionId(acpSessionId);
+    // Wired to the model only on commit, but the name must ride on the resume.
+    if (const auto sit = m_sessions.constFind(sessionId); sit != m_sessions.constEnd() && sit->model)
+        conn->setSessionName(sit->model->sessionName());
     opIt->target = conn;
 
     // Not wired to the model or view until it has resumed: a failure must

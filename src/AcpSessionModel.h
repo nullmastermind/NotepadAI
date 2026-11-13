@@ -118,6 +118,11 @@ public:
     // (GLOSSARY). Persisted so a restored session keeps it.
     bool userSent() const { return m_userSent; }
     void setUserSent();
+    // Name the user gave the session (empty = none). Claude Code takes it as
+    // its session name (`--name` at spawn, `/rename` live), the name other
+    // Claude Code sessions see in ListAgents. Persisted.
+    QString sessionName() const { return m_sessionName; }
+    void setSessionName(const QString &name);
     // Prewalk model of this session (GLOSSARY): empty = Off, nullopt = never
     // chosen (a new session takes the agent default). Persisted.
     const std::optional<QString> &prewalkModel() const { return m_prewalkModel; }
@@ -243,6 +248,7 @@ signals:
     void usageChanged();
     void isProcessingChanged(bool processing);
     void backgroundTaskCountChanged(int count);
+    void sessionNameChanged(const QString &name);
     void turnEnded(int groupId);
     void goalJudgeTurnRemoved(const QVector<int> &messageIndices,
                               const QStringList &toolCallIds);
@@ -262,6 +268,7 @@ private:
     QString m_projectId;
     QString m_acpSessionId;
     bool m_userSent = false;
+    QString m_sessionName;
     std::optional<QString> m_prewalkModel;
     std::optional<SelectionOverride> m_selectionOverride;
     QString m_historyDirOverride; // empty = use default AppDataLocation

@@ -220,6 +220,16 @@ void AcpSessionModel::setUserSent()
     schedulePersistIfNeeded();
 }
 
+void AcpSessionModel::setSessionName(const QString &name)
+{
+    const QString trimmed = name.simplified();
+    if (m_sessionName == trimmed)
+        return;
+    m_sessionName = trimmed;
+    schedulePersistIfNeeded();
+    emit sessionNameChanged(m_sessionName);
+}
+
 void AcpSessionModel::setPrewalkModel(const QString &model)
 {
     if (m_prewalkModel == model)
@@ -281,6 +291,7 @@ void AcpSessionModel::loadFromDisk()
         m_acpSessionId = acpId.toString();
     }
     m_userSent = obj.value(QStringLiteral("userSent")).toBool(false);
+    m_sessionName = obj.value(QStringLiteral("sessionName")).toString();
     if (const QJsonValue prewalk = obj.value(QStringLiteral("prewalkModel")); prewalk.isString())
         m_prewalkModel = prewalk.toString();
     const QJsonObject meta = obj.value(QStringLiteral("agentMeta")).toObject();
@@ -440,6 +451,8 @@ QJsonObject AcpSessionModel::toHistoryJson() const
     if (m_userSent) {
         obj.insert(QStringLiteral("userSent"), true);
     }
+    if (!m_sessionName.isEmpty())
+        obj.insert(QStringLiteral("sessionName"), m_sessionName);
     if (m_prewalkModel)
         obj.insert(QStringLiteral("prewalkModel"), *m_prewalkModel);
     // Prewalk switched: record the selection the session goes back to. Copies

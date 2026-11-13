@@ -18,6 +18,8 @@
 
 #include "AcpConnection.h"
 
+#include "AcpAgentBrand.h"
+
 #include "GrillMeForm.h"
 
 #include "IAcpProcessChannel.h"
@@ -474,6 +476,7 @@ void AcpConnection::sendNewSession()
     // ACP requires `mcpServers` as an array — strict (Zod) agents reject the
     // request with "expected array, received undefined" if the key is absent.
     params.insert(QStringLiteral("mcpServers"), m_mcpServers);
+    insertSessionNameMeta(params);
 
     sendRequest(AcpProtocol::kMethodSessionNew, params,
                 [this](const QJsonValue &result, const QJsonValue &error) {
@@ -487,6 +490,17 @@ void AcpConnection::sendNewSession()
                 });
 }
 
+void AcpConnection::insertSessionNameMeta(QJsonObject &params) const
+{
+    // Other agents never see the Claude Code option.
+    // Same detection as AcpSwitchAgent::isClaudeCodeAgent (not linked here).
+    if (m_sessionName.isEmpty() || detectAcpAgentBrand(m_agent) != QLatin1String("claude-code"))
+        return;
+    const QJsonObject meta = AcpProtocol::sessionNameMeta(m_sessionName);
+    if (!meta.isEmpty())
+        params.insert(QStringLiteral("_meta"), meta);
+}
+
 void AcpConnection::sendResumeSession()
 {
     if (!m_capabilities.sessionResume) {
@@ -498,6 +512,7 @@ void AcpConnection::sendResumeSession()
     params.insert(QStringLiteral("sessionId"), m_resumeSessionId);
     params.insert(QStringLiteral("cwd"), m_workingDir);
     params.insert(QStringLiteral("mcpServers"), m_mcpServers);
+    insertSessionNameMeta(params);
 
     sendRequest(AcpProtocol::kMethodSessionResume, params,
                 [this](const QJsonValue &result, const QJsonValue &error) {

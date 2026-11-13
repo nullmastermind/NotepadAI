@@ -49,6 +49,7 @@ public:
         // request): the number wears a red dot until it is answered.
         bool waiting = false;
         QString lastUserPreview; // truncated last human prompt; empty = no tooltip
+        QString name;            // the session's name (Rename…); empty = none
 
         bool operator==(const SlotSnapshot &) const = default;
     };
@@ -76,6 +77,8 @@ signals:
     void closeRequested(int index);
     // A drag released over another number: move session `from` to position `to`.
     void moveRequested(int from, int to);
+    // Right-click on session `index` (the owner shows the menu: Rename…).
+    void contextMenuRequested(int index, const QPoint &globalPos);
 
 protected:
     void changeEvent(QEvent *event) override;

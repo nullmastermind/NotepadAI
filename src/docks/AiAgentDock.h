@@ -156,6 +156,14 @@ public:
                 QString newSessionId,
                 QString newAgentName);
 
+    // Name a session (empty = clear). Stored on the model; Claude Code also
+    // takes it as its own session name (ListAgents): `/rename <name>` on a live
+    // session, `--name` on the next session/new or session/resume. Returns
+    // false for an unknown session.
+    bool renameSession(const QString &sessionId, const QString &name);
+    // Right-click on a session number: Rename… opens a name prompt.
+    void promptRenameSession(const QString &sessionId);
+
     // Switch agent (AcpAgentManager::switchAgent): the session keeps its slot,
     // model and transcript and continues on `connection`.
     void rebindConnection(const QString &sessionId, AcpConnection *connection, QString agentName);

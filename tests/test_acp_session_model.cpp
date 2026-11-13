@@ -393,6 +393,11 @@ void TestAcpSessionModel::restoreFieldsSurviveRoundTrip()
     a.setAcpSessionId(QStringLiteral("ef4daa04"));
     a.appendUserMessage(QStringLiteral("hi"), {});
     a.setUserSent();
+    QSignalSpy nameSpy(&a, &AcpSessionModel::sessionNameChanged);
+    a.setSessionName(QStringLiteral("  api   worker "));
+    QCOMPARE(a.sessionName(), QStringLiteral("api worker"));
+    a.setSessionName(QStringLiteral("api worker")); // unchanged: no signal
+    QCOMPARE(nameSpy.count(), 1);
 
     QFile f(tmp.path() + QStringLiteral("/r2.json"));
     QVERIFY(f.open(QIODevice::WriteOnly));
@@ -402,6 +407,7 @@ void TestAcpSessionModel::restoreFieldsSurviveRoundTrip()
     AcpSessionModel b(QStringLiteral("r2"), QStringLiteral("proj"), tmp.path());
     QCOMPARE(b.acpSessionId(), QStringLiteral("ef4daa04"));
     QVERIFY(b.userSent());
+    QCOMPARE(b.sessionName(), QStringLiteral("api worker"));
     QCOMPARE(b.currentModeId(), QStringLiteral("plan"));
     QCOMPARE(b.availableModes().size(), 2);
     QCOMPARE(b.currentModelId(), QStringLiteral("opus"));

@@ -188,6 +188,8 @@ QJsonObject sessionJson(AiAgentDock *dock, const QString &sessionId, bool detail
                   // What a /wait after a prompt waits for: the turn ended, or
                   // it needs an answer (a permission asked mid-turn included).
                   {QStringLiteral("settled"), !working || waiting}};
+    if (const AcpSessionModel *model = dock->modelFor(sessionId); model && !model->sessionName().isEmpty())
+        o.insert(QStringLiteral("name"), model->sessionName());
     if (!view)
         return o;
     if (queued > 0)
@@ -1059,6 +1061,26 @@ void Registrar::ai()
             if (!view)
                 return;
             const QString id = idOf(dock, view);
+            showSession(ctx, dock, id);
+            ctx.ok(sessionJson(dock, id, false));
+        });
+
+    add(QStringLiteral("ai.rename"),
+        QStringLiteral("Name a session; a Claude Code session also takes it as the name other Claude Code sessions "
+                       "see in ListAgents (sent as /rename when live)"),
+        true,
+        {sessionArgSpec(),
+         required(QStringLiteral("name"), ArgType::String, QStringLiteral("the new name; empty clears it"))},
+        [sessionArg, showSession, idOf](const CommandContext &ctx) {
+            AiAgentDock *dock = nullptr;
+            AcpSessionView *view = sessionArg(ctx, &dock);
+            if (!view)
+                return;
+            const QString id = idOf(dock, view);
+            if (!dock->renameSession(id, ctx.str(QStringLiteral("name")))) {
+                ctx.fail(404, QStringLiteral("no AI session %1; ai.sessions lists them").arg(id));
+                return;
+            }
             showSession(ctx, dock, id);
             ctx.ok(sessionJson(dock, id, false));
         });

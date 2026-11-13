@@ -59,6 +59,7 @@ private slots:
     void toolCallUpdateIsBackgrounded_readsAirMarker();
     void toolCallUpdateIsAsyncSubagentLaunch_readsToolResponse();
     void clientCapabilitiesMeta_declaresAsyncTasks();
+    void sessionNameMeta_passesNameAsCliArg();
     void formatWaitDuration_secondsMinutesHours();
     void formatToolDuration_compactUnits();
     void rawOutputToObject_wrapsNonObjects();
@@ -865,6 +866,22 @@ void TestAcpProtocolSerialization::clientCapabilitiesMeta_declaresAsyncTasks()
     for (const auto &v : air.value(QStringLiteral("capabilities")).toArray())
         found = found || v.toString() == QLatin1String("asyncTasks");
     QVERIFY(found);
+}
+
+void TestAcpProtocolSerialization::sessionNameMeta_passesNameAsCliArg()
+{
+    // claude-agent-acp spreads `claudeCode.options.extraArgs` onto the CLI:
+    // {"name": "x"} -> `--name x` (verified live: ListAgents shows it).
+    const QJsonObject meta = AcpProtocol::sessionNameMeta(QStringLiteral("  api   worker "));
+    const QJsonObject extraArgs = meta.value(QStringLiteral("claudeCode")).toObject()
+        .value(QStringLiteral("options")).toObject()
+        .value(QStringLiteral("extraArgs")).toObject();
+    QCOMPARE(extraArgs.value(QStringLiteral("name")).toString(), QStringLiteral("api worker"));
+    QCOMPARE(extraArgs.size(), 1);
+
+    QVERIFY(AcpProtocol::sessionNameMeta(QString()).isEmpty());
+    QVERIFY(AcpProtocol::sessionNameMeta(QStringLiteral("   ")).isEmpty());
+    QCOMPARE(AcpProtocol::renameCommandText(QStringLiteral(" docs  bot ")), QStringLiteral("/rename docs bot"));
 }
 
 

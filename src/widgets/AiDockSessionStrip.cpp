@@ -19,6 +19,7 @@
 #include "AiDockSessionStrip.h"
 
 #include <QApplication>
+#include <QContextMenuEvent>
 #include <QCoreApplication>
 #include <QEvent>
 #include <QFont>
@@ -214,6 +215,14 @@ bool AiDockSessionStrip::eventFilter(QObject *watched, QEvent *event)
                 emit closeRequested(index);
             return true;
         }
+    }
+
+    if (event->type() == QEvent::ContextMenu) {
+        // The owner builds the menu: it maps the index to a session id before
+        // any nested loop can reorder or close sessions.
+        endDrag();
+        emit contextMenuRequested(index, static_cast<QContextMenuEvent *>(event)->globalPos());
+        return true;
     }
 
     if (handleDrag(index, event))
@@ -426,12 +435,16 @@ QString AiDockSessionStrip::tooltipFor(int index) const
     if (index < 0 || index >= m_snapshots.size())
         return {};
     const SlotSnapshot &snap = m_snapshots.at(index);
-    if (!snap.waiting)
-        return snap.lastUserPreview;
+    QStringList lines;
+    lines.reserve(3);
+    if (!snap.name.isEmpty())
+        lines.append(snap.name);
     // Colour is never the only carrier of meaning (ui-dna).
-    const QString waiting = tr("Waiting for your answer");
-    return snap.lastUserPreview.isEmpty() ? waiting
-                                          : waiting + QLatin1Char('\n') + snap.lastUserPreview;
+    if (snap.waiting)
+        lines.append(tr("Waiting for your answer"));
+    if (!snap.lastUserPreview.isEmpty())
+        lines.append(snap.lastUserPreview);
+    return lines.join(QLatin1Char('\n'));
 }
 
 int AiDockSessionStrip::indexOfButton(const QObject *obj) const

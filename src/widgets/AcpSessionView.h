@@ -96,6 +96,9 @@ public:
     QVector<QPair<QByteArray, QString>> takeInputImages();
     QStringList goalDebugLog() const;
     AcpConnection *connection() const { return m_connection; }
+    // Sends a slash command like the composer would (queued while a turn
+    // runs). Used for `/rename` (AiAgentDock::renameSession).
+    void sendSlashCommand(const QString &text) { submitSlashCommand(text); }
 
     // If "New worktree" is checked, return displayText plus a hidden instruction
     // for the agent. The transcript should keep displayText. Stays checked for

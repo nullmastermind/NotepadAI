@@ -10,6 +10,7 @@
 
 #include <QtTest>
 #include <QApplication>
+#include <QContextMenuEvent>
 #include <QPointer>
 #include <QSignalSpy>
 #include <QSizePolicy>
@@ -37,6 +38,8 @@ private slots:
     void waitingSlot_tooltipSaysWaiting_keepsPreview();
     void attentionColor_isAVisibleRed();
     void tooltip_numberShowsLastUserPreview();
+    void tooltip_nameComesFirst();
+    void rightClick_requestsContextMenuForThatNumber();
     void size_matchesHint_buttonsDoNotShrink();
     void tabBar_tabSizeHint_includesFullStripWidth();
     void deferredDelete_afterMove_detachesFromNewBar();
@@ -262,6 +265,39 @@ void TestAiDockSessionStrip::tooltip_numberShowsLastUserPreview()
     QCOMPARE(strip.slotTooltip(2), QStringLiteral("hello"));
     QVERIFY(!strip.slotTooltip(0).contains(QStringLiteral("Claude")));
     QVERIFY(!strip.slotTooltip(0).contains(QStringLiteral("idle")));
+}
+
+void TestAiDockSessionStrip::tooltip_nameComesFirst()
+{
+    auto snaps = threeSnapshots(false);
+    snaps[0].name = QStringLiteral("api-worker");
+    snaps[0].lastUserPreview = QStringLiteral("fix the crash");
+    snaps[1].name = QStringLiteral("docs");
+    snaps[1].waiting = true;
+    AiDockSessionStrip strip;
+    strip.setSlots(3, 0, snaps);
+    QCOMPARE(strip.slotTooltip(0), QStringLiteral("api-worker\nfix the crash"));
+    QCOMPARE(strip.slotTooltip(1), QStringLiteral("docs\nWaiting for your answer"));
+    QCOMPARE(strip.slotTooltip(2), QString());
+}
+
+void TestAiDockSessionStrip::rightClick_requestsContextMenuForThatNumber()
+{
+    AiDockSessionStrip strip;
+    strip.setSlots(3, 0, threeSnapshots(false));
+    const auto buttons = stripButtons(&strip);
+    QCOMPARE(buttons.size(), 3);
+    QSignalSpy menu(&strip, &AiDockSessionStrip::contextMenuRequested);
+    QSignalSpy activated(&strip, &AiDockSessionStrip::activated);
+
+    const QPoint local = buttons.at(2)->rect().center();
+    QContextMenuEvent ev(QContextMenuEvent::Mouse, local, buttons.at(2)->mapToGlobal(local));
+    QApplication::sendEvent(buttons.at(2), &ev);
+
+    QCOMPARE(menu.count(), 1);
+    QCOMPARE(menu.at(0).at(0).toInt(), 2);
+    QCOMPARE(menu.at(0).at(1).toPoint(), buttons.at(2)->mapToGlobal(local));
+    QCOMPARE(activated.count(), 0);
 }
 
 void TestAiDockSessionStrip::size_matchesHint_buttonsDoNotShrink()

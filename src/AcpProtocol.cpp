@@ -743,6 +743,27 @@ QJsonObject clientCapabilitiesMeta()
     return meta;
 }
 
+QJsonObject sessionNameMeta(const QString &name)
+{
+    const QString trimmed = name.simplified();
+    if (trimmed.isEmpty())
+        return {};
+    QJsonObject extraArgs;
+    extraArgs.insert(QStringLiteral("name"), trimmed);
+    QJsonObject options;
+    options.insert(QStringLiteral("extraArgs"), extraArgs);
+    QJsonObject claudeCode;
+    claudeCode.insert(QStringLiteral("options"), options);
+    QJsonObject meta;
+    meta.insert(QStringLiteral("claudeCode"), claudeCode);
+    return meta;
+}
+
+QString renameCommandText(const QString &name)
+{
+    return QStringLiteral("/rename ") + name.simplified();
+}
+
 QString toolCallMutatedPath(const QJsonObject &rawInput,
                             const QJsonArray &content,
                             const QJsonObject &rawOutput,

@@ -383,6 +383,14 @@ QString formatToolDuration(qint64 ms);
 // The agent requires `version` >= 1 and `capabilities` to be an array.
 QJsonObject clientCapabilitiesMeta();
 
+// Claude Code session name for session/new and session/resume `_meta`:
+// claude-agent-acp passes `claudeCode.options.extraArgs` to the CLI, so this
+// starts it with `--name <name>` (the name ListAgents shows). Empty name ->
+// empty object (send no `_meta`).
+QJsonObject sessionNameMeta(const QString &name);
+// The live rename: `/rename <name>` (claude-agent-acp advertises it).
+QString renameCommandText(const QString &name);
+
 // Path for git refresh and titles. Claude uses `file_path`; omp uses `path`,
 // `locations[]`, type:diff.path, or a hashline `input` (`[file#tag]`).
 QString toolCallMutatedPath(const QJsonObject &rawInput,
