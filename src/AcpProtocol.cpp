@@ -47,8 +47,9 @@ AcpCapabilities parseAgentCapabilities(const QJsonObject &initializeResult)
     out.sessionLoad = caps.value(QStringLiteral("loadSession")).toBool()
         || caps.value(QStringLiteral("sessionLoad")).toBool();
     // Spec: an object means supported; absent or null means not.
-    out.sessionResume = caps.value(QStringLiteral("sessionCapabilities")).toObject()
-                            .value(QStringLiteral("resume")).isObject();
+    const QJsonObject sessionCaps = caps.value(QStringLiteral("sessionCapabilities")).toObject();
+    out.sessionResume = sessionCaps.value(QStringLiteral("resume")).isObject();
+    out.sessionList = sessionCaps.value(QStringLiteral("list")).isObject();
     return out;
 }
 
@@ -402,7 +403,7 @@ QString firstLocationPath(const QJsonArray &locations)
     for (int i = 0; i < n; ++i) {
         const QString path = locations.at(i).toObject().value(QStringLiteral("path")).toString();
         if (!path.isEmpty()) {
-            return path;
+            return AcpProtocol::stripUriDriveSlash(path);
         }
     }
     return {};
@@ -418,7 +419,7 @@ QString firstDiffPath(const QJsonArray &content)
         }
         const QString path = obj.value(QStringLiteral("path")).toString();
         if (!path.isEmpty()) {
-            return path;
+            return AcpProtocol::stripUriDriveSlash(path);
         }
     }
     return {};
@@ -805,6 +806,79 @@ void injectToolCallPath(QJsonObject &rawInput, const QJsonArray &locations)
     if (!path.isEmpty()) {
         rawInput.insert(QStringLiteral("path"), path);
     }
+}
+
+QString stripUriDriveSlash(const QString &path)
+{
+    // "/X:" or "/X:/..." / "/X:\..."; checked by position, no allocation.
+    if (path.size() < 3 || path.at(0) != QLatin1Char('/') || path.at(2) != QLatin1Char(':'))
+        return path;
+    const char16_t drive = path.at(1).unicode();
+    if (!((drive >= u'A' && drive <= u'Z') || (drive >= u'a' && drive <= u'z')))
+        return path;
+    if (path.size() > 3 && path.at(3) != QLatin1Char('/') && path.at(3) != QLatin1Char('\\'))
+        return path;
+    return path.mid(1);
+}
+
+void normalizeDiffPaths(QJsonArray &content)
+{
+    const int n = qMin(content.size(), 256);
+    for (int i = 0; i < n; ++i) {
+        const QJsonValue item = content.at(i);
+        if (!item.isObject())
+            continue;
+        QJsonObject block = item.toObject();
+        if (block.value(QStringLiteral("type")).toString() != QLatin1String("diff"))
+            continue;
+        const QString path = block.value(QStringLiteral("path")).toString();
+        const QString fixed = stripUriDriveSlash(path);
+        if (fixed.size() == path.size())
+            continue;
+        block.insert(QStringLiteral("path"), fixed);
+        content.replace(i, block);
+    }
+}
+
+namespace {
+
+// Moves `from` to `to` when `from` holds a string and `to` is absent.
+void moveStringKey(QJsonObject &obj, QLatin1String from, QLatin1String to)
+{
+    const auto it = obj.find(from);
+    if (it == obj.end() || !it->isString() || obj.contains(to))
+        return;
+    const QJsonValue value = *it;
+    obj.erase(it);
+    obj.insert(to, value);
+}
+
+} // namespace
+
+void normalizeAntigravityToolInput(QJsonObject &rawInput)
+{
+    // PascalCase keys are agy's; every key below is checked before any copy.
+    moveStringKey(rawInput, QLatin1String("CommandLine"), QLatin1String("command"));
+    if (rawInput.value(QLatin1String("Prompt")).isString()
+        && (rawInput.contains(QLatin1String("Role")) || rawInput.contains(QLatin1String("TypeName")))) {
+        moveStringKey(rawInput, QLatin1String("Prompt"), QLatin1String("prompt"));
+        moveStringKey(rawInput, QLatin1String("Role"), QLatin1String("description"));
+        moveStringKey(rawInput, QLatin1String("TypeName"), QLatin1String("subagent_type"));
+    }
+}
+
+bool isAntigravityPlaceholderTitle(const QString &name, const QString &title, const QString &kind)
+{
+    if (name.isEmpty() || title.isEmpty())
+        return false;
+    // "Run invoke_subagent", "Run manage_task".
+    if (title.size() == name.size() + 4 && title.startsWith(QLatin1String("Run "))
+        && QStringView(title).mid(4) == name)
+        return true;
+    if (name == QLatin1String("run_command"))
+        return true;
+    return (kind == QLatin1String("read") || kind == QLatin1String("edit"))
+        && title.startsWith(QLatin1String("File "));
 }
 
 QJsonArray ensureDiffContent(const QJsonArray &content,

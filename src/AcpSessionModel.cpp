@@ -853,7 +853,8 @@ void AcpSessionModel::attachSubagentChild(const QString &parentToolCallId, const
 
 bool AcpSessionModel::isBackgroundRunning(const QString &toolCallId) const
 {
-    return m_backgroundToolCallIds.contains(toolCallId) || m_liveAsyncSubagents.contains(toolCallId);
+    return m_backgroundToolCallIds.contains(toolCallId) || m_liveAsyncSubagents.contains(toolCallId)
+        || m_leftRunningToolCallIds.contains(toolCallId);
 }
 
 bool AcpSessionModel::isAsyncSubagentLaunch(const AcpToolCall &tc) const
@@ -1019,9 +1020,11 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
         if (update.status.has_value()) {
             it.value().status = *update.status;
             AcpToolCall &cur = it.value();
-            if (cur.durationMs < 0 && cur.startedAtMs > 0
-                && AcpProtocol::toolCallStatusIsTerminal(cur.status)) {
-                cur.durationMs = qMax<qint64>(0, QDateTime::currentMSecsSinceEpoch() - cur.startedAtMs);
+            if (AcpProtocol::toolCallStatusIsTerminal(cur.status)) {
+                if (cur.durationMs < 0 && cur.startedAtMs > 0)
+                    cur.durationMs = qMax<qint64>(0, QDateTime::currentMSecsSinceEpoch() - cur.startedAtMs);
+                if (m_leftRunningToolCallIds.remove(update.id))
+                    cur.backgroundRunning = isBackgroundRunning(update.id);
             }
         }
         if (update.content.has_value()) {
@@ -1049,6 +1052,9 @@ void AcpSessionModel::onToolCallUpdated(const AcpToolCallUpdate &update)
             // An async Agent call: `completed` on launch, its subagent works on.
             if (m_isProcessing && isAsyncSubagentLaunch(it.value()))
                 m_liveAsyncSubagents.insert(update.id);
+            // Still open when its turn ended: the agent runs it on.
+            if (*update.backgrounded && !AcpProtocol::toolCallStatusIsTerminal(it.value().status))
+                m_leftRunningToolCallIds.insert(update.id);
             it.value().backgroundRunning = isBackgroundRunning(update.id);
         }
     }

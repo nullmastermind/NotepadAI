@@ -301,6 +301,10 @@ private:
     // Agent calls launched async whose subagent still runs. Live-only: the
     // adapter holds the turn open until they settle, so a turn end clears it.
     QSet<QString> m_liveAsyncSubagents;
+    // Calls the agent left running when their turn ended (agy's backgrounded
+    // run_command), until their terminal status arrives. Display only: agy
+    // reports them done only on the next prompt, so they are not pending work.
+    QSet<QString> m_leftRunningToolCallIds;
     int m_streamingAssistantMessageIndex = -1;
     QString m_streamingAssistantMessageId;
     // Bubble that was streaming when the turn was declared over. The host ends

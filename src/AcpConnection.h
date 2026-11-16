@@ -182,6 +182,14 @@ public:
     // A permission request the user has not answered yet.
     bool hasPendingPermissions() const { return !m_pendingPermissions.isEmpty(); }
     void setBackgroundWakeGraceMsForTest(int ms) { m_bgWakeGraceMs = ms; }
+    // Catch-up (AcpCatchUp): polling session/list for a turn no stream showed.
+    bool catchUpArmed() const { return m_catchUp.armed; }
+    void setCatchUpTimingForTest(int pollMs, int settleMs)
+    {
+        m_catchUpPollMs = pollMs;
+        m_catchUpSettleMs = settleMs;
+    }
+    void setCapabilitiesForTest(const AcpProtocol::AcpCapabilities &caps) { m_capabilities = caps; }
     QJsonArray mcpServersForTest() const { return m_mcpServers; }
 
 public slots:
@@ -333,6 +341,28 @@ private:
     // see as traffic: an open tool call or a permission waiting on the user.
     bool hasOpenWork() const;
     void trackToolCallStatus(const QString &toolCallId, const QString &status);
+    // Tells the model that each still-open tool call outlived its turn (see the
+    // session/prompt result): emits a `backgrounded` update per call.
+    void markOpenToolCallsBackgrounded();
+
+    // Catch-up for turns the agent runs with no stream open (agy: a background
+    // command that ends after `end_turn` wakes the model, and only a
+    // session/load replay shows it). While calls left running exist, poll
+    // session/list; when the session's `updatedAt` moves, load it, capture the
+    // replay (never rendered) and feed only what is missing (AcpCatchUp) as a
+    // wake-up turn. Settles once those calls are final and `updatedAt` holds
+    // for m_catchUpSettleMs. Needs loadSession + sessionCapabilities.list.
+    bool catchUpSupported() const;
+    void armCatchUp();
+    void disarmCatchUp();
+    void scheduleCatchUpPoll();
+    void pollCatchUp();
+    void requestCatchUpList(const QString &cursor, int page);
+    void onCatchUpUpdatedAt(const QString &updatedAt);
+    // Loads the session and applies the missing part; `then` runs afterwards
+    // (also on failure). Calls during a load queue behind it.
+    void runCatchUpLoad(std::function<void()> then = {});
+    void applyCatchUp(const QList<QJsonObject> &replay);
     void applyAsyncTaskEvent(const AcpProtocol::AcpAsyncTaskEvent &ev);
     void emitAsyncTasksIfChanged();
     // Feed a tool_call / tool_call_update payload to the scheduled-job tracker.
@@ -397,6 +427,30 @@ private:
     // Advisor is a server tool whose result the adapter drops; its trailing
     // "failed" update is normalized to completed (see tool_call_update).
     QSet<QString> m_advisorToolCallIds;
+    // Catch-up state (see armCatchUp).
+    struct CatchUp
+    {
+        bool armed = false;
+        bool listInFlight = false;
+        bool loadInFlight = false;
+        QString updatedAt;        // baseline; empty until the first list answer
+        qint64 settledSinceMs = 0; // calls final and updatedAt unchanged since
+        int pollDelayMs = 0;
+        QList<QJsonObject> replay; // session/update objects captured during a load
+        QList<std::function<void()>> afterLoad;
+    } m_catchUp;
+    QTimer *m_catchUpTimer = nullptr;
+    // First poll interval; it backs off x1.5 to kCatchUpMaxPollMs while
+    // nothing moves.
+    int m_catchUpPollMs = 3000;
+    static constexpr int kCatchUpMaxPollMs = 15000;
+    // agy's reply to a finished command came 36 s after its completion was
+    // recorded (gemini-4, 2026-11-16): wait well past that before settling.
+    int m_catchUpSettleMs = 90000;
+    // What the client has seen, for AcpCatchUp::missingUpdates.
+    QString m_turnText;                  // main-agent text since the last prompt
+    QHash<QString, QString> m_toolStatus; // every tool call: id -> last status
+    QSet<QString> m_leftRunning;          // calls open at a turn's end, not final yet
     QVector<AcpProtocol::AcpBackgroundTask> m_liveAsyncTasks; // spawn order; a handful at most
     int liveTaskIndex(const QString &taskId) const;
     QStringList m_lastEmittedAsyncToolIds;

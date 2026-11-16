@@ -1257,10 +1257,14 @@ QString AcpToolCallCard::enrichedTitle(const AcpProtocol::AcpToolCall &tc)
             : tr("Background jobs complete");
     }
 
+    // Antigravity names calls "Run <tool>" / "File <path>" / the command line:
+    // build the title from what the call did, like an untitled call.
+    const bool agyPlaceholder = AcpProtocol::isAntigravityPlaceholderTitle(tc.name, tc.title, tc.kind);
+
     // Agents that report the wire tool name plus a refined title (claude-agent-acp
     // sends a placeholder like "Terminal"/"Find" first, then "echo hi", "Read a.txt")
     // render as `Name: title` rather than being rebuilt from raw params.
-    if (!tc.name.isEmpty() && !tc.title.isEmpty()
+    if (!agyPlaceholder && !tc.name.isEmpty() && !tc.title.isEmpty()
         && !tc.title.contains(QLatin1String("codebase-retrieval"))
         && !tc.title.startsWith(QLatin1String("Tool: "))) {
         static const QStringList placeholders = {
@@ -1282,6 +1286,10 @@ QString AcpToolCallCard::enrichedTitle(const AcpProtocol::AcpToolCall &tc)
     }
 
     QString t = tc.title.isEmpty() ? tc.id : tc.title;
+    // agy's invoke_subagent ("Run invoke_subagent"), input normalized to an
+    // Agent call's: titled like one.
+    if (agyPlaceholder && AcpProtocol::isSubagentToolInput(tc.rawInput))
+        t = QStringLiteral("Agent");
     const QString tLower = t.toLower();
     const QJsonObject args = tc.rawInput.value(QStringLiteral("arguments")).toObject();
 
@@ -1344,10 +1352,11 @@ QString AcpToolCallCard::enrichedTitle(const AcpProtocol::AcpToolCall &tc)
     const QString mutatedPath = AcpProtocol::toolCallMutatedPath(
         tc.rawInput, tc.content, tc.rawOutput);
     const bool writeLike =
-        tc.kind == QLatin1String("edit")
-        && tc.rawInput.value(QStringLiteral("content")).isString()
-        && !tc.rawInput.contains(QStringLiteral("input"))
-        && !tc.rawInput.contains(QStringLiteral("edits"));
+        (tc.kind == QLatin1String("edit")
+         && tc.rawInput.value(QStringLiteral("content")).isString()
+         && !tc.rawInput.contains(QStringLiteral("input"))
+         && !tc.rawInput.contains(QStringLiteral("edits")))
+        || (agyPlaceholder && tc.name == QLatin1String("write_file"));
 
     static const QStringList readTitles = {
         QStringLiteral("read"), QStringLiteral("read file")

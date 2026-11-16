@@ -137,6 +137,8 @@ qt_add_executable(NotepadAI
 	AcpAgentManager.cpp
 	AcpAgentIcons.cpp
 	AcpAgentRegistry.cpp
+	AcpCatchUp.cpp
+	AcpCatchUp.h
 	AcpConnection.cpp
 	AcpConversationCopy.cpp
 	AcpErrorClassifier.cpp

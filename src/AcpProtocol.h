@@ -45,6 +45,8 @@ constexpr int kProtocolVersion = 1;
 constexpr const char *kMethodInitialize          = "initialize";
 constexpr const char *kMethodSessionNew          = "session/new";
 constexpr const char *kMethodSessionResume       = "session/resume";
+constexpr const char *kMethodSessionLoad         = "session/load";
+constexpr const char *kMethodSessionList         = "session/list";
 constexpr const char *kMethodSessionPrompt       = "session/prompt";
 constexpr const char *kMethodSessionCancel       = "session/cancel";
 constexpr const char *kMethodSessionSetMode      = "session/set_mode";
@@ -239,6 +241,9 @@ struct AcpCapabilities
     // `agentCapabilities.sessionCapabilities.resume`: session/resume restores
     // a session's context without replaying it (Switch agent, restored sessions).
     bool sessionResume{false};
+    // `agentCapabilities.sessionCapabilities.list`: session/list answers with
+    // each session's `updatedAt` (the catch-up poll, see AcpCatchUp).
+    bool sessionList{false};
 };
 
 // initialize result -> capabilities. Spec key `agentCapabilities` (loadSession,
@@ -400,6 +405,23 @@ QString toolCallMutatedPath(const QJsonObject &rawInput,
 
 // Fold locations / hashline into `rawInput.path` when the agent omitted it.
 void injectToolCallPath(QJsonObject &rawInput, const QJsonArray &locations);
+
+// "/D:/w/a.txt" -> "D:/w/a.txt": a file-URI path with the drive letter after
+// the slash (Antigravity sends finished calls' paths so). Other paths as is.
+QString stripUriDriveSlash(const QString &path);
+// The same on every type:diff block's `path`. Untouched (no copy) when none
+// needs it.
+void normalizeDiffPaths(QJsonArray &content);
+
+// Antigravity (`agy acp`) tool input in the keys the cards read: `CommandLine`
+// -> `command`; invoke_subagent's `Prompt` / `Role` / `TypeName` -> `prompt` /
+// `description` / `subagent_type` (a Claude Agent call). Keys are moved, not
+// copied. No-op for other agents' input.
+void normalizeAntigravityToolInput(QJsonObject &rawInput);
+// Antigravity's placeholder titles ("Run <name>", read/edit "File <path>",
+// run_command's bare command line): the card names such a call by what it did
+// (Read: / Edit: / Command: / Agent ...) instead of "<name>: <title>".
+bool isAntigravityPlaceholderTitle(const QString &name, const QString &title, const QString &kind);
 
 // Normalize tool-call content to the Claude/Codex edit card: `type:diff`
 // with oldText/newText, plus omp's compact numbered `diff` hunk when present.

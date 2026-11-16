@@ -19,6 +19,7 @@
 #include "AcpConnection.h"
 
 #include "AcpAgentBrand.h"
+#include "AcpCatchUp.h"
 
 #include "GrillMeForm.h"
 
@@ -195,6 +196,10 @@ AcpConnection::AcpConnection(QObject *parent)
             emit scheduledJobsChanged();
         rearmScheduledJobExpiry();
     });
+
+    m_catchUpTimer = new QTimer(this);
+    m_catchUpTimer->setSingleShot(true);
+    connect(m_catchUpTimer, &QTimer::timeout, this, &AcpConnection::pollCatchUp);
 
     m_sessionBusyRetryTimer = new QTimer(this);
     m_sessionBusyRetryTimer->setSingleShot(true);
@@ -745,7 +750,14 @@ void AcpConnection::sendPrompt(const QString &text, const QList<QPair<QByteArray
         return;
     }
 
+    const bool wasIdle = !m_promptInFlight;
     notePromptOpened();
+    // A turn may have run unseen since the last poll: fetch it before the new
+    // prompt's stream starts, since that stream never carries it.
+    if (m_catchUp.armed && wasIdle) {
+        runCatchUpLoad([this, text, images]() { dispatchSessionPrompt(text, images); });
+        return;
+    }
     dispatchSessionPrompt(text, images);
 }
 
@@ -765,6 +777,15 @@ void AcpConnection::sendSidePrompt(const QString &text)
 void AcpConnection::dispatchSessionPrompt(const QString &text,
                                          const QList<QPair<QByteArray, QString>> &images)
 {
+    // The replay's latest turn starts at this prompt too. Older calls matter to
+    // a catch-up only while they still run.
+    m_turnText.clear();
+    for (auto it = m_toolStatus.begin(); it != m_toolStatus.end();) {
+        if (m_leftRunning.contains(it.key()))
+            ++it;
+        else
+            it = m_toolStatus.erase(it);
+    }
     QJsonArray content;
     {
         AcpProtocol::AcpContentBlock t;
@@ -823,6 +844,18 @@ void AcpConnection::dispatchSessionPrompt(const QString &text,
                             || usage.totalTokens.value_or(0) > 0;
                         if (!m_promptProducedOutput && !hasUsage) {
                             emit requestFailed(QStringLiteral("The agent ended the turn without a response. Open Debug for details."));
+                        }
+                        // The turn's own end while a call it started is still
+                        // open: the agent left it running (agy backgrounds a
+                        // run_command past WaitMsBeforeAsync and reports it done
+                        // only when the next prompt starts). A cancelled turn's
+                        // open calls are not running work.
+                        if (m_openPrompts <= 1
+                            && result.toObject().value(QStringLiteral("stopReason")).toString()
+                                   != QLatin1String("cancelled")) {
+                            markOpenToolCallsBackgrounded();
+                            if (!m_leftRunning.isEmpty())
+                                armCatchUp();
                         }
                     } else {
                         stopSessionBusyRetry();
@@ -1045,6 +1078,12 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         return;
     }
     const QJsonObject update = params.value(QStringLiteral("update")).toObject();
+    if (m_catchUp.loadInFlight) {
+        // A catch-up's session/load replays the whole session: keep it out of
+        // the transcript; applyCatchUp takes only what is missing.
+        m_catchUp.replay.append(update);
+        return;
+    }
     const QString kind = update.value(QStringLiteral("sessionUpdate")).toString();
 
     if (kind == QLatin1String("agent_message_chunk")) {
@@ -1060,6 +1099,8 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         // with (and split) the main agent's bubble.
         if (!AcpProtocol::subagentParentToolCallId(update).isEmpty())
             return;
+        if (catchUpSupported())
+            m_turnText += text; // only a catch-up reads it
         emit messageChunk(text, update.value(QStringLiteral("messageId")).toString());
     } else if (kind == QLatin1String("agent_thought_chunk")) {
         m_promptProducedOutput = true;
@@ -1079,7 +1120,9 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         tc.kind = update.value(QStringLiteral("kind")).toString();
         tc.status = update.value(QStringLiteral("status")).toString();
         tc.content = update.value(QStringLiteral("content")).toArray();
+        AcpProtocol::normalizeDiffPaths(tc.content);
         tc.rawInput = update.value(QStringLiteral("rawInput")).toObject();
+        AcpProtocol::normalizeAntigravityToolInput(tc.rawInput);
         tc.rawOutput = AcpProtocol::rawOutputToObject(update.value(QStringLiteral("rawOutput")));
         tc.groupId = update.value(QStringLiteral("groupId")).toInt(0);
         tc.parentToolCallId = AcpProtocol::subagentParentToolCallId(update);
@@ -1141,10 +1184,12 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
             u.content = QJsonArray{block};
         } else if (c.isArray()) {
             u.content = c.toArray();
+            AcpProtocol::normalizeDiffPaths(*u.content);
         }
         const QJsonValue ri = update.value(QStringLiteral("rawInput"));
         if (ri.isObject()) {
             u.rawInput = ri.toObject();
+            AcpProtocol::normalizeAntigravityToolInput(*u.rawInput);
             AcpProtocol::injectToolCallPath(
                 *u.rawInput, update.value(QStringLiteral("locations")).toArray());
         }
@@ -1684,6 +1729,15 @@ void AcpConnection::handleProcessFinished(int exitCode, QProcess::ExitStatus sta
         m_promptIdleEndTimer->stop();
     m_openPrompts = 0;
     m_openToolCalls.clear();
+    // Nothing more to catch up with: its pending callbacks never run (the
+    // load's answer will not come), so drop them with the state.
+    disarmCatchUp();
+    m_catchUp.loadInFlight = false;
+    m_catchUp.listInFlight = false;
+    m_catchUp.replay.clear();
+    m_catchUp.afterLoad.clear();
+    m_leftRunning.clear();
+    m_toolStatus.clear();
     // Background tasks die with their agent process.
     m_liveAsyncTasks.clear();
     emitAsyncTasksIfChanged();
@@ -1867,11 +1921,202 @@ bool AcpConnection::hasOpenWork() const
     return !m_openToolCalls.isEmpty() || !m_pendingPermissions.isEmpty();
 }
 
+void AcpConnection::markOpenToolCallsBackgrounded()
+{
+    // Copy: a receiver may answer with traffic that touches the set.
+    const QSet<QString> open = m_openToolCalls;
+    for (const QString &id : open) {
+        m_leftRunning.insert(id);
+        AcpProtocol::AcpToolCallUpdate u;
+        u.id = id;
+        u.backgrounded = true;
+        emit toolCallUpdated(u);
+    }
+}
+
+bool AcpConnection::catchUpSupported() const
+{
+    return m_capabilities.sessionLoad && m_capabilities.sessionList;
+}
+
+void AcpConnection::armCatchUp()
+{
+    if (!catchUpSupported() || m_sessionId.isEmpty())
+        return;
+    m_catchUp.settledSinceMs = 0;
+    m_catchUp.pollDelayMs = m_catchUpPollMs;
+    if (m_catchUp.armed)
+        return; // keeps its baseline: a turn ended since only moves it
+    m_catchUp.armed = true;
+    m_catchUp.updatedAt.clear();
+    appendDebugLog(QStringLiteral("catch-up: armed (%1 call(s) left running)").arg(m_leftRunning.size()));
+    // The first answer is the baseline: take it at once (after the prompt
+    // result that armed this is done), before a fast wake-up can move it.
+    m_catchUpTimer->start(0);
+}
+
+void AcpConnection::disarmCatchUp()
+{
+    if (!m_catchUp.armed)
+        return;
+    m_catchUp.armed = false;
+    m_catchUpTimer->stop();
+    appendDebugLog(QStringLiteral("catch-up: settled"));
+}
+
+void AcpConnection::scheduleCatchUpPoll()
+{
+    if (!m_catchUp.armed)
+        return;
+    m_catchUpTimer->start(m_catchUp.pollDelayMs);
+    m_catchUp.pollDelayMs = qMin(m_catchUp.pollDelayMs * 3 / 2, kCatchUpMaxPollMs);
+}
+
+void AcpConnection::pollCatchUp()
+{
+    if (!m_catchUp.armed || m_catchUp.listInFlight || m_catchUp.loadInFlight)
+        return;
+    // A session/prompt in flight streams by itself.
+    if (m_openPrompts > 0 || m_busyRetryPending) {
+        scheduleCatchUpPoll();
+        return;
+    }
+    requestCatchUpList(QString(), 0);
+}
+
+void AcpConnection::requestCatchUpList(const QString &cursor, int page)
+{
+    // session/list answers every session of the cwd, a page at a time.
+    constexpr int kMaxPages = 8;
+    QJsonObject params;
+    params.insert(QStringLiteral("cwd"), m_workingDir);
+    if (!cursor.isEmpty())
+        params.insert(QStringLiteral("cursor"), cursor);
+    m_catchUp.listInFlight = true;
+    sendRequest(AcpProtocol::kMethodSessionList, params,
+                [this, page](const QJsonValue &result, const QJsonValue &error) {
+                    m_catchUp.listInFlight = false;
+                    if (!m_catchUp.armed)
+                        return;
+                    if (!error.isUndefined() && !error.isNull()) {
+                        appendDebugLog(QStringLiteral("catch-up: session/list failed: %1")
+                                           .arg(rpcErrorMessage(error)));
+                        disarmCatchUp();
+                        return;
+                    }
+                    const QJsonObject obj = result.toObject();
+                    for (const auto &v : obj.value(QStringLiteral("sessions")).toArray()) {
+                        const QJsonObject s = v.toObject();
+                        if (s.value(QStringLiteral("sessionId")).toString() == m_sessionId) {
+                            onCatchUpUpdatedAt(s.value(QStringLiteral("updatedAt")).toString());
+                            return;
+                        }
+                    }
+                    const QString next = obj.value(QStringLiteral("nextCursor")).toString();
+                    if (!next.isEmpty() && page + 1 < kMaxPages) {
+                        requestCatchUpList(next, page + 1);
+                        return;
+                    }
+                    // Not listed: nothing to compare, so load at each poll is
+                    // all that would be left. Stop instead.
+                    appendDebugLog(QStringLiteral("catch-up: session not in session/list"));
+                    disarmCatchUp();
+                });
+}
+
+void AcpConnection::onCatchUpUpdatedAt(const QString &updatedAt)
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_catchUp.updatedAt.isEmpty()) {
+        m_catchUp.updatedAt = updatedAt;
+    } else if (updatedAt != m_catchUp.updatedAt) {
+        m_catchUp.updatedAt = updatedAt;
+        m_catchUp.settledSinceMs = 0;
+        m_catchUp.pollDelayMs = m_catchUpPollMs;
+        runCatchUpLoad([this]() { scheduleCatchUpPoll(); });
+        return;
+    } else if (m_leftRunning.isEmpty()) {
+        if (m_catchUp.settledSinceMs == 0)
+            m_catchUp.settledSinceMs = now;
+        else if (now - m_catchUp.settledSinceMs >= m_catchUpSettleMs) {
+            disarmCatchUp();
+            return;
+        }
+    }
+    scheduleCatchUpPoll();
+}
+
+void AcpConnection::runCatchUpLoad(std::function<void()> then)
+{
+    if (then)
+        m_catchUp.afterLoad.append(std::move(then));
+    if (m_catchUp.loadInFlight)
+        return;
+    m_catchUp.loadInFlight = true;
+    m_catchUp.replay.clear();
+    QJsonObject params;
+    params.insert(QStringLiteral("sessionId"), m_sessionId);
+    params.insert(QStringLiteral("cwd"), m_workingDir);
+    params.insert(QStringLiteral("mcpServers"), m_mcpServers);
+    sendRequest(AcpProtocol::kMethodSessionLoad, params,
+                [this](const QJsonValue &, const QJsonValue &error) {
+                    m_catchUp.loadInFlight = false;
+                    const QList<QJsonObject> replay = std::exchange(m_catchUp.replay, {});
+                    if (!error.isUndefined() && !error.isNull()) {
+                        appendDebugLog(QStringLiteral("catch-up: session/load failed: %1")
+                                           .arg(rpcErrorMessage(error)));
+                    } else {
+                        applyCatchUp(replay);
+                    }
+                    const auto callbacks = std::exchange(m_catchUp.afterLoad, {});
+                    for (const auto &cb : callbacks)
+                        cb();
+                });
+}
+
+void AcpConnection::applyCatchUp(const QList<QJsonObject> &replay)
+{
+    const AcpCatchUp::Seen seen{m_turnText, m_toolStatus};
+    const QList<QJsonObject> missing = AcpCatchUp::missingUpdates(replay, seen);
+    appendDebugLog(QStringLiteral("catch-up: replay %1 update(s), %2 missing")
+                       .arg(replay.size())
+                       .arg(missing.size()));
+    if (missing.isEmpty())
+        return;
+    // Through the live path, so the model, the view and the turn bookkeeping
+    // see a wake-up turn like any other.
+    QStringList stillRunning;
+    for (const QJsonObject &update : missing) {
+        handleInboundNotification(QLatin1String(AcpProtocol::kMethodSessionUpdate),
+                                  QJsonObject{{QStringLiteral("sessionId"), m_sessionId},
+                                              {QStringLiteral("update"), update}});
+        const QString id = update.value(QStringLiteral("toolCallId")).toString();
+        if (!id.isEmpty()
+            && !AcpProtocol::toolCallStatusIsTerminal(update.value(QStringLiteral("status")).toString()))
+            stillRunning.append(id);
+    }
+    // A call the replay shows running is not this catch-up's to wait for: the
+    // next one reports its end.
+    for (const QString &id : std::as_const(stillRunning)) {
+        if (!m_openToolCalls.remove(id))
+            continue;
+        m_leftRunning.insert(id);
+        AcpProtocol::AcpToolCallUpdate u;
+        u.id = id;
+        u.backgrounded = true;
+        emit toolCallUpdated(u);
+    }
+    schedulePromptIdleEnd();
+}
+
 void AcpConnection::trackToolCallStatus(const QString &toolCallId, const QString &status)
 {
     if (toolCallId.isEmpty() || status.isEmpty())
         return;
+    if (catchUpSupported())
+        m_toolStatus.insert(toolCallId, status);
     if (AcpProtocol::toolCallStatusIsTerminal(status)) {
+        m_leftRunning.remove(toolCallId);
         if (m_openToolCalls.remove(toolCallId) && m_openToolCalls.isEmpty()
             && m_openPrompts == 0 && !m_busyRetryPending) {
             // Last open tool just closed: the turn may now go quiet and end.

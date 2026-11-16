@@ -721,6 +721,7 @@ target_sources(test_goal_draft_generator PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpAgentDefinition.h
     ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.h
+    ${CMAKE_SOURCE_DIR}/src/AcpCatchUp.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.h
@@ -887,6 +888,7 @@ target_sources(test_acp_agent_manager PRIVATE
     ${CMAKE_SOURCE_DIR}/src/McpStdio.cpp
     ${CMAKE_SOURCE_DIR}/src/McpStdio.h
     ${CMAKE_SOURCE_DIR}/src/AcpAgentManager.h
+    ${CMAKE_SOURCE_DIR}/src/AcpCatchUp.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.h
@@ -1001,6 +1003,7 @@ target_sources(test_acp_agent_exit_restart PRIVATE
     ${CMAKE_SOURCE_DIR}/src/McpStdio.cpp
     ${CMAKE_SOURCE_DIR}/src/McpStdio.h
     ${CMAKE_SOURCE_DIR}/src/AcpAgentManager.h
+    ${CMAKE_SOURCE_DIR}/src/AcpCatchUp.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.h
@@ -1109,6 +1112,7 @@ target_sources(test_acp_dock_close_event PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.h
     ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.cpp
     ${CMAKE_SOURCE_DIR}/src/ApplicationSettings.h
+    ${CMAKE_SOURCE_DIR}/src/AcpCatchUp.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.h
@@ -1222,12 +1226,30 @@ target_link_libraries(test_acp_session_view_wake PRIVATE
 )
 add_test(NAME AcpSessionViewWake COMMAND test_acp_session_view_wake)
 
+# Antigravity (agy acp) wire replayed through AcpConnection + AcpSessionModel.
+qt_add_executable(test_acp_agy_wire test_acp_agy_wire.cpp)
+target_sources(test_acp_agy_wire PRIVATE ${_acp_view_srcs})
+target_include_directories(test_acp_agy_wire PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/dialogs
+    ${CMAKE_SOURCE_DIR}/src/docks
+    ${CMAKE_SOURCE_DIR}/src/remote
+    ${CMAKE_SOURCE_DIR}/src/widgets
+)
+target_link_libraries(test_acp_agy_wire PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Test
+    SingleApplication::SingleApplication
+    xdiff
+)
+add_test(NAME AcpAgyWire COMMAND test_acp_agy_wire)
+
 foreach(_goal_http_tgt
         test_send_with_goal_dialog
         test_acp_agent_manager
         test_acp_agent_exit_restart
         test_acp_dock_close_event
-        test_acp_session_view_wake)
+        test_acp_session_view_wake
+        test_acp_agy_wire)
     if(WIN32)
         target_sources(${_goal_http_tgt} PRIVATE
             ${CMAKE_SOURCE_DIR}/src/ai/CredentialStore_Windows.cpp)
@@ -1248,7 +1270,8 @@ foreach(_acp_dock_tgt
         test_acp_agent_manager
         test_acp_agent_exit_restart
         test_acp_dock_close_event
-        test_acp_session_view_wake)
+        test_acp_session_view_wake
+        test_acp_agy_wire)
     target_sources(${_acp_dock_tgt} PRIVATE
         ${CMAKE_SOURCE_DIR}/src/AcpAgentIcons.cpp
         ${CMAKE_SOURCE_DIR}/src/AcpAgentIcons.h
@@ -2267,6 +2290,7 @@ target_link_libraries(test_acp_remote_transport PRIVATE Qt6::Core Qt6::Gui Qt6::
 target_sources(test_acp_remote_transport PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/FakeSshTransport.h
     ${CMAKE_SOURCE_DIR}/src/AcpAgentDefinition.h
+    ${CMAKE_SOURCE_DIR}/src/AcpCatchUp.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.h
@@ -2478,6 +2502,7 @@ target_sources(test_goal_agent PRIVATE
     ${CMAKE_SOURCE_DIR}/src/AcpAgentDefinition.h
     ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpAgentRegistry.h
+    ${CMAKE_SOURCE_DIR}/src/AcpCatchUp.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.cpp
     ${CMAKE_SOURCE_DIR}/src/GrillMeForm.h
@@ -2703,6 +2728,7 @@ foreach(goal_prompt_test
         test_acp_agent_exit_restart
         test_acp_dock_close_event
         test_acp_session_view_wake
+        test_acp_agy_wire
         test_goal_http_judge
         test_goal_agent)
     target_sources(${goal_prompt_test} PRIVATE ${CMAKE_SOURCE_DIR}/src/prompts/prompts.qrc)
@@ -2912,6 +2938,7 @@ qt_add_executable(test_acp_grill_me_permission test_acp_grill_me_permission.cpp)
 target_include_directories(test_acp_grill_me_permission PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_acp_grill_me_permission PRIVATE Qt6::Core Qt6::Test)
 target_sources(test_acp_grill_me_permission PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/AcpCatchUp.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpConnection.cpp
     ${CMAKE_SOURCE_DIR}/src/AcpConnection.h
     ${CMAKE_SOURCE_DIR}/src/AcpErrorClassifier.cpp
