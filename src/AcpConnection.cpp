@@ -185,7 +185,18 @@ AcpConnection::AcpConnection(QObject *parent)
     m_bgIdleTimer = new QTimer(this);
     m_bgIdleTimer->setSingleShot(true);
     connect(m_bgIdleTimer, &QTimer::timeout, this, [this]() {
-        if (m_liveAsyncTasks.isEmpty() && !m_promptInFlight)
+        if (m_liveAsyncTasks.isEmpty() && !watchesLeftRunning() && !m_wakeReplyDue && !m_promptInFlight)
+            emit backgroundIdle();
+    });
+
+    m_wakeReplyTimer = new QTimer(this);
+    m_wakeReplyTimer->setSingleShot(true);
+    connect(m_wakeReplyTimer, &QTimer::timeout, this, [this]() {
+        if (!m_wakeReplyDue)
+            return;
+        m_wakeReplyDue = false;
+        appendDebugLog(QStringLiteral("catch-up: no wake-up reply after the background command"));
+        if (!hasPendingBackgroundWork() && !m_promptInFlight)
             emit backgroundIdle();
     });
 
@@ -780,6 +791,7 @@ void AcpConnection::dispatchSessionPrompt(const QString &text,
     // The replay's latest turn starts at this prompt too. Older calls matter to
     // a catch-up only while they still run.
     m_turnText.clear();
+    clearWakeReplyDue(); // this prompt's turn answers instead
     for (auto it = m_toolStatus.begin(); it != m_toolStatus.end();) {
         if (m_leftRunning.contains(it.key()))
             ++it;
@@ -856,6 +868,9 @@ void AcpConnection::dispatchSessionPrompt(const QString &text,
                             markOpenToolCallsBackgrounded();
                             if (!m_leftRunning.isEmpty())
                                 armCatchUp();
+                            // Before promptEnded: the view decides on it whether
+                            // the turn is over.
+                            emitAsyncTasksIfChanged();
                         }
                     } else {
                         stopSessionBusyRetry();
@@ -1099,6 +1114,7 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         // with (and split) the main agent's bubble.
         if (!AcpProtocol::subagentParentToolCallId(update).isEmpty())
             return;
+        noteWakeReplyArrived(update);
         if (catchUpSupported())
             m_turnText += text; // only a catch-up reads it
         emit messageChunk(text, update.value(QStringLiteral("messageId")).toString());
@@ -1107,6 +1123,7 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         noteStreamingActivity();
         if (!AcpProtocol::subagentParentToolCallId(update).isEmpty())
             return; // same as a subagent's message chunk
+        noteWakeReplyArrived(update);
         const QString text = AcpProtocol::contentBlockToChunkText(
             update.value(QStringLiteral("content")).toObject());
         emit thoughtChunk(text);
@@ -1126,6 +1143,7 @@ void AcpConnection::handleInboundNotification(const QString &method, const QJson
         tc.rawOutput = AcpProtocol::rawOutputToObject(update.value(QStringLiteral("rawOutput")));
         tc.groupId = update.value(QStringLiteral("groupId")).toInt(0);
         tc.parentToolCallId = AcpProtocol::subagentParentToolCallId(update);
+        noteWakeReplyArrived(update);
         if (AcpProtocol::isAdvisorToolName(tc.name)) {
             m_advisorToolCallIds.insert(tc.id);
         }
@@ -1903,7 +1921,8 @@ void AcpConnection::rearmScheduledJobExpiry()
 
 bool AcpConnection::hasPendingBackgroundWork() const
 {
-    return !m_liveAsyncTasks.isEmpty() || (m_bgIdleTimer && m_bgIdleTimer->isActive());
+    return !m_liveAsyncTasks.isEmpty() || watchesLeftRunning() || m_wakeReplyDue
+        || (m_bgIdleTimer && m_bgIdleTimer->isActive());
 }
 
 bool AcpConnection::agentWorkPending() const
@@ -1959,9 +1978,30 @@ void AcpConnection::disarmCatchUp()
 {
     if (!m_catchUp.armed)
         return;
+    // Calls nobody watches any more are not work anyone can wait for (a failed
+    // session/list, or a process exit, which stops the idle timer after this).
+    const bool wasPending = watchesLeftRunning() || m_wakeReplyDue;
     m_catchUp.armed = false;
     m_catchUpTimer->stop();
+    clearWakeReplyDue();
     appendDebugLog(QStringLiteral("catch-up: settled"));
+    emitAsyncTasksIfChanged();
+    if (wasPending && m_liveAsyncTasks.isEmpty() && !m_promptInFlight)
+        m_bgIdleTimer->start(0);
+}
+
+void AcpConnection::noteWakeReplyArrived(const QJsonObject &update)
+{
+    if (m_wakeReplyDue && AcpProtocol::subagentParentToolCallId(update).isEmpty())
+        clearWakeReplyDue();
+}
+
+void AcpConnection::clearWakeReplyDue()
+{
+    if (!m_wakeReplyDue)
+        return;
+    m_wakeReplyDue = false;
+    m_wakeReplyTimer->stop();
 }
 
 void AcpConnection::scheduleCatchUpPoll()
@@ -2106,6 +2146,7 @@ void AcpConnection::applyCatchUp(const QList<QJsonObject> &replay)
         u.backgrounded = true;
         emit toolCallUpdated(u);
     }
+    emitAsyncTasksIfChanged();
     schedulePromptIdleEnd();
 }
 
@@ -2116,7 +2157,16 @@ void AcpConnection::trackToolCallStatus(const QString &toolCallId, const QString
     if (catchUpSupported())
         m_toolStatus.insert(toolCallId, status);
     if (AcpProtocol::toolCallStatusIsTerminal(status)) {
-        m_leftRunning.remove(toolCallId);
+        if (m_leftRunning.remove(toolCallId)) {
+            // The last command agy was running in the background ended with no
+            // prompt open (a catch-up saw it): agy wakes the model now, and the
+            // turn is not over until that reply.
+            if (m_leftRunning.isEmpty() && m_catchUp.armed && m_openPrompts == 0 && !m_busyRetryPending) {
+                m_wakeReplyDue = true;
+                m_wakeReplyTimer->start(m_catchUpSettleMs);
+            }
+            emitAsyncTasksIfChanged();
+        }
         if (m_openToolCalls.remove(toolCallId) && m_openToolCalls.isEmpty()
             && m_openPrompts == 0 && !m_busyRetryPending) {
             // Last open tool just closed: the turn may now go quiet and end.
@@ -2165,23 +2215,32 @@ void AcpConnection::applyAsyncTaskEvent(const AcpProtocol::AcpAsyncTaskEvent &ev
 
 void AcpConnection::emitAsyncTasksIfChanged()
 {
+    // agy's commands left running count as tasks while a catch-up watches them.
+    const qsizetype watched = watchesLeftRunning() ? m_leftRunning.size() : 0;
     QStringList ids;
-    ids.reserve(m_liveAsyncTasks.size());
+    ids.reserve(m_liveAsyncTasks.size() + watched);
     for (const auto &task : std::as_const(m_liveAsyncTasks)) {
         if (!task.toolCallId.isEmpty())
             ids.append(task.toolCallId);
     }
+    if (watched > 0) {
+        for (const QString &id : std::as_const(m_leftRunning))
+            ids.append(id);
+    }
     ids.sort();
-    const int count = m_liveAsyncTasks.size();
+    const int live = int(m_liveAsyncTasks.size());
+    const int count = live + int(watched);
     if (count == m_lastEmittedAsyncCount && ids == m_lastEmittedAsyncToolIds)
         return;
-    const int previousCount = m_lastEmittedAsyncCount;
+    const int previousLive = m_lastEmittedLiveTaskCount;
     m_lastEmittedAsyncCount = count;
+    m_lastEmittedLiveTaskCount = live;
     m_lastEmittedAsyncToolIds = ids;
     if (count > 0) {
         m_bgIdleTimer->stop();
-    } else if (previousCount > 0) {
-        // Last task done: give the wake-up turn a window to begin.
+    } else if (previousLive > 0) {
+        // Last task done: give the wake-up turn a window to begin. A watched
+        // command's end waits for agy's reply instead (m_wakeReplyDue).
         m_bgIdleTimer->start(m_bgWakeGraceMs);
     }
     emit asyncTasksChanged(count, ids);

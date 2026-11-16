@@ -288,6 +288,7 @@ private slots:
     void init();
     void monitor_keepsTurnOpenUntilStopped();
     void backgroundTask_keepsTurnOpenUntilIdle();
+    void agyBackgroundCommand_keepsTurnOpenUntilItsWakeUpReply();
     void wakeUpsWithoutPendingWork_foldAtConfirmedEnd();
     void dock_monitorKeepsSessionWorking_untilStopped();
     void dock_backgroundTaskKeepsSessionWorking_untilItEnds();
@@ -394,6 +395,112 @@ void TestAcpSessionViewWake::backgroundTask_keepsTurnOpenUntilIdle()
     QTRY_COMPARE(transcript(*s.view), (QStringList{QStringLiteral("user: start the server"),
                                                    QStringLiteral("fold"),
                                                    QStringLiteral("assistant: server is up")}));
+}
+
+namespace {
+
+// agy 1.5.9 (`agy acp`): a run_command past WaitMsBeforeAsync is backgrounded,
+// agy tells the model to say so and end the turn, and wakes it when the command
+// ends, with no stream open. Frames as captured (test_acp_agy_wire).
+const char *kAgyCmdStart = R"({"sessionUpdate":"tool_call","toolCallId":"call_cmd","name":"run_command","status":"in_progress","kind":"execute","title":"dev-browser run click.js","rawInput":{"CommandLine":"dev-browser run click.js","WaitMsBeforeAsync":10000}})";
+const char *kAgyCmdDone = R"({"sessionUpdate":"tool_call","toolCallId":"call_cmd","name":"run_command","status":"completed","kind":"execute","title":"dev-browser run click.js","rawInput":{"CommandLine":"dev-browser run click.js"},"rawOutput":{"output":"Command exited with code 0.\n","exit_code":0}})";
+const char *kAgyUser = R"({"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"click Play Now"}})";
+const char *kAgyWaiting = R"({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Clicking Play Now..."}})";
+const char *kAgyReply = R"({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The game page is open."}})";
+
+QByteArray agyUpdate(const char *json)
+{
+    return QByteArrayLiteral(R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":)")
+        + QByteArray(json) + QByteArrayLiteral("}}\n");
+}
+
+// The next request named `method` the client wrote after line `*from`.
+QJsonObject takeRequest(const QByteArray &written, qsizetype *from, const char *method)
+{
+    const QList<QByteArray> lines = written.split('\n');
+    for (qsizetype i = *from; i < lines.size(); ++i) {
+        const QJsonObject o = QJsonDocument::fromJson(lines.at(i)).object();
+        if (o.value(QStringLiteral("method")).toString() == QLatin1String(method)) {
+            *from = i + 1;
+            return o;
+        }
+    }
+    return {};
+}
+
+QByteArray answer(const QJsonObject &request, const QJsonObject &result)
+{
+    return frame({{QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                  {QStringLiteral("id"), request.value(QStringLiteral("id"))},
+                  {QStringLiteral("result"), result}});
+}
+
+QJsonObject agyList(const QString &updatedAt)
+{
+    return {{QStringLiteral("sessions"),
+             QJsonArray{QJsonObject{{QStringLiteral("sessionId"), QStringLiteral("s1")},
+                                    {QStringLiteral("updatedAt"), updatedAt}}}}};
+}
+
+} // namespace
+
+// The user's "it said it was doing something, then did nothing" (agy, session
+// 1d7847aa, 2026-11-17): the turn that left a command running folded as if
+// finished, so the user typed "continue" while agy was still waiting for the
+// command (or already woken by it). Like a Claude Code background task, the
+// command keeps the turn open until agy's wake-up reply arrives.
+void TestAcpSessionViewWake::agyBackgroundCommand_keepsTurnOpenUntilItsWakeUpReply()
+{
+    Session s;
+    AcpProtocol::AcpCapabilities caps;
+    caps.sessionLoad = true;
+    caps.sessionList = true;
+    s.conn.setCapabilitiesForTest(caps);
+    s.conn.setCatchUpTimingForTest(10, 150);
+
+    const int id = s.prompt(QStringLiteral("click Play Now"));
+    s.channel->pushStdout(agyUpdate(kAgyCmdStart));
+    s.channel->pushStdout(agyUpdate(kAgyWaiting));
+    s.channel->pushStdout(QStringLiteral(R"({"jsonrpc":"2.0","result":{"stopReason":"end_turn","usage":{"inputTokens":2409,"outputTokens":155,"totalTokens":50166}},"id":%1})")
+                              .arg(id).toUtf8() + '\n');
+    QTest::qWait(500);
+    const QStringList waiting{QStringLiteral("user: click Play Now"), QStringLiteral("fold (live)"),
+                              QStringLiteral("card call_cmd"), QStringLiteral("assistant: Clicking Play Now...")};
+    QCOMPARE(transcript(*s.view), waiting);
+    QVERIFY(!s.model->isProcessing()); // the composer is free meanwhile
+    QVERIFY2(statusLine(*s.view).contains(QStringLiteral("Waiting background (1)")), qPrintable(statusLine(*s.view)));
+    QVERIFY(s.conn.agentWorkPending());
+
+    qsizetype read = 0;
+    QJsonObject req;
+    QTRY_VERIFY(!(req = takeRequest(s.channel->written, &read, "session/list")).isEmpty());
+    s.channel->pushStdout(answer(req, agyList(QStringLiteral("2026-11-16T17:09:33Z")))); // baseline
+
+    // The command ended; agy has recorded it but not yet replied (its reply
+    // once came 36 s later): the turn is still not over.
+    QTRY_VERIFY(!(req = takeRequest(s.channel->written, &read, "session/list")).isEmpty());
+    s.channel->pushStdout(answer(req, agyList(QStringLiteral("2026-11-16T17:09:52Z"))));
+    QTRY_VERIFY(!(req = takeRequest(s.channel->written, &read, "session/load")).isEmpty());
+    for (const char *u : {kAgyUser, kAgyCmdDone, kAgyWaiting})
+        s.channel->pushStdout(agyUpdate(u));
+    s.channel->pushStdout(answer(req, {}));
+    QTest::qWait(500);
+    QCOMPARE(s.model->toolCalls().value(QStringLiteral("call_cmd")).status, QStringLiteral("completed"));
+    QCOMPARE(transcript(*s.view).value(1), QStringLiteral("fold (live)"));
+    QVERIFY(s.conn.agentWorkPending());
+
+    // agy's wake-up reply: the turn ends with it.
+    QTRY_VERIFY(!(req = takeRequest(s.channel->written, &read, "session/list")).isEmpty());
+    s.channel->pushStdout(answer(req, agyList(QStringLiteral("2026-11-16T17:10:30Z"))));
+    QTRY_VERIFY(!(req = takeRequest(s.channel->written, &read, "session/load")).isEmpty());
+    for (const char *u : {kAgyUser, kAgyCmdDone, kAgyWaiting, kAgyReply})
+        s.channel->pushStdout(agyUpdate(u));
+    s.channel->pushStdout(answer(req, {}));
+    QTRY_COMPARE(transcript(*s.view).value(1), QStringLiteral("fold"));
+    QVERIFY2(transcript(*s.view).last().contains(QStringLiteral("The game page is open.")),
+             qPrintable(transcript(*s.view).join(QStringLiteral(" | "))));
+    QVERIFY(statusLine(*s.view).isEmpty());
+    QVERIFY(!s.conn.agentWorkPending());
 }
 
 // With nothing left to wake it, every wake-up (a scheduled one, a Monitor's

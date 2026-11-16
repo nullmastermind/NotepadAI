@@ -229,6 +229,7 @@ private slots:
     void catchUp_olderTurnsCallsIgnored_newCallsAdded();
     void catchUp_wakeUpWithNoStream_isShownAfterUpdatedAtMoves();
     void catchUp_notArmedWithoutSessionList();
+    void catchUp_listFails_commandNoLongerPendingWork();
 };
 
 void TestAcpAgyWire::catchUp_returnsTheUnseenReplyAndTheCompletion()
@@ -335,6 +336,34 @@ void TestAcpAgyWire::catchUp_notArmedWithoutSessionList()
     QTRY_VERIFY(!s.model->isProcessing());
     QVERIFY(!s.conn.catchUpArmed());
     QVERIFY(s.takeRequest("session/list").isEmpty());
+    // Nothing would ever report its end: shown, never waited for.
+    QVERIFY(!s.conn.agentWorkPending());
+}
+
+void TestAcpAgyWire::catchUp_listFails_commandNoLongerPendingWork()
+{
+    Session s;
+    s.enableCatchUp();
+    QSignalSpy idle(&s.conn, &AcpConnection::backgroundIdle);
+    const int id = s.prompt(QStringLiteral("start ping in the background"));
+    s.push(kPingStart);
+    s.endPrompt(id);
+    QTRY_VERIFY(!s.model->isProcessing());
+    QVERIFY(s.conn.agentWorkPending());
+
+    const QJsonObject req = s.waitRequest("session/list");
+    QVERIFY(!req.isEmpty());
+    s.channel->pushStdout(QJsonDocument(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                                                    {QStringLiteral("id"), req.value(QStringLiteral("id"))},
+                                                    {QStringLiteral("error"),
+                                                     QJsonObject{{QStringLiteral("code"), -32601},
+                                                                 {QStringLiteral("message"), QStringLiteral("nope")}}}})
+                              .toJson(QJsonDocument::Compact)
+                          + '\n');
+    QTRY_VERIFY(!s.conn.catchUpArmed());
+    QTRY_COMPARE(idle.count(), 1);
+    QVERIFY(!s.conn.agentWorkPending());
+    QVERIFY(s.call("call_ping").backgroundRunning); // still shown as running
 }
 
 void TestAcpAgyWire::toolCards_titledByWhatTheyDid()

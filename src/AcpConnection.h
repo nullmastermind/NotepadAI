@@ -171,6 +171,8 @@ public:
     // True while background tasks are alive, and for a short grace after the
     // last one finished: Claude Code wakes the model to read the result, and
     // that wake-up turn starts a moment after the task's final state update.
+    // agy's backgrounded commands count too while a catch-up watches them, and
+    // after the last one ends until agy's wake-up reply arrives.
     // Supervisors (goal judge, auto-compact) must not act before it settles.
     bool hasPendingBackgroundWork() const;
     // Prompts sent before session/new returned; they go out once it does.
@@ -451,10 +453,22 @@ private:
     QString m_turnText;                  // main-agent text since the last prompt
     QHash<QString, QString> m_toolStatus; // every tool call: id -> last status
     QSet<QString> m_leftRunning;          // calls open at a turn's end, not final yet
+    // A watched left-running call ended outside any session/prompt (seen by a
+    // catch-up): agy now wakes the model, and its reply can come tens of
+    // seconds later. Pending work until a main-agent update of that reply
+    // arrives, a prompt goes out, or m_catchUpSettleMs passes.
+    bool m_wakeReplyDue = false;
+    QTimer *m_wakeReplyTimer = nullptr;
+    // Left-running calls count as background work only while a catch-up
+    // watches them: nothing else would ever report their end.
+    bool watchesLeftRunning() const { return m_catchUp.armed && !m_leftRunning.isEmpty(); }
+    void noteWakeReplyArrived(const QJsonObject &update);
+    void clearWakeReplyDue();
     QVector<AcpProtocol::AcpBackgroundTask> m_liveAsyncTasks; // spawn order; a handful at most
     int liveTaskIndex(const QString &taskId) const;
     QStringList m_lastEmittedAsyncToolIds;
     int m_lastEmittedAsyncCount = 0;
+    int m_lastEmittedLiveTaskCount = 0; // m_liveAsyncTasks part of the count above
     QTimer *m_bgIdleTimer = nullptr;
     AcpProtocol::ScheduledJobTracker m_scheduledJobs;
     QTimer *m_scheduledExpiryTimer = nullptr; // fires at the earliest job expiry, no polling
