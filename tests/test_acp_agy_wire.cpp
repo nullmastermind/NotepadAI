@@ -77,6 +77,18 @@ const char *kPingReplayed = R"({"sessionUpdate":"tool_call","toolCallId":"call_p
 const char *kPingReplayedRunning = R"({"sessionUpdate":"tool_call","toolCallId":"call_ping","name":"run_command","status":"in_progress","kind":"execute","title":"ping -n 8 127.0.0.1","rawInput":{"CommandLine":"ping -n 8 127.0.0.1"}})";
 const char *kOldCall = R"({"sessionUpdate":"tool_call","toolCallId":"call_old","name":"read_file","status":"completed","kind":"read","title":"File a.txt"})";
 
+// ask_question (agy 1.5.10): the call goes `pending`, agy prints the question
+// as message text and ends the turn; the user's next prompt is the answer
+// (agy then moves the call in_progress -> completed and the model carries on).
+const char *kAskStart = R"({"sessionUpdate":"tool_call","toolCallId":"call_ask","name":"ask_question","args":{"questions":[{"options":["red","blue"],"question":"Which colour do you prefer?"}]},"status":"in_progress","kind":"other","title":"Run ask_question","rawInput":{"questions":[{"options":["red","blue"],"question":"Which colour do you prefer?"}]}})";
+const char *kAskPending = R"({"sessionUpdate":"tool_call_update","toolCallId":"call_ask","name":"ask_question","args":{"questions":[{"options":["red","blue"],"question":"Which colour do you prefer?"}]},"status":"pending","kind":"other","title":"Run ask_question","rawInput":{"questions":[{"options":["red","blue"],"question":"Which colour do you prefer?"}]}})";
+const char *kAskReplayedPending = R"({"sessionUpdate":"tool_call","toolCallId":"call_ask","name":"ask_question","args":{"questions":[{"options":["red","blue"],"question":"Which colour do you prefer?"}]},"status":"pending","kind":"other","title":"Run ask_question","rawInput":{"questions":[{"options":["red","blue"],"question":"Which colour do you prefer?"}]}})";
+const char *kAskText = R"({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"\nWhich colour do you prefer?\n- [1] red\n- [2] blue\n"}})";
+const char *kAskAnswering = R"({"sessionUpdate":"tool_call_update","toolCallId":"call_ask","name":"ask_question","status":"in_progress","kind":"other","title":"Run ask_question"})";
+const char *kAskAnswered = R"({"sessionUpdate":"tool_call_update","toolCallId":"call_ask","name":"ask_question","status":"completed","kind":"other","title":"Run ask_question"})";
+const char *kBlueText = R"({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Blue."}})";
+const QString kAskQuestionText = QStringLiteral("\nWhich colour do you prefer?\n- [1] red\n- [2] blue\n");
+
 QJsonObject obj(const char *json)
 {
     return QJsonDocument::fromJson(QByteArray(json)).object();
@@ -117,6 +129,7 @@ struct Session
     int prompt(const QString &text)
     {
         channel->written.clear();
+        m_readLines = 0;
         conn.sendPrompt(text, {});
         return QJsonDocument::fromJson(channel->written.trimmed()).object().value(QStringLiteral("id")).toInt();
     }
@@ -230,7 +243,78 @@ private slots:
     void catchUp_wakeUpWithNoStream_isShownAfterUpdatedAtMoves();
     void catchUp_notArmedWithoutSessionList();
     void catchUp_listFails_commandNoLongerPendingWork();
+    void askQuestion_pendingAtTurnEnd_isNotBackgroundWork_andTheNextPromptAnswersIt();
+    void catchUp_replayedPendingQuestion_isNotLeftRunning();
 };
+
+void TestAcpAgyWire::askQuestion_pendingAtTurnEnd_isNotBackgroundWork_andTheNextPromptAnswersIt()
+{
+    Session s;
+    s.enableCatchUp();
+    const int first = s.prompt(QStringLiteral("ask me which colour I prefer"));
+    s.push(kAskStart);
+    s.push(kAskPending);
+    s.push(kAskText);
+    s.endPrompt(first);
+    QTRY_VERIFY(!s.model->isProcessing());
+
+    // Waiting for the user, not running: no "Waiting background", no catch-up.
+    QVERIFY2(!s.call("call_ask").backgroundRunning, "a question waiting for its answer is not background work");
+    QVERIFY(!s.conn.catchUpArmed());
+    QVERIFY(!s.conn.agentWorkPending());
+    QTest::qWait(30);
+    QVERIFY(s.takeRequest("session/list").isEmpty());
+
+    // The answer goes out as the prompt itself. A session/load in front of it
+    // makes agy restart its update stream (re-sending the question into the
+    // new turn) and queue the answer as a message instead of answering.
+    s.channel->written.clear();
+    s.m_readLines = 0;
+    s.conn.sendPrompt(QStringLiteral("blue"), {});
+    QVERIFY(s.takeRequest("session/load").isEmpty());
+    const QJsonObject answer = s.takeRequest("session/prompt");
+    QVERIFY(!answer.isEmpty());
+    s.push(kAskAnswering);
+    s.push(kAskAnswered);
+    s.push(kBlueText);
+    s.endPrompt(answer.value(QStringLiteral("id")).toInt());
+    QTRY_VERIFY(!s.model->isProcessing());
+
+    QCOMPARE(s.call("call_ask").status, QStringLiteral("completed"));
+    const QStringList texts = s.assistantTexts();
+    QCOMPARE(texts.count(kAskQuestionText), 1);
+    QVERIFY2(texts.contains(QStringLiteral("Blue.")), qPrintable(texts.join(" | ")));
+}
+
+void TestAcpAgyWire::catchUp_replayedPendingQuestion_isNotLeftRunning()
+{
+    // A wake-up turn (seen only through a catch-up) that ends on a question.
+    Session s;
+    s.enableCatchUp();
+    const int id = s.prompt(QStringLiteral("start ping in the background"));
+    s.push(kPingStart);
+    s.push(kStartedText);
+    s.endPrompt(id);
+    QTRY_VERIFY(!s.model->isProcessing());
+    QVERIFY(s.conn.catchUpArmed());
+
+    QJsonObject req = s.waitRequest("session/list");
+    QVERIFY(!req.isEmpty());
+    s.answer(req, s.listResult(QStringLiteral("2026-11-16T04:29:50Z")));
+    req = s.waitRequest("session/list");
+    QVERIFY(!req.isEmpty());
+    s.answer(req, s.listResult(QStringLiteral("2026-11-16T04:30:40Z")));
+    const QJsonObject load = s.waitRequest("session/load");
+    QVERIFY(!load.isEmpty());
+    for (const char *u : {kUserPrompt, kPingReplayed, kStartedText, kAskReplayedPending, kAskText})
+        s.push(u);
+    s.answer(load, QJsonObject{{QStringLiteral("sessionId"), QStringLiteral("s1")}});
+
+    QCOMPARE(s.call("call_ask").status, QStringLiteral("pending"));
+    QVERIFY2(!s.call("call_ask").backgroundRunning, "a replayed question is waiting for the user, not running");
+    QTRY_VERIFY(!s.model->isProcessing()); // the question does not hold the wake-up turn open
+    QVERIFY(!s.conn.hasPendingBackgroundWork());
+}
 
 void TestAcpAgyWire::catchUp_returnsTheUnseenReplyAndTheCompletion()
 {

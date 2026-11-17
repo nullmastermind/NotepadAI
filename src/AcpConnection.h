@@ -424,8 +424,8 @@ private:
     QHash<QString, std::function<void(const QString &outcome, const QString &optionId)>> m_pendingPermissions;
     // Tool calls reported but not yet in a final state. Wake-up turns have no
     // session/prompt to bound them, so this is what keeps the turn open while
-    // a long tool runs silently.
-    QSet<QString> m_openToolCalls;
+    // a long tool runs silently. id -> last status.
+    QHash<QString, QString> m_openToolCalls;
     // Advisor is a server tool whose result the adapter drops; its trailing
     // "failed" update is normalized to completed (see tool_call_update).
     QSet<QString> m_advisorToolCallIds;

@@ -169,6 +169,14 @@ QString contentArrayText(const QJsonArray &arr)
     return out.trimmed();
 }
 
+// ACP `pending`: the call has not started (input still streaming, or waiting
+// on the user). agy's ask_question sits here after printing its question and
+// ending the turn; the user's next prompt is the answer. Never running work.
+bool toolCallNotStarted(const QString &status)
+{
+    return status == QLatin1String("pending");
+}
+
 } // namespace
 
 AcpConnection::AcpConnection(QObject *parent)
@@ -1943,8 +1951,11 @@ bool AcpConnection::hasOpenWork() const
 void AcpConnection::markOpenToolCallsBackgrounded()
 {
     // Copy: a receiver may answer with traffic that touches the set.
-    const QSet<QString> open = m_openToolCalls;
-    for (const QString &id : open) {
+    const QHash<QString, QString> open = m_openToolCalls;
+    for (auto it = open.cbegin(); it != open.cend(); ++it) {
+        if (toolCallNotStarted(it.value()))
+            continue; // waits for the user's next prompt, nothing to watch
+        const QString &id = it.key();
         m_leftRunning.insert(id);
         AcpProtocol::AcpToolCallUpdate u;
         u.id = id;
@@ -2138,7 +2149,10 @@ void AcpConnection::applyCatchUp(const QList<QJsonObject> &replay)
     // A call the replay shows running is not this catch-up's to wait for: the
     // next one reports its end.
     for (const QString &id : std::as_const(stillRunning)) {
-        if (!m_openToolCalls.remove(id))
+        const QString status = m_openToolCalls.take(id);
+        // Not open, or a question waiting for the user's next prompt: it must
+        // not hold the wake-up turn open, and no catch-up reports its end.
+        if (status.isEmpty() || toolCallNotStarted(status))
             continue;
         m_leftRunning.insert(id);
         AcpProtocol::AcpToolCallUpdate u;
@@ -2173,7 +2187,7 @@ void AcpConnection::trackToolCallStatus(const QString &toolCallId, const QString
             schedulePromptIdleEnd();
         }
     } else {
-        m_openToolCalls.insert(toolCallId);
+        m_openToolCalls.insert(toolCallId, status);
     }
 }
 
